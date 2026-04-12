@@ -1,0 +1,53 @@
+# ── Python ────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# ── Environment ───────────────────────────────────────
+.env
+.env.*
+*.key
+*.secret
+venv/
+.venv/
+env/
+
+# ── Papers (copyright protected — do not upload) ──────
+*.pdf
+projects/*/papers/*
+!projects/*/papers/.gitkeep
+
+# ── Index storage (auto-generated, large binary files) ─
+projects/*/index_storage/*
+!projects/*/index_storage/.gitkeep
+
+# ── VL output (images extracted from papers) ──────────
+projects/*/vl_test_output/*
+!projects/*/vl_test_output/.gitkeep
+
+# ── Paper metadata (derived from paper content) ───────
+projects/*/papers_metadata.json
+
+# ── ChromaDB memory (personal session data) ───────────
+memory_db/
+!memory_db/.gitkeep
+*.chroma
+
+# ── Internal dev docs ─────────────────────────────────
+pipeline_v2_task_spec.md
+
+# ── Logs ──────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS / Editor ───────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/settings.json

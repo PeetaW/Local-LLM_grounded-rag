@@ -1,0 +1,103 @@
+# config.py
+# ══════════════════════════════════════════════════════
+# 所有可調整的參數集中在這裡
+# 修改任何 INDEX_* 類型的參數後，需刪除 index_storage/ 重新執行
+# ══════════════════════════════════════════════════════
+
+# ── Project 設定 ───────────────────────────────────────
+ACTIVE_PROJECT = "zvi"   # ← 切換 project 改這裡
+PROJECTS_BASE_DIR = "projects"
+
+
+# ── 路徑設定 ──────────────────────────────────────────
+PAPERS_DIR        = f"{PROJECTS_BASE_DIR}/{ACTIVE_PROJECT}/papers"
+INDEX_BASE_DIR    = f"{PROJECTS_BASE_DIR}/{ACTIVE_PROJECT}/index_storage"
+INDEX_CONFIG_PATH = f"{PROJECTS_BASE_DIR}/{ACTIVE_PROJECT}/index_storage/config.json"
+VL_OUTPUT_DIR     = f"{PROJECTS_BASE_DIR}/{ACTIVE_PROJECT}/vl_test_output"
+METADATA_PATH     = f"{PROJECTS_BASE_DIR}/{ACTIVE_PROJECT}/papers_metadata.json"
+MEMORY_DB_DIR     = "./memory_db"   # 共用，不跟著 project 走
+
+# ── Ollama 連線 ───────────────────────────────────────
+OLLAMA_BASE_URL   = "http://localhost:11434"
+OLLAMA_API_KEY    = "ollama"   # Ollama 不需要真實 key，固定填這個
+
+# ── LLM 設定 ──────────────────────────────────────────
+LLM_MODEL         = "gemma4:31b"
+PLANNING_LLM_MODEL = "qwen2.5:14b"
+VL_MODEL = "qwen3-vl:32b"
+VL_AUTO_RUN = True
+LLM_TIMEOUT       = 28800.0    # 8小時，避免長推理被中斷
+LLM_CONTEXT_WINDOW = 32768
+
+# ── Contextual Summarization 設定 ─────────────────────
+CONTEXT_SUMMARY_ENABLED = True    # 是否啟用
+CONTEXT_SUMMARY_MODEL   = LLM_MODEL  # 用 deepseek-r1:32b
+
+# ── Citation Grounding + Answer Relevance Check 設定 ──
+CITATION_GROUNDING_ENABLED = True   # 改成 False 可以關閉審查
+
+# ── 推理模式設定 ──────────────────────────────────────
+# "strict"    → 只引用論文原文，不做推論（高精確度，防幻覺）
+# "reasoning" → 允許跨文獻推論與知識延伸，但必須標注認知層次
+# 可在對話中動態切換，或在這裡設定預設值
+REASONING_MODE = "reasoning"
+
+
+LLM_SYSTEM_PROMPT = (
+    "你是一個學術論文分析助手。"
+    "請只根據提供的論文內容回答問題，使用繁體中文。"
+    "請務必使用繁體中文，絕對不可使用簡體中文。"
+    "如果論文中沒有相關資訊，請直接說明「此論文未涉及此議題」，"
+    "不要自行推測或補充論文以外的內容。"
+    "回答時請盡量引用論文中的具體數據、步驟與條件。"
+)
+
+# ── Embedding 設定 ────────────────────────────────────
+EMBED_MODEL       = "bge-m3"
+
+# ── Chunking 設定（修改後需刪除 index_storage/ 重建）──
+CHUNK_SIZE        = 1024
+CHUNK_OVERLAP     = 256
+
+# ── 檢索設定 ──────────────────────────────────────────
+SIMILARITY_TOP_K  = 8    # vector & BM25 各取幾個候選
+
+# ── Review 模式開關（測試用）─────────────────────────
+# True  = 查詢所有論文，不篩選，專用於 mini-review 生成
+# False = 正常模式，自動篩選最相關 5 篇（預設）
+REVIEW_MODE = False
+
+# ── Reranker 設定 ─────────────────────────────────────
+RERANKER_MODEL    = "BAAI/bge-reranker-v2-m3"
+RERANKER_TOP_N    = 8    # rerank 後保留幾個送進 LLM
+
+# ── Stage 3：知識蒸餾 ─────────────────────────────────────
+SYNTHESIS_ENABLED = True
+SYNTHESIS_MODEL   = "gemma4:31b"    # 同時用於 Stage 3 和 Stage 4
+
+# ── Stage 5：邏輯自洽驗證 ─────────────────────────────
+VERIFY_ENABLED      = True
+VERIFY_MODEL        = "qwen3.5:35b-a3b"
+MAX_VERIFY_RETRIES  = 2             # fallback 最多重試幾次
+
+# ── Stage 2：並行子查詢 ────────────────────────────────
+SUBQUERY_MAX_WORKERS = 4   # 並行子查詢的 thread pool 大小
+
+# ── 記憶系統設定 ──────────────────────────────────────
+MEMORY_RECALL_N   = 3    # 每次查詢召回幾筆歷史記憶
+
+# ── ChromaDB Collection 名稱 ──────────────────────────
+MEMORY_COLLECTION_EPISODIC   = "episodic_memory"
+MEMORY_COLLECTION_PREFERENCE = "preference_memory"
+
+# ══════════════════════════════════════════════════════
+#    以下這個 dict 給 index_storage/config.json 比對用
+#    不要手動修改，它會自動同步上方的值
+# ══════════════════════════════════════════════════════
+INDEX_BUILD_CONFIG = {
+    "chunk_size":    CHUNK_SIZE,
+    "chunk_overlap": CHUNK_OVERLAP,
+    "embed_model":   EMBED_MODEL,
+    "parser":        "pymupdf",
+    "include_vl":    True,
+}
