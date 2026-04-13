@@ -57,24 +57,43 @@ def _build_subquery_tasks(sub_questions, paper_engines_to_use, paper_engines):
 
 def _run_subqueries_parallel(valid_tasks, prefilled):
     """
-    並行執行 valid_tasks，與 prefilled 合併後依 original_index 排序回傳。
+    兩階段執行：
+      Phase A（並行）：所有任務同時做 embed 清洗 + 向量檢索（bge-m3），
+                       Ollama 只需維持 bge-m3，不會觸發模型切換。
+      Phase B（串行）：依序用 LLM 生成每個子問題的答案（gemma4），
+                       Ollama 載入一次 gemma4 後連續處理所有任務。
+
+    這樣避免 bge-m3 / gemma4 交錯切換造成的 unload/load 開銷。
     回傳：list of (label, result_str)，順序與原始 sub_questions 一致。
     """
-    def _run_one(task):
+    results = dict(prefilled)
+
+    # ── Phase A：並行 embed 清洗 + 向量檢索 ──────────────────────
+    def _retrieve_one(task):
         task_idx, label, engine, sub_q = task
         try:
-            result = _safe_query(engine, sub_q)
-            return task_idx, label, result
+            query_text = _prepare_query_text(sub_q)
+            nodes = _retrieve_nodes(engine, query_text)
+            return task_idx, label, engine, query_text, nodes
         except Exception as e:
-            return task_idx, label, f"{label}查詢失敗：{e}"
+            print(f"  ⚠️  [Phase A] {label} 檢索失敗：{e}")
+            return task_idx, label, engine, sub_q, None
 
-    results = dict(prefilled)  # 先填入找不到引擎的項目
-
+    retrieved = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=cfg.SUBQUERY_MAX_WORKERS) as ex:
-        futures = [ex.submit(_run_one, t) for t in valid_tasks]
+        futures = [ex.submit(_retrieve_one, t) for t in valid_tasks]
         for f in concurrent.futures.as_completed(futures):
-            task_idx, label, result = f.result()
+            task_idx, label, engine, query_text, nodes = f.result()
+            retrieved[task_idx] = (label, engine, query_text, nodes)
+
+    # ── Phase B：串行 LLM 生成（gemma4 只載入一次）──────────────
+    for task_idx in sorted(retrieved.keys()):
+        label, engine, query_text, nodes = retrieved[task_idx]
+        try:
+            result = _generate_from_nodes(engine, nodes, query_text)
             results[task_idx] = (label, result)
+        except Exception as e:
+            results[task_idx] = (label, f"{label}生成失敗：{e}")
 
     return [(label, result) for _, (label, result) in sorted(results.items())]
 
@@ -83,104 +102,163 @@ _verifier    = AnswerVerifier()
 
 
 # ══════════════════════════════════════════════════════════════════
-#  輔助函數：embedding 預檢 + 空結果偵測
+#  輔助函數：embedding 預檢 + 空結果偵測 + 段落抽取
 # ══════════════════════════════════════════════════════════════════
 
-def _safe_query(engine, query_str: str) -> str:
+def _extract_direct_citation_section(text: str) -> str:
     """
-    呼叫 engine.query 前先做 embedding 預檢。
-    處理優先順序：
-      1. 先清洗特殊字元（保留完整語意，修掉 NaN 觸發字元）
-      2. 再試原始版本
-      3. 最後才截短（真正的最後手段，會損失語意）
+    從答案中只抽取【論文直接依據】段落。
+    grounding fallback 只應針對直引段落觸發：
+    推論與知識延伸段落的 grounding score 低是預期行為，不應觸發修正。
+    若找不到直引段落（表示答案全是推論），回傳空字串。
+    """
+    import re
+    matches = re.findall(
+        r'(##[^\n]*(?:論文直接依據|直接依據|直引)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
+        text
+    )
+    return "\n\n".join(m.strip() for m in matches)
+
+def _clean_for_embed(text: str) -> str:
+    """
+    移除可能導致 bge-m3 產生 NaN 的字元，盡量保留完整語意。
+    模組層級函數，供 _prepare_query_text 使用。
+    """
+    import unicodedata
+    removed_ctrl = [
+        f"U+{ord(c):04X}({unicodedata.name(c, '?')})"
+        for c in text if unicodedata.category(c).startswith('C')
+    ]
+    if removed_ctrl:
+        print(f"  🔬 [embed-debug] 移除控制字元：{removed_ctrl[:5]}")
+
+    text = ''.join(c for c in text if not unicodedata.category(c).startswith('C'))
+    text = text.replace('（', '(').replace('）', ')')
+
+    angle_matches = re.findall(r'[<>]\s*\d+\s*\w+', text)
+    if angle_matches:
+        print(f"  🔬 [embed-debug] 角括號數值（替換）：{angle_matches}")
+    text = re.sub(r'<\s*(\d+\s*\w+)', r'less than \1', text)
+    text = re.sub(r'>\s*(\d+\s*\w+)', r'greater than \1', text)
+
+    long_parens = re.findall(r'\([^)]{25,}\)', text)
+    if long_parens:
+        print(f"  🔬 [embed-debug] 移除長括號內容：{[p[:30] for p in long_parens]}")
+    text = re.sub(r'\([^)]{25,}\)', '', text)
+
+    return text.strip()
+
+
+def _test_embed(text: str, label: str = "") -> str:
+    """
+    對單一文字做 embedding 預檢。
+    回傳 'ok'/'nan'/'timeout'/'error'。
+    模組層級函數，thread-safe（只做 HTTP GET，無共享狀態）。
     """
     import requests
-    import unicodedata
-    import config as cfg
+    try:
+        r = requests.post(
+            f"{cfg.OLLAMA_BASE_URL}/api/embeddings",
+            json={"model": cfg.EMBED_MODEL, "prompt": text},
+            timeout=120,
+        )
+        if r.status_code != 200:
+            # HTTP 500 + NaN 訊息 = bge-m3 產生 NaN，Ollama 無法序列化
+            # 這是文字內容問題，回傳 "nan" 觸發清洗/截短，而非等待重試
+            if r.status_code == 500 and "NaN" in r.text:
+                print(f"  🔬 [embed-debug] HTTP 500 NaN（bge-m3 輸出 NaN），text={text[:60]!r}")
+                return "nan"
+            print(f"  🔬 [embed-debug] HTTP {r.status_code}，text={text[:60]!r}")
+            return "error"
+        embedding = r.json().get("embedding", [])
+        if not embedding:
+            print(f"  🔬 [embed-debug] embedding 為空，text={text[:60]!r}")
+            return "error"
+        nan_count = sum(1 for x in embedding if x != x)
+        if nan_count:
+            print(f"  🔬 [embed-debug] NaN {nan_count}/{len(embedding)} 維，"
+                  f"label={label!r}，text={text[:80]!r}")
+            return "nan"
+        return "ok"
+    except requests.exceptions.Timeout:
+        print(f"  🔬 [embed-debug] Timeout（Ollama 忙碌），text={text[:60]!r}")
+        return "timeout"
+    except Exception as e:
+        print(f"  🔬 [embed-debug] 例外：{e}，text={text[:60]!r}")
+        return "error"
 
-    def clean_for_embed(text: str) -> str:
-        """
-        移除可能導致 bge-m3 產生 NaN 的字元，盡量保留完整語意。
-        - 移除 Unicode 控制字元（不可見字元）
-        - 全形括號換半形
-        - 超長括號內容（化學全名等）移除，縮寫保留
-        - <100nm 類型的角括號改為描述性文字
-        - 單位斜線保留（g/mL 是合法文字，不移除）
-        """
-        # 找出被移除的控制字元，供 debug 用
-        removed_ctrl = [
-            f"U+{ord(c):04X}({unicodedata.name(c, '?')})"
-            for c in text if unicodedata.category(c).startswith('C')
-        ]
-        if removed_ctrl:
-            print(f"  🔬 [embed-debug] 移除控制字元：{removed_ctrl[:5]}")  # 最多印5個
 
-        text = ''.join(c for c in text if not unicodedata.category(c).startswith('C'))
-        text = text.replace('（', '(').replace('）', ')')
-
-        # <100nm → less than 100nm，避免 < > 觸發 NaN
-        angle_matches = re.findall(r'[<>]\s*\d+\s*\w+', text)
-        if angle_matches:
-            print(f"  🔬 [embed-debug] 角括號數值（替換）：{angle_matches}")
-        text = re.sub(r'<\s*(\d+\s*\w+)', r'less than \1', text)
-        text = re.sub(r'>\s*(\d+\s*\w+)', r'greater than \1', text)
-
-        # 超長括號內容移除（化學全名等），縮寫保留
-        long_parens = re.findall(r'\([^)]{25,}\)', text)
-        if long_parens:
-            print(f"  🔬 [embed-debug] 移除長括號內容：{[p[:30] for p in long_parens]}")
-        text = re.sub(r'\([^)]{25,}\)', '', text)
-
-        return text.strip()
-
-    def test_embed(text: str, label: str = "") -> bool:
-        """回傳 True 代表 embedding 正常；失敗時印出診斷資訊"""
-        try:
-            r = requests.post(
-                f"{cfg.OLLAMA_BASE_URL}/api/embeddings",
-                json={"model": cfg.EMBED_MODEL, "prompt": text},
-                timeout=30,
-            )
-            if r.status_code != 200:
-                print(f"  🔬 [embed-debug] HTTP {r.status_code}，text={text[:60]!r}")
-                return False
-            embedding = r.json().get("embedding", [])
-            if not embedding:
-                print(f"  🔬 [embed-debug] embedding 為空，text={text[:60]!r}")
-                return False
-            nan_count = sum(1 for x in embedding if x != x)
-            if nan_count:
-                print(f"  🔬 [embed-debug] NaN {nan_count}/{len(embedding)} 維，"
-                      f"label={label!r}，text={text[:80]!r}")
-                return False
+def _embed_with_retry(text: str, label: str = "", max_retries: int = 5) -> bool:
+    """
+    timeout 時等待後重試，NaN 時回傳 False（讓呼叫端截短）。
+    模組層級函數。
+    """
+    import time
+    for i in range(max_retries):
+        result = _test_embed(text, label=label)
+        if result == "ok":
             return True
-        except Exception as e:
-            print(f"  🔬 [embed-debug] 例外：{e}，text={text[:60]!r}")
+        if result == "nan":
             return False
+        wait = 15 * (i + 1)
+        print(f"  ⏳ [embed] Ollama 忙碌，{wait}s 後重試（第{i+1}/{max_retries}次）...")
+        time.sleep(wait)
+    return False
 
-    # ── Step 1：先嘗試清洗版本（保留完整語意）────────────────────
-    cleaned = clean_for_embed(query_str)
+
+def _prepare_query_text(query_str: str) -> str:
+    """
+    Phase A-1：清洗文字 + embed 預檢，回傳可安全送進 retriever 的 query text。
+    只使用 bge-m3，不涉及 LLM，thread-safe。
+    """
+    cleaned = _clean_for_embed(query_str)
     if cleaned != query_str:
         print(f"  🧹 偵測到特殊字元，清洗後重試...")
-        if test_embed(cleaned, label="cleaned"):
-            return str(engine.query(cleaned))
+        if _embed_with_retry(cleaned, label="cleaned"):
+            return cleaned
 
-    # ── Step 2：原始版本直接試 ────────────────────────────────────
-    if test_embed(query_str, label="original"):
-        return str(engine.query(query_str))
+    if _embed_with_retry(query_str, label="original"):
+        return query_str
 
-    # ── Step 3：最後手段才截短（會損失語意）──────────────────────
-    current_query = cleaned if cleaned else query_str
+    # 最後手段：截短
+    current = cleaned if cleaned else query_str
     for attempt in range(3):
-        cut = int(len(current_query) * 2 / 3)
-        current_query = current_query[:cut].strip()
-        print(f"  ⚠️  embedding NaN，截短至 {len(current_query)} 字元後重試（第{attempt+1}次）")
-        print(f"  🔬 [embed-debug] 截短後內容：{current_query!r}")
-        if test_embed(current_query, label=f"truncated-{attempt+1}"):
-            return str(engine.query(current_query))
+        cut = int(len(current) * 2 / 3)
+        current = current[:cut].strip()
+        print(f"  ⚠️  embedding NaN，截短至 {len(current)} 字元後重試（第{attempt+1}次）")
+        print(f"  🔬 [embed-debug] 截短後內容：{current!r}")
+        if _embed_with_retry(current, label=f"truncated-{attempt+1}"):
+            return current
 
     print(f"  ❌ embedding 反覆失敗，使用截短版本強制查詢")
-    return str(engine.query(current_query))
+    return current
+
+
+def _retrieve_nodes(engine, query_text: str):
+    """
+    Phase A-2：只做向量檢索，回傳 retrieved nodes。
+    使用 bge-m3，不呼叫 LLM，thread-safe（read-only index）。
+    """
+    retriever = engine.retriever if hasattr(engine, 'retriever') else None
+    if retriever is not None:
+        return retriever.retrieve(query_text)
+    # fallback：若 engine 沒有暴露 retriever，降級為整體查詢
+    return None
+
+
+def _generate_from_nodes(engine, nodes, query_text: str) -> str:
+    """
+    Phase B：只做 LLM 生成（gemma4）。
+    nodes 已由 Phase A 取得，此函數串行呼叫，避免模型切換。
+    """
+    if nodes is None:
+        # fallback：retriever 無法單獨存取，退回整體查詢
+        return str(engine.query(query_text))
+    from llama_index.core.response_synthesizers import get_response_synthesizer
+    from llama_index.core import QueryBundle
+    synthesizer = get_response_synthesizer()
+    response = synthesizer.synthesize(query=QueryBundle(query_text), nodes=nodes)
+    return str(response)
 
 
 # ── 空結果偵測 ────────────────────────────────────────────────────
@@ -621,13 +699,14 @@ def execute_structured_query(
             knowledge_base=knowledge_base
         )
 
-    # ── Citation Grounding（Fallback 模式下跳過）────────────────────
+    # ── Citation Grounding + 低分 Fallback 修正 ──────────────────────
     if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything:
         try:
             from rag.citation_grounding import (
                 split_into_sentences,
                 check_citation_grounding,
                 format_grounding_report,
+                compute_grounding_score,
             )
 
             print("  🔍 執行答案品質審查...")
@@ -637,6 +716,67 @@ def execute_structured_query(
                 for i, ans in enumerate(sub_answers)
             ]
             citation_results = check_citation_grounding(sentences, chunks)
+
+            # ── Grounding Fallback：只針對【論文直接依據】段落 ──
+            # 推論與知識延伸段落 grounding score 低是預期行為，不觸發修正
+            direct_section = _extract_direct_citation_section(full_text)
+            if direct_section:
+                direct_sentences = split_into_sentences(direct_section)
+                direct_results = check_citation_grounding(direct_sentences, chunks)
+                direct_score = compute_grounding_score(direct_results)
+            else:
+                direct_results = []
+                direct_score = 1.0  # 無直引段落，不觸發 fallback
+
+            grounding_score = compute_grounding_score(citation_results)  # 全文分數供報告用
+            unsupported = [r for r in direct_results if not r["supported"]]
+            if unsupported and direct_score < 0.8:
+                print(
+                    f"  🔄 [Grounding Fallback] {len(unsupported)} 個陳述依據不足"
+                    f"（整體 {grounding_score:.1%}），送回 gemma4 重新引用..."
+                )
+                bad_sentences = "\n".join(
+                    f"- {r['sentence']}（信心度：{r['confidence']:.1%}）"
+                    for r in unsupported
+                )
+                fallback_prompt = (
+                    f"以下陳述在論文中找不到明確依據，請根據「已知事實清單」重新確認：\n\n"
+                    f"{bad_sentences}\n\n"
+                    f"已知事實清單：\n{knowledge_base}\n\n"
+                    f"原始答案：\n{full_text}\n\n"
+                    "請針對上列低依據陳述，在原始答案中找到對應句子並修正：\n"
+                    "- 若事實清單有對應依據：修正引用標注使其精確\n"
+                    "- 若事實清單完全沒有依據：標注 [待確認] 並說明原因\n"
+                    "輸出完整修正後的答案，不要輸出說明或前言。"
+                )
+                try:
+                    import requests as _req
+                    resp = _req.post(
+                        f"{cfg.OLLAMA_BASE_URL}/api/generate",
+                        json={
+                            "model": cfg.SYNTHESIS_MODEL,
+                            "system": cfg.LLM_SYSTEM_PROMPT,
+                            "prompt": fallback_prompt,
+                            "stream": False,
+                            "options": {
+                                "temperature": 0.1,
+                                "num_ctx": 65536,
+                                "num_predict": -1,
+                            },
+                        },
+                        timeout=cfg.LLM_TIMEOUT,
+                    )
+                    if resp.ok:
+                        corrected = resp.json().get("response", "").strip()
+                        if corrected:
+                            full_text = corrected
+                            print("  ✅ [Grounding Fallback] gemma4 修正完成，重新執行 grounding 審查...")
+                            # 修正後重新做一次 grounding
+                            sentences = split_into_sentences(full_text)
+                            citation_results = check_citation_grounding(sentences, chunks)
+                except Exception as fe:
+                    print(f"  ⚠️  [Grounding Fallback] 修正失敗，保留原答案：{fe}")
+
             report = format_grounding_report(citation_results)
             full_text += report
             print(report)
@@ -823,13 +963,14 @@ def execute_structured_query_stream(
             yield corrected
             full_text = corrected
 
-    # ── Step 5：Citation Grounding（完成後附加）──────────────────
+    # ── Step 5：Citation Grounding + 低分 Fallback 修正 ──────────────
     if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything:
         try:
             from rag.citation_grounding import (
                 split_into_sentences,
                 check_citation_grounding,
                 format_grounding_report,
+                compute_grounding_score,
             )
             sentences = split_into_sentences(full_text)
             chunks_data = [
@@ -837,6 +978,64 @@ def execute_structured_query_stream(
                 for i, ans in enumerate(sub_answers)
             ]
             citation_results = check_citation_grounding(sentences, chunks_data)
+
+            # ── Grounding Fallback：只針對【論文直接依據】段落 ──
+            direct_section = _extract_direct_citation_section(full_text)
+            if direct_section:
+                direct_sentences = split_into_sentences(direct_section)
+                direct_results = check_citation_grounding(direct_sentences, chunks_data)
+                direct_score = compute_grounding_score(direct_results)
+            else:
+                direct_results = []
+                direct_score = 1.0
+
+            unsupported = [r for r in direct_results if not r["supported"]]
+            if unsupported and direct_score < 0.8:
+                yield (
+                    f"[STATUS] 🔄 [Grounding Fallback] 直引段落 {len(unsupported)} 個陳述依據不足"
+                    f"（直引 {direct_score:.1%}），送回 gemma4 重新引用...\n"
+                )
+                bad_sentences = "\n".join(
+                    f"- {r['sentence']}（信心度：{r['confidence']:.1%}）"
+                    for r in unsupported
+                )
+                fallback_prompt = (
+                    f"以下陳述在論文中找不到明確依據，請根據「已知事實清單」重新確認：\n\n"
+                    f"{bad_sentences}\n\n"
+                    f"已知事實清單：\n{knowledge_base}\n\n"
+                    f"原始答案：\n{full_text}\n\n"
+                    "請針對上列低依據陳述，在原始答案中找到對應句子並修正：\n"
+                    "- 若事實清單有對應依據：修正引用標注使其精確\n"
+                    "- 若事實清單完全沒有依據：標注 [待確認] 並說明原因\n"
+                    "輸出完整修正後的答案，不要輸出說明或前言。"
+                )
+                try:
+                    import requests as _req
+                    resp = _req.post(
+                        f"{cfg.OLLAMA_BASE_URL}/api/generate",
+                        json={
+                            "model": cfg.SYNTHESIS_MODEL,
+                            "system": cfg.LLM_SYSTEM_PROMPT,
+                            "prompt": fallback_prompt,
+                            "stream": False,
+                            "options": {
+                                "temperature": 0.1,
+                                "num_ctx": 65536,
+                                "num_predict": -1,
+                            },
+                        },
+                        timeout=cfg.LLM_TIMEOUT,
+                    )
+                    if resp.ok:
+                        corrected = resp.json().get("response", "").strip()
+                        if corrected:
+                            full_text = corrected
+                            yield "[STATUS] ✅ [Grounding Fallback] gemma4 修正完成，重新執行 grounding 審查...\n"
+                            sentences = split_into_sentences(full_text)
+                            citation_results = check_citation_grounding(sentences, chunks_data)
+                except Exception as fe:
+                    yield f"[STATUS] ⚠️ [Grounding Fallback] 修正失敗，保留原答案：{fe}\n"
+
             report = format_grounding_report(citation_results)
             yield report
         except Exception as e:
