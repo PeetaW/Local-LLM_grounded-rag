@@ -83,17 +83,35 @@ class KnowledgeSynthesizer:
                     "model":  self.model,
                     "system": SYNTHESIS_SYSTEM_PROMPT,
                     "prompt": user_prompt,
-                    "stream": False,
+                    "stream": True,
                     "options": {
                         "temperature": 0.1,
-                        "num_predict": 32768,
-                        "num_ctx": 65536,
+                        "num_predict": 8192,
+                        "num_ctx": 32768,
                     }
                 },
-                timeout=self.timeout
+                timeout=self.timeout,
+                stream=True,
             )
             resp.raise_for_status()
-            result = resp.json().get("response", "").strip()
+
+            import json as _json
+            chunks_out = []
+            for raw_line in resp.iter_lines():
+                if not raw_line:
+                    continue
+                try:
+                    chunk = _json.loads(raw_line)
+                except _json.JSONDecodeError:
+                    continue
+                token = chunk.get("response", "")
+                if token:
+                    print(token, end="", flush=True)
+                    chunks_out.append(token)
+                if chunk.get("done"):
+                    break
+            print()  # 換行
+            result = "".join(chunks_out).strip()
 
             elapsed = time.time() - t0
             logger.info(

@@ -126,14 +126,18 @@ class AnswerVerifier:
             thinking_chunk = chunk.get("thinking", "")
             response_chunk = chunk.get("response", "")
 
-            # thinking 內容：只在第一次出現時印提示，之後省略（避免刷屏）
+            # thinking 內容：完整串流到 terminal，方便 debug 觀察模型推理行為
             if thinking_chunk:
                 if not thinking_printed:
-                    print("  💭 [Verifier] 推論思考中...", flush=True)
+                    print("\n  💭 [Verifier] === 思考過程開始 ===", flush=True)
                     thinking_printed = True
+                print(thinking_chunk, end="", flush=True)
 
             # 正式輸出：即時印出，讓使用者看到進度
             if response_chunk:
+                if thinking_printed and not full_response:
+                    # 思考結束後，輸出分隔線
+                    print("\n  💭 [Verifier] === 思考過程結束，正式輸出 ===\n", flush=True)
                 print(response_chunk, end="", flush=True)
                 full_response.append(response_chunk)
 
