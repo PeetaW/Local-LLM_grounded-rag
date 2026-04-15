@@ -1,30 +1,74 @@
 # rag/citation_grounding.py
-# 負責 Citation Grounding：用 mDeBERTa 判斷答案陳述是否有 chunk 依據
 # 負責 Citation Grounding：用 mDeBERTa 多語言 NLI 模型判斷答案陳述是否有 chunk 依據
 #
-# 本次修改重點：
-# 1. NLI 模型換成 mDeBERTa-v3-base-mnli-xnli（支援中英跨語言，278MB，比原版 1.74GB 小）
-# 2. 修正 NLI 使用方式：改成 premise=chunk, hypothesis=sentence 的正確 pair 比對
-# 3. 對每個 chunk 逐一比對，取最高分，避免 token 截斷
-# 4. Vectara 模型載入加入 trust_remote_code=True（修正載入失敗問題）
+# V3 修改重點：
+# 1. 改用標準 NLI 三分類模式（entailment / neutral / contradiction）
+#    取代 zero-shot-classification，以同時取得 entailment 和 contradiction score
+# 2. NLI_CONTRADICTION_ENABLED=True 時標記知識庫內部矛盾（contradiction > 0.7）
+# 3. check_citation_grounding() 回傳格式新增 contradiction_detected / status 欄位
+#    （向下相容：舊程式不讀新欄位則不受影響）
 
 import re
 import torch
+import config as cfg
 
-_nli_pipeline = None
+_nli_model = None
+_nli_tokenizer = None
+_NLI_LABEL_MAP = None   # {0: "contradiction", 1: "neutral", 2: "entailment"} 或依模型決定
 
-def get_nli_pipeline():
-    global _nli_pipeline
-    if _nli_pipeline is None:
-        from transformers import pipeline
-        print("  📦 載入 mDeBERTa 多語言 NLI 模型...")
-        _nli_pipeline = pipeline(
-            "zero-shot-classification",
-            model="MoritzLaurer/mDeBERTa-v3-base-mnli-xnli",
-            device=0 if torch.cuda.is_available() else -1,
-        )
-        print("  ✅ mDeBERTa 載入完成")
-    return _nli_pipeline
+
+def _get_nli_model():
+    """
+    載入 mDeBERTa NLI 三分類模型（singleton）。
+    使用 AutoModelForSequenceClassification 以同時取得三個 label 的 logits。
+    """
+    global _nli_model, _nli_tokenizer, _NLI_LABEL_MAP
+    if _nli_model is None:
+        from transformers import AutoTokenizer, AutoModelForSequenceClassification
+        import torch
+
+        model_name = "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
+        print("  📦 載入 mDeBERTa 多語言 NLI 模型（三分類模式）...")
+        _nli_tokenizer = AutoTokenizer.from_pretrained(model_name)
+        _nli_model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        device = 0 if torch.cuda.is_available() else -1
+        if device == 0:
+            _nli_model = _nli_model.cuda()
+        _nli_model.eval()
+
+        # 從模型 config 取得 label 對應關係
+        id2label = _nli_model.config.id2label  # e.g. {0: "CONTRADICTION", 1: "NEUTRAL", 2: "ENTAILMENT"}
+        _NLI_LABEL_MAP = {v.upper(): k for k, v in id2label.items()}
+        print(f"  ✅ mDeBERTa 載入完成（labels: {id2label}）")
+    return _nli_model, _nli_tokenizer, _NLI_LABEL_MAP
+
+
+def _run_nli(premise: str, hypothesis: str) -> dict:
+    """
+    對單一 (premise, hypothesis) pair 執行 NLI，
+    回傳 {"entailment": float, "neutral": float, "contradiction": float}。
+    """
+    import torch
+
+    model, tokenizer, label_map = _get_nli_model()
+    inputs = tokenizer(
+        premise[:512], hypothesis[:256],
+        return_tensors="pt", truncation=True, max_length=512,
+    )
+    device = next(model.parameters()).device
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    with torch.no_grad():
+        logits = model(**inputs).logits
+    probs = torch.softmax(logits, dim=-1)[0].cpu().tolist()
+
+    result = {}
+    for label, idx in label_map.items():
+        result[label.lower()] = round(probs[idx], 4)
+    # 確保三個 key 都存在（防止模型 label 名不同）
+    for key in ("entailment", "neutral", "contradiction"):
+        result.setdefault(key, 0.0)
+    return result
 
 
 def split_into_sentences(text: str) -> list:
@@ -35,37 +79,65 @@ def split_into_sentences(text: str) -> list:
 
 
 def check_citation_grounding(sentences: list, chunks: list) -> list:
+    """
+    對每個 sentence 在所有 chunks 中找最佳支撐 chunk。
+    回傳格式（V3 新增 contradiction_detected / status）：
+    {
+        "sentence": str,
+        "supported": bool,
+        "confidence": float,        # entailment score
+        "best_chunk": str,
+        "contradiction_detected": bool,   # 僅當 NLI_CONTRADICTION_ENABLED=True
+        "contradiction_source": str,      # 矛盾最強的 chunk id
+        "status": "SUPPORTED" | "CONFLICT" | "UNSUPPORTED",
+    }
+    """
     if not sentences or not chunks:
         return []
 
-    nli = get_nli_pipeline()
     results = []
 
     for sentence in sentences:
-        best_score = 0.0
+        best_entail = 0.0
         best_chunk_id = None
+        best_contradict = 0.0
+        best_contradict_id = None
 
         for chunk in chunks:
-            chunk_text = chunk["text"][:600]
+            chunk_text = chunk["text"][:512]
             try:
-                result = nli(
-                    chunk_text,
-                    candidate_labels=[sentence],
-                    hypothesis_template="{}",
-                    multi_label=False,
-                )
-                score = result["scores"][0]
-                if score > best_score:
-                    best_score = score
-                    best_chunk_id = chunk["id"]
+                scores = _run_nli(premise=chunk_text, hypothesis=sentence)
+                e_score = scores["entailment"]
+                c_score = scores["contradiction"]
+
+                if e_score > best_entail:
+                    best_entail = e_score
+                    best_chunk_id = chunk.get("id", chunk.get("source", ""))
+
+                if cfg.NLI_CONTRADICTION_ENABLED and c_score > best_contradict:
+                    best_contradict = c_score
+                    best_contradict_id = chunk.get("id", chunk.get("source", ""))
+
             except Exception:
                 continue
 
+        contradiction_detected = (
+            cfg.NLI_CONTRADICTION_ENABLED and best_contradict > 0.7
+        )
+
+        if best_entail >= 0.5:
+            status = "CONFLICT" if contradiction_detected else "SUPPORTED"
+        else:
+            status = "CONFLICT" if contradiction_detected else "UNSUPPORTED"
+
         results.append({
             "sentence": sentence,
-            "supported": best_score >= 0.5,
-            "confidence": round(best_score, 3),
+            "supported": best_entail >= 0.5,
+            "confidence": round(best_entail, 3),
             "best_chunk": best_chunk_id,
+            "contradiction_detected": contradiction_detected,
+            "contradiction_source": best_contradict_id if contradiction_detected else None,
+            "status": status,
         })
 
     return results
@@ -104,10 +176,20 @@ def format_grounding_report(citation_results: list) -> str:
 
     lines.append(f"{emoji} **整體論文依據率**：{grounding_score:.1%}　{label}\n")
 
-    unsupported = [r for r in citation_results if not r["supported"]]
-    if not unsupported:
+    # ── 矛盾偵測摘要 ──────────────────────────────────
+    if cfg.NLI_CONTRADICTION_ENABLED:
+        conflicts = [r for r in citation_results if r.get("status") == "CONFLICT"]
+        if conflicts:
+            lines.append(f"⚠️  **偵測到 {len(conflicts)} 個陳述與知識庫存在矛盾：**\n")
+            for r in conflicts:
+                src = f"（矛盾來源：{r['contradiction_source']}）" if r.get("contradiction_source") else ""
+                lines.append(f"- [CONFLICT] {r['sentence']}{src}")
+            lines.append("")
+
+    unsupported = [r for r in citation_results if not r["supported"] and r.get("status") != "CONFLICT"]
+    if not unsupported and not [r for r in citation_results if r.get("status") == "CONFLICT"]:
         lines.append("✅ **所有陳述均有論文依據**\n")
-    else:
+    elif unsupported:
         lines.append(
             f"⚠️  **以下 {len(unsupported)} 個陳述未找到明確論文依據，請謹慎參考：**\n"
         )
@@ -198,3 +280,183 @@ def has_multi_paper_reference(text: str) -> bool:
     回傳 True 代表有多文獻指稱。
     """
     return bool(_MULTI_PAPER_RE.search(text))
+
+
+# ══════════════════════════════════════════════════════════════════
+#  2-B：子命題拆解驗證（NLI_DECOMPOSE_ENABLED 控制）
+# ══════════════════════════════════════════════════════════════════
+
+def decompose_and_verify(conclusion: str, facts: list[dict]) -> dict:
+    """
+    對一個結論句子做子命題拆解驗證。
+
+    流程：
+    1. 呼叫 gemma4:31b 把結論拆成子命題 JSON list
+    2. 每個子命題對所有 facts 跑 NLI，取最高 entailment score
+    3. 依閾值標記 SUPPORTED / INFERENCE_BRIDGE / UNSUPPORTED
+
+    輸出格式：
+    {
+        "conclusion": str,
+        "sub_claims": [
+            {
+                "claim": str,
+                "grounding_score": float,
+                "source": str,
+                "status": "SUPPORTED" | "INFERENCE_BRIDGE" | "UNSUPPORTED"
+            }
+        ],
+        "chain_complete": bool   # 所有子命題都有 SUPPORTED 或 INFERENCE_BRIDGE
+    }
+
+    若 NLI_DECOMPOSE_ENABLED=False，直接回傳空結果。
+    """
+    if not cfg.NLI_DECOMPOSE_ENABLED:
+        return {"conclusion": conclusion, "sub_claims": [], "chain_complete": True}
+
+    import requests as _req
+    import json as _json
+
+    # ── Step 1：呼叫 LLM 拆解子命題 ──────────────────────────
+    prompt = (
+        f"請將以下結論句子拆解成 2-4 個獨立的子命題，每個子命題應能獨立被文獻支撐或反駁。\n"
+        f"只輸出 JSON 陣列，格式：[\"子命題1\", \"子命題2\", ...]\n\n"
+        f"結論：{conclusion}"
+    )
+    try:
+        resp = _req.post(
+            f"{cfg.OLLAMA_BASE_URL}/api/generate",
+            json={
+                "model": cfg.SYNTHESIS_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.1, "num_predict": 512, "num_ctx": 4096},
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        raw = resp.json().get("response", "[]").strip()
+        raw = re.sub(r'```json|```', '', raw).strip()
+        sub_claims_text = _json.loads(raw)
+        if not isinstance(sub_claims_text, list):
+            sub_claims_text = [conclusion]
+    except Exception:
+        sub_claims_text = [conclusion]
+
+    # ── Step 2：對每個子命題跑 NLI ───────────────────────────
+    sub_claims = []
+    for claim in sub_claims_text:
+        best_score = 0.0
+        best_source = None
+        for fact in facts:
+            try:
+                scores = _run_nli(premise=fact["text"][:512], hypothesis=claim)
+                if scores["entailment"] > best_score:
+                    best_score = scores["entailment"]
+                    best_source = fact.get("id", fact.get("source", ""))
+            except Exception:
+                continue
+
+        if best_score >= 0.65:
+            status = "SUPPORTED"
+        elif best_score >= 0.4:
+            status = "INFERENCE_BRIDGE"
+        else:
+            status = "UNSUPPORTED"
+
+        sub_claims.append({
+            "claim": claim,
+            "grounding_score": round(best_score, 3),
+            "source": best_source,
+            "status": status,
+        })
+
+    chain_complete = all(sc["status"] != "UNSUPPORTED" for sc in sub_claims)
+
+    return {
+        "conclusion": conclusion,
+        "sub_claims": sub_claims,
+        "chain_complete": chain_complete,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════
+#  2-C：多來源聯合驗證（NLI_JOINT_VERIFY_ENABLED 控制）
+# ══════════════════════════════════════════════════════════════════
+
+def joint_verify(claim: str, facts: list[dict]) -> dict:
+    """
+    對一個子命題做多來源聯合驗證。
+
+    流程：
+    1. 對每個 fact 個別跑 NLI，取 entailment score
+    2. 取 top-3 highest entailment score 的 facts
+    3. 把 top-3 facts 文字拼接後，再跑一次 NLI
+    4. individual scores 低但 joint score 高 → INFERENCE_BRIDGE（跨文獻推論橋接）
+
+    輸出格式：
+    {
+        "claim": str,
+        "individual_scores": [float, float, float],
+        "joint_score": float,
+        "is_inference_bridge": bool,
+        "bridge_sources": [str, str, ...]
+    }
+
+    若 NLI_JOINT_VERIFY_ENABLED=False，直接回傳空結果。
+    """
+    if not cfg.NLI_JOINT_VERIFY_ENABLED:
+        return {
+            "claim": claim,
+            "individual_scores": [],
+            "joint_score": 0.0,
+            "is_inference_bridge": False,
+            "bridge_sources": [],
+        }
+
+    # ── Step 1：個別跑 NLI，收集所有分數 ────────────────────
+    scored_facts = []
+    for fact in facts:
+        try:
+            scores = _run_nli(premise=fact["text"][:512], hypothesis=claim)
+            scored_facts.append({
+                "source": fact.get("id", fact.get("source", "")),
+                "text": fact["text"][:512],
+                "score": scores["entailment"],
+            })
+        except Exception:
+            continue
+
+    if not scored_facts:
+        return {
+            "claim": claim,
+            "individual_scores": [],
+            "joint_score": 0.0,
+            "is_inference_bridge": False,
+            "bridge_sources": [],
+        }
+
+    # ── Step 2：取 top-3（依 entailment score 排序）────────
+    top3 = sorted(scored_facts, key=lambda x: x["score"], reverse=True)[:3]
+    individual_scores = [round(f["score"], 3) for f in top3]
+    bridge_sources = [f["source"] for f in top3]
+
+    # ── Step 3：拼接 top-3 文字後聯合驗證 ───────────────────
+    joint_premise = "\n\n".join(f["text"] for f in top3)
+    try:
+        joint_scores = _run_nli(premise=joint_premise[:1024], hypothesis=claim)
+        joint_score = round(joint_scores["entailment"], 3)
+    except Exception:
+        joint_score = max(individual_scores) if individual_scores else 0.0
+
+    # ── 判斷是否為跨文獻推論橋接 ─────────────────────────────
+    avg_individual = sum(individual_scores) / len(individual_scores) if individual_scores else 0.0
+    is_inference_bridge = (avg_individual < 0.5) and (joint_score >= 0.65)
+
+    return {
+        "claim": claim,
+        "individual_scores": individual_scores,
+        "joint_score": joint_score,
+        "is_inference_bridge": is_inference_bridge,
+        "bridge_sources": bridge_sources if is_inference_bridge else [],
+    }

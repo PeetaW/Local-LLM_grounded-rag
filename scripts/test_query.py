@@ -36,13 +36,7 @@ import asyncio
 from main import paper_engines, episodic_collection, preference_collection
 from rag.query_engine import execute_structured_query
 from rag.memory import recall_memories, decide_and_save
-
-
-def _parse_grounding_score(answer: str) -> float:
-    """從答案的品質報告中解析 grounding_score，解析失敗回傳 -1.0。"""
-    import re
-    match = re.search(r'grounding_score=(\d+\.?\d*)', answer)
-    return float(match.group(1)) if match else -1.0
+from rag.answer_processor import parse_grounding_score
 
 
 async def query_with_memory(question: str) -> str:
@@ -60,7 +54,7 @@ async def query_with_memory(question: str) -> str:
 
     answer = execute_structured_query(question, paper_engines, memory_context)
 
-    grounding_score = _parse_grounding_score(answer)
+    grounding_score = parse_grounding_score(answer)
     decide_and_save(question, answer, grounding_score, False, False, episodic_collection, preference_collection)
     print(f"  💾 記憶已儲存（episodic：{episodic_collection.count()} 筆）")
 

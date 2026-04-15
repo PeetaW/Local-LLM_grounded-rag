@@ -527,7 +527,8 @@ def plan_sub_questions(question: str, paper_names: list) -> list:
 def execute_structured_query(
     question: str,
     paper_engines: dict,
-    memory_context: str = ""
+    memory_context: str = "",
+    on_status=None,
 ) -> str:
     """
     StructuredPlanning 主流程：
@@ -540,34 +541,39 @@ def execute_structured_query(
     - 若所有子查詢均未返回有效內容（rag_found_anything = False），
       自動切換為模型自身知識推理，並在回答開頭標注來源說明。
     """
+    def _status(msg):
+        if on_status:
+            on_status(msg)
+        else:
+            print(msg)
+
     all_paper_names = list(paper_engines.keys())
 
     # ── Step 0：先篩選相關論文 ────────────────────────────────────
     detected = detect_target_paper(question, all_paper_names)
     if cfg.REVIEW_MODE:
-        # Review 模式：強制使用所有論文，不篩選
-        print("\n  📖 REVIEW_MODE 已啟用，使用全部論文，跳過篩選")
+        _status("\n  📖 REVIEW_MODE 已啟用，使用全部論文，跳過篩選")
         paper_names = all_paper_names
         paper_engines_to_use = paper_engines
     elif detected:
         paper_names = all_paper_names
         paper_engines_to_use = paper_engines
     else:
-        print("\n  🔎 先篩選相關論文...")
+        _status("\n  🔎 先篩選相關論文...")
         prefiltered = _keyword_prefilter(question, all_paper_names)
         selected_names = select_relevant_papers(question, prefiltered)
         paper_names = selected_names
         paper_engines_to_use = {k: v for k, v in paper_engines.items() if k in selected_names}
 
-    print("\n  📋 拆解子問題中...")
+    _status("\n  📋 拆解子問題中...")
     sub_questions = plan_sub_questions(question, paper_names)
-    print(f"  → 拆出 {len(sub_questions)} 個子問題")
+    _status(f"  → 拆出 {len(sub_questions)} 個子問題")
 
     sub_answers = []
     rag_found_anything = False
 
     # ── Stage 2：並行子查詢 ────────────────────────────────────────
-    print(f"\n  ⚡ 並行檢索 {len(sub_questions)} 個子問題中（workers={cfg.SUBQUERY_MAX_WORKERS}）...")
+    _status(f"\n  ⚡ 並行檢索 {len(sub_questions)} 個子問題中（workers={cfg.SUBQUERY_MAX_WORKERS}）...")
     valid_tasks, prefilled = _build_subquery_tasks(sub_questions, paper_engines_to_use, paper_engines)
     ordered_results = _run_subqueries_parallel(valid_tasks, prefilled)
 
@@ -575,29 +581,29 @@ def execute_structured_query(
         sub_answers.append(f"{label}\n{result}")
         if not _is_empty_result(result):
             rag_found_anything = True
-        print(f"\n  ── {label} 回覆 ──\n  {result[:200]}")
+        _status(f"\n  ── {label} 回覆 ──\n  {result[:200]}")
 
-    # ── 根據 RAG 是否找到內容，決定走哪條 prompt 路徑 ────────────
-    print("\n  🔗 綜合所有子答案中...")
+    _status("\n  🔗 綜合所有子答案中...")
     combined = "\n\n".join(sub_answers)
 
     # ── Stage 3：知識蒸餾 ────────────────────────────────────
     if cfg.SYNTHESIS_ENABLED and rag_found_anything:
-        print("\n  🧪 Stage 3: 知識蒸餾中...")
+        _status("\n  🧪 Stage 3: 知識蒸餾中...")
         synthesis_chunks = [
             {"text": ans, "source": _extract_paper_name(ans, f"retrieved_chunk_{i}")}
             for i, ans in enumerate(sub_answers)
         ]
         knowledge_base = _synthesizer.synthesize(
             chunks=synthesis_chunks,
-            query=question
+            query=question,
+            on_status=on_status,
         )
     else:
         knowledge_base = combined
 
     if not rag_found_anything:
         # ── Fallback：RAG 完全沒找到，切換至模型自身知識 ──────────
-        print("  ℹ️  RAG 資料庫未找到相關內容，切換至模型推理模式...")
+        _status("  ℹ️  RAG 資料庫未找到相關內容，切換至模型推理模式...")
         fallback_notice = (
             "⚠️ **資料來源說明**：本地學術文獻資料庫中未找到與此問題直接相關的內容。"
             "以下回答來自模型自身知識，非論文原文，請謹慎參考並自行查證。\n\n"
@@ -693,10 +699,11 @@ def execute_structured_query(
 
     # ── Stage 5：邏輯自洽驗證 ────────────────────────────────────
     if cfg.VERIFY_ENABLED and rag_found_anything:
-        print("\n  🔍 Stage 5: 邏輯自洽驗證中...")
+        _status("\n  🔍 Stage 5: 邏輯自洽驗證中...")
         full_text = _verifier.verify_and_correct(
             draft_answer=full_text,
-            knowledge_base=knowledge_base
+            knowledge_base=knowledge_base,
+            on_status=on_status,
         )
 
     # ── Citation Grounding + 低分 Fallback 修正 ──────────────────────
@@ -794,7 +801,8 @@ def execute_structured_query(
 def execute_structured_query_stream(
     question: str,
     paper_engines: dict,
-    memory_context: str = ""
+    memory_context: str = "",
+    on_status=None,
 ):
     """
     execute_structured_query 的 streaming generator 版本。
@@ -855,7 +863,8 @@ def execute_structured_query_stream(
         ]
         knowledge_base = _synthesizer.synthesize(
             chunks=synthesis_chunks,
-            query=question
+            query=question,
+            on_status=on_status,
         )
         yield "[STATUS] 📋 事實清單已整理完成\n"
     else:
@@ -956,7 +965,8 @@ def execute_structured_query_stream(
         yield "[STATUS] 🔍 Stage 5: 邏輯自洽驗證中...\n"
         corrected = _verifier.verify_and_correct(
             draft_answer=full_text,
-            knowledge_base=knowledge_base
+            knowledge_base=knowledge_base,
+            on_status=on_status,
         )
         if corrected != full_text:
             yield "\n\n---\n📝 **已根據邏輯自洽驗證修正如下：**\n\n"

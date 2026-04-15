@@ -3,8 +3,6 @@ import asyncio
 import queue
 import uuid
 import re
-import io
-import sys
 import json
 import time
 import logging
@@ -17,37 +15,11 @@ from typing import Optional, List
 logger = logging.getLogger(__name__)
 
 
-class _StatusCapture(io.TextIOBase):
-    """
-    在 worker thread 執行期間攔截 sys.stdout，
-    把所有 print() 的輸出以 [STATUS] 格式放入 queue，
-    同時保留 terminal 輸出（方便 debug）。
-    """
-    def __init__(self, q: queue.Queue, original_stdout):
-        self._q = q
-        self._orig = original_stdout
-        self._buf = ""
-
-    def write(self, text: str) -> int:
-        self._orig.write(text)   # 同步寫入 terminal
-        self._orig.flush()
-        self._buf += text
-        # 按換行符切割，逐行放入 queue
-        while "\n" in self._buf:
-            line, self._buf = self._buf.split("\n", 1)
-            stripped = line.strip()
-            if stripped:
-                self._q.put(f"[STATUS] {stripped}\n")
-        return len(text)
-
-    def flush(self):
-        self._orig.flush()
-
 from main import paper_engines, episodic_collection, preference_collection
 
-from rag.citation_grounding import has_speculation_keywords, has_multi_paper_reference
 from rag.query_engine import execute_structured_query, execute_structured_query_stream
-from rag.memory import recall_memories, decide_and_save, _check_is_preference, _save_preference
+from rag.memory import recall_memories, _check_is_preference, _save_preference
+from rag.answer_processor import post_process_answer, parse_grounding_score
 
 app = FastAPI(
     title="ZVI RAG Pipeline",
@@ -94,27 +66,6 @@ def _check_prompt_injection(text: str) -> bool:
     """回傳 True 表示偵測到可疑內容"""
     return bool(_INJECTION_RE.search(text))
 
-
-def _parse_grounding_score(answer: str) -> float:
-    """
-    從答案末尾的品質報告中解析 grounding_score。
-    格式：<!-- grounding_score=0.875 -->
-    解析失敗回傳 -1.0（由 decide_and_save 的 < 0 分支處理）。
-    """
-    match = re.search(r'grounding_score=(\d+\.?\d*)', answer)
-    if match:
-        return float(match.group(1))
-    logger.debug("_parse_grounding_score: 未找到分數標記，回傳 -1.0")
-    return -1.0
-
-
-def _trim_session_store():
-    """session_store 超過上限時，移除最舊的條目（防止記憶體無限增長）。"""
-    if len(session_store) > SESSION_MAX_COUNT:
-        overflow = len(session_store) - SESSION_MAX_COUNT
-        for key in list(session_store.keys())[:overflow]:
-            del session_store[key]
-        logger.info("session_store 已清理 %d 個過期 session", overflow)
 
 
 def _resolve_session_id(raw_sid: Optional[str]) -> str:
@@ -224,23 +175,9 @@ async def query(request: QueryRequest):
         lambda: execute_structured_query(question, paper_engines, memory_context)
     )
 
-    if session_id not in session_store:
-        session_store[session_id] = []
-    session_store[session_id].append((question, answer))
-    if len(session_store[session_id]) > SESSION_MAX_TURNS:
-        session_store[session_id] = session_store[session_id][-SESSION_MAX_TURNS:]
-    _trim_session_store()
-
-    grounding_score = _parse_grounding_score(answer)
-    is_speculation = has_speculation_keywords(answer)
-    is_multi_paper = (
-        has_multi_paper_reference(answer) and
-        has_multi_paper_reference(question)
-    )
-
-    decide_and_save(
-        question, answer,
-        grounding_score, is_speculation, is_multi_paper,
+    post_process_answer(
+        question, answer, session_id,
+        session_store, SESSION_MAX_TURNS, SESSION_MAX_COUNT,
         episodic_collection, preference_collection,
     )
 
@@ -427,19 +364,21 @@ async def chat_completions(request: ChatCompletionRequest):
             q_in: queue.Queue = queue.Queue()
 
             def _run():
-                # 攔截 sys.stdout：把 pipeline 內部所有 print() 也轉成 [STATUS] 串流
-                capture = _StatusCapture(q_in, sys.stdout)
-                old_stdout = sys.stdout
-                sys.stdout = capture
+                # 每個請求有獨立的 status_handler，天然並發安全
+                def status_handler(msg: str):
+                    q_in.put(f"[STATUS] {msg}\n")
+
                 try:
                     for chunk_text in execute_structured_query_stream(
-                        question, paper_engines, memory_context
+                        question, paper_engines, memory_context,
+                        on_status=status_handler,
                     ):
                         q_in.put(chunk_text)
                 finally:
-                    sys.stdout = old_stdout
                     q_in.put(None)  # sentinel
 
+            # max_workers=1：RTX 3090 單卡不支援真正並發推理（硬體限制，非設計限制）。
+            # 改為 status_callback 模式後，多卡部署可直接調整此數值。
             executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             loop = asyncio.get_event_loop()
             loop.run_in_executor(executor, _run)
@@ -468,22 +407,9 @@ async def chat_completions(request: ChatCompletionRequest):
                 yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
             # ── 串流結束後寫入記憶 ────────────────────────────
-            if session_id not in session_store:
-                session_store[session_id] = []
-            session_store[session_id].append((question, full_answer))
-            if len(session_store[session_id]) > SESSION_MAX_TURNS:
-                session_store[session_id] = session_store[session_id][-SESSION_MAX_TURNS:]
-            _trim_session_store()
-
-            grounding_score = _parse_grounding_score(full_answer)
-            is_speculation = has_speculation_keywords(full_answer)
-            is_multi_paper = (
-                has_multi_paper_reference(full_answer) and
-                has_multi_paper_reference(question)
-            )
-            decide_and_save(
-                question, full_answer,
-                grounding_score, is_speculation, is_multi_paper,
+            post_process_answer(
+                question, full_answer, session_id,
+                session_store, SESSION_MAX_TURNS, SESSION_MAX_COUNT,
                 episodic_collection, preference_collection,
             )
 
@@ -516,22 +442,9 @@ async def chat_completions(request: ChatCompletionRequest):
             lambda: execute_structured_query(question, paper_engines, memory_context)
         )
 
-        if session_id not in session_store:
-            session_store[session_id] = []
-        session_store[session_id].append((question, answer))
-        if len(session_store[session_id]) > SESSION_MAX_TURNS:
-            session_store[session_id] = session_store[session_id][-SESSION_MAX_TURNS:]
-        _trim_session_store()
-
-        grounding_score = _parse_grounding_score(answer)
-        is_speculation = has_speculation_keywords(answer)
-        is_multi_paper = (
-            has_multi_paper_reference(answer) and
-            has_multi_paper_reference(question)
-        )
-        decide_and_save(
-            question, answer,
-            grounding_score, is_speculation, is_multi_paper,
+        post_process_answer(
+            question, answer, session_id,
+            session_store, SESSION_MAX_TURNS, SESSION_MAX_COUNT,
             episodic_collection, preference_collection,
         )
 

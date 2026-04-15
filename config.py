@@ -10,6 +10,9 @@ PROJECTS_BASE_DIR = "projects"
 
 
 # ── 路徑設定 ──────────────────────────────────────────
+# NOTE: 以下路徑在 module import 時就計算完成（module-level 靜態值）。
+# ACTIVE_PROJECT 切換需重啟 server 才會生效，不支援 runtime 動態切換。
+# 若未來需要 runtime 切換 project，路徑應改為函數：get_papers_dir(project_name)。
 PAPERS_DIR        = f"{PROJECTS_BASE_DIR}/{ACTIVE_PROJECT}/papers"
 INDEX_BASE_DIR    = f"{PROJECTS_BASE_DIR}/{ACTIVE_PROJECT}/index_storage"
 INDEX_CONFIG_PATH = f"{PROJECTS_BASE_DIR}/{ACTIVE_PROJECT}/index_storage/config.json"
@@ -82,6 +85,20 @@ MAX_VERIFY_RETRIES  = 2             # fallback 最多重試幾次
 
 # ── Stage 2：並行子查詢 ────────────────────────────────
 SUBQUERY_MAX_WORKERS = 4   # 並行子查詢的 thread pool 大小
+
+# ── 各 Stage num_ctx 設定 ──────────────────────────────
+# Stage 1（qwen2.5:14b）與 Stage 4（gemma4:31b）透過 LlamaIndex 呼叫，
+# 不支援 per-call num_ctx override，沿用 LLM_CONTEXT_WINDOW / planning_llm context_window。
+STAGE3_NUM_CTX = 16384    # 知識蒸餾（knowledge_synthesizer.py）
+STAGE5_NUM_CTX = 65536    # 邏輯驗證（answer_verifier.py）
+
+# ── Plan-and-Execute 架構開關 ─────────────────────────
+PLAN_EXECUTE_ENABLED = False       # 預設關閉，穩定後開啟
+
+# ── NLI 擴展開關 ──────────────────────────────────────
+NLI_CONTRADICTION_ENABLED = True   # 矛盾偵測（預設開啟）
+NLI_DECOMPOSE_ENABLED = False      # 子命題拆解驗證
+NLI_JOINT_VERIFY_ENABLED = False   # 多來源聯合驗證
 
 # ── 記憶系統設定 ──────────────────────────────────────
 MEMORY_RECALL_N   = 3    # 每次查詢召回幾筆歷史記憶
