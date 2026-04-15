@@ -11,6 +11,25 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# ── 自動 tee：同時輸出到 terminal 和 test_run.log ─────────────────
+class _Tee:
+    def __init__(self, stream, filepath):
+        self._stream = stream
+        self._file = open(filepath, "w", encoding="utf-8", buffering=1)
+    def write(self, data):
+        self._stream.write(data)
+        self._file.write(data)
+    def flush(self):
+        self._stream.flush()
+        self._file.flush()
+    def __getattr__(self, attr):
+        return getattr(self._stream, attr)
+
+_log_path = os.path.join(os.path.dirname(__file__), "..", "test_run.log")
+sys.stdout = _Tee(sys.stdout, _log_path)
+sys.stderr = _Tee(sys.stderr, _log_path)
+# ─────────────────────────────────────────────────────────────────
+
 import time
 import asyncio
 

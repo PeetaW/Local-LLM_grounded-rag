@@ -43,7 +43,7 @@ def init_llm_and_embedding():
         is_chat_model=True,
         timeout=300.0,           # 小模型用短 timeout 就夠
         http_client=http_client,
-        context_window=8192,
+        context_window=16384,
     )
 
     Settings.embed_model = OllamaEmbedding(
