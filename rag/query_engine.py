@@ -962,6 +962,8 @@ def execute_structured_query_stream(
             yield "\n\n---\n📝 **已根據邏輯自洽驗證修正如下：**\n\n"
             yield corrected
             full_text = corrected
+        else:
+            yield "[STATUS] ✅ Stage 5 邏輯驗證通過（VERIFY_PASS），答案無需修正\n"
 
     # ── Step 5：Citation Grounding + 低分 Fallback 修正 ──────────────
     if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything:

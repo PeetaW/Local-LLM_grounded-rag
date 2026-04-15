@@ -126,6 +126,12 @@ for i, question in enumerate(questions, 1):
     response = asyncio.run(query_with_memory(question))
     q_elapsed = time.time() - q_start
 
+    print(f"\n{'─'*65}")
+    print(f"★ 最終答案（Stage 5 修正後）：")
+    print(f"{'─'*65}")
+    print(response)
+    print(f"{'─'*65}")
+
     minutes = int(q_elapsed // 60)
     seconds = int(q_elapsed % 60)
     print(f"\n⏱ 本題耗時：{minutes}分{seconds}秒")
