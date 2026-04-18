@@ -24,6 +24,7 @@ VERIFY_SYSTEM_PROMPT = """
   [推論跳躍]、[前提不存在]、[與事實矛盾]、[推測過度延伸]
   格式：問題類型｜引用或句子內容｜問題說明
 
+完成分析後，至多重複確認一次之後，就直接輸出你的判斷。
 使用繁體中文輸出。
 """
 
@@ -91,9 +92,10 @@ class AnswerVerifier:
         import json
 
         options = {
-            "temperature": 0.1,
+            "temperature": 0.3,
             "num_predict": -1,
             "num_ctx": cfg.STAGE5_NUM_CTX,
+            "presence_penalty": 1.2,
         }
         if disable_thinking:
             options["thinking"] = False

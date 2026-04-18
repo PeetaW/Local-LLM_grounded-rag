@@ -71,10 +71,81 @@ def _run_nli(premise: str, hypothesis: str) -> dict:
     return result
 
 
+def _latex_to_plain(text: str) -> str:
+    """
+    將 LaTeX 數學式轉換為可讀的科學表達式，保留化學式的語義資訊。
+
+    範例：
+      $\text{FeSO}_4\cdot 7\text{H}_2\text{O}$  →  FeSO4·7H2O
+      $\text{KBH}_4$                             →  KBH4
+      $\text{Fe}^{2+}$                           →  Fe2+
+      $\text{NH}_2$                              →  NH2
+      $\text{CO}_3^{2-}$                         →  CO32-
+    """
+    def _convert_math_block(m: re.Match) -> str:
+        inner = m.group(1)
+        # \text{X} → X（移除 \text 包裝，保留內容）
+        inner = re.sub(r'\\text\{([^}]+)\}', r'\1', inner)
+        # _{...} 下標：移除大括號，保留內容（如 _{4} → 4, _{2+} → 2+）
+        inner = re.sub(r'_\{([^}]+)\}', r'\1', inner)
+        # _X 單字元下標（如 _4 → 4）
+        inner = re.sub(r'_(\w)', r'\1', inner)
+        # ^{...} 上標：移除大括號，保留內容（如 ^{2+} → 2+, ^{-} → -）
+        inner = re.sub(r'\^\{([^}]+)\}', r'\1', inner)
+        # ^X 單字元上標（如 ^2 → 2）
+        inner = re.sub(r'\^(\w)', r'\1', inner)
+        # 常用符號替換
+        inner = re.sub(r'\\cdot', '·', inner)
+        inner = re.sub(r'\\pm', '±', inner)
+        inner = re.sub(r'\\times', '×', inner)
+        inner = re.sub(r'\\geq', '≥', inner)
+        inner = re.sub(r'\\leq', '≤', inner)
+        # 移除其他殘留的 LaTeX 指令（\something）
+        inner = re.sub(r'\\[a-zA-Z]+', '', inner)
+        # 移除殘留大括號
+        inner = re.sub(r'[{}]', '', inner)
+        return inner.strip()
+
+    # 處理 $...$ 行內數學式
+    text = re.sub(r'\$([^$]+)\$', _convert_math_block, text)
+    # 移除孤立殘留的 $ 符號
+    text = text.replace('$', '')
+    return text
+
+
+def _preprocess_for_nli(text: str) -> str:
+    """
+    送入 NLI 前移除格式噪音並轉換 LaTeX：
+    - 引用標籤 （見 [事實N]）、（原文：「...」）會讓 NLI 誤判為 contradiction
+    - Markdown bullet / 標題符號與 NLI 訓練資料格式不符
+    - LaTeX 數學式轉為可讀科學表達式（保留化學式語義）
+    原始句子仍保留在 results["sentence"] 供報告使用。
+    """
+    # 移除引用標籤與狀態標記
+    text = re.sub(r'（見 \[事實\d+\][^）]*）', '', text)
+    text = re.sub(r'（原文：「[^」]*」）', '', text)
+    text = re.sub(r'\[事實\d+\]', '', text)
+    text = re.sub(r'\[待確認\]|\[資訊不足\]', '', text)
+    # 移除 markdown 格式
+    text = re.sub(r'^\s*\*+\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+    # LaTeX → 可讀科學表達式（保留化學式語義）
+    text = _latex_to_plain(text)
+    # 移除行尾孤立冒號（如「試劑與用量：」這類標題行）
+    text = re.sub(r'：\s*$', '', text)
+    # 整理空白
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
 def split_into_sentences(text: str) -> list:
+    # 移除 markdown 粗體與標題符號，保留內容
     text = re.sub(r'\*\*|##|###|【.*?】', '', text)
-    sentences = re.split(r'(?<=[。！？\.\!\?])\s*|\n+', text)
-    sentences = [s.strip() for s in sentences if len(s.strip()) >= 10]
+    # 只在中文句號／問號／驚嘆號及英文 !? 後切分；
+    # 不使用 \. 以避免在「0.6」「1.5:1」等數值的小數點處誤切
+    sentences = re.split(r'(?<=[。！？\!\?])\s*|\n+', text)
+    # 最小長度 20 字元，過濾截斷片段與純標點符號行
+    sentences = [s.strip() for s in sentences if len(s.strip()) >= 20]
     return sentences
 
 
@@ -103,10 +174,15 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
         best_contradict = 0.0
         best_contradict_id = None
 
+        # 預處理：移除引用標籤、Markdown、LaTeX 等格式噪音後再送入 NLI
+        hypothesis = _preprocess_for_nli(sentence)
+        if not hypothesis:
+            continue  # 預處理後為空（例如純標題行），跳過
+
         for chunk in chunks:
             chunk_text = chunk["text"][:512]
             try:
-                scores = _run_nli(premise=chunk_text, hypothesis=sentence)
+                scores = _run_nli(premise=chunk_text, hypothesis=hypothesis)
                 e_score = scores["entailment"]
                 c_score = scores["contradiction"]
 
@@ -129,6 +205,9 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
             status = "CONFLICT" if contradiction_detected else "SUPPORTED"
         else:
             status = "CONFLICT" if contradiction_detected else "UNSUPPORTED"
+
+        print(f"  [NLI-debug] e={best_entail:.3f} c={best_contradict:.3f} "
+              f"status={status} | {sentence[:60]}")
 
         results.append({
             "sentence": sentence,
