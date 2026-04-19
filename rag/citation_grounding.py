@@ -100,6 +100,9 @@ def _latex_to_plain(text: str) -> str:
         inner = re.sub(r'\\times', '×', inner)
         inner = re.sub(r'\\geq', '≥', inner)
         inner = re.sub(r'\\leq', '≤', inner)
+        inner = re.sub(r'\\rightarrow', '→', inner)
+        inner = re.sub(r'\\leftarrow', '←', inner)
+        inner = re.sub(r'\\to\b', '→', inner)
         # 移除其他殘留的 LaTeX 指令（\something）
         inner = re.sub(r'\\[a-zA-Z]+', '', inner)
         # 移除殘留大括號
@@ -120,7 +123,19 @@ def _preprocess_for_nli(text: str) -> str:
     - Markdown bullet / 標題符號與 NLI 訓練資料格式不符
     - LaTeX 數學式轉為可讀科學表達式（保留化學式語義）
     原始句子仍保留在 results["sentence"] 供報告使用。
+    回傳空字串表示「跳過此句」（caller 的 `if not hypothesis: continue` 負責跳過）。
     """
+    # 元陳述句：描述「資訊缺失」或「無法確認」的句子本身不是事實命題，
+    # 送入 NLI 必然產生偽陽性 contradiction，直接跳過。
+    _META_SKIP = (
+        r'缺失資訊',              # "缺失資訊：..." 或 "*   缺失資訊：..."
+        r'\[資訊不足\]',          # "[資訊不足]..." 或 "*   [資訊不足]..."
+        r'文獻依據不足，無法確認', # 清除 [資訊不足] 標籤後的殘餘文字
+    )
+    for pat in _META_SKIP:
+        if re.search(pat, text):
+            return ""
+
     # 移除引用標籤與狀態標記
     text = re.sub(r'（見 \[事實\d+\][^）]*）', '', text)
     text = re.sub(r'（原文：「[^」]*」）', '', text)
@@ -146,6 +161,18 @@ def split_into_sentences(text: str) -> list:
     sentences = re.split(r'(?<=[。！？\!\?])\s*|\n+', text)
     # 最小長度 20 字元，過濾截斷片段與純標點符號行
     sentences = [s.strip() for s in sentences if len(s.strip()) >= 20]
+    # 過濾純標題行（非命題，不送 NLI）：
+    # 1. 數字編號標題：「2. 明膠氣凝膠的角色」（無句末標點）
+    # 2. Bullet 階段標題：「*   第一階段：GEL 碳化氣凝膠的製備」（無句末標點）
+    def _is_title(s: str) -> bool:
+        if re.search(r'[。！？!?]', s):
+            return False  # 有句末標點 → 是正常句子
+        if re.match(r'^\d+\.\s+\S', s):
+            return True   # "2. ..." 格式
+        if re.match(r'^\*\s+第[一二三四五六七八九十百千\d]+[階段步品]', s):
+            return True   # "*   第一階段：..." 格式
+        return False
+    sentences = [s for s in sentences if not _is_title(s)]
     return sentences
 
 
@@ -171,8 +198,7 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
     for sentence in sentences:
         best_entail = 0.0
         best_chunk_id = None
-        best_contradict = 0.0
-        best_contradict_id = None
+        best_entail_c = 0.0   # contradiction score of the best-entailment chunk
 
         # 預處理：移除引用標籤、Markdown、LaTeX 等格式噪音後再送入 NLI
         hypothesis = _preprocess_for_nli(sentence)
@@ -188,17 +214,17 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
 
                 if e_score > best_entail:
                     best_entail = e_score
+                    best_entail_c = c_score   # c 跟著 best-e chunk 一起更新
                     best_chunk_id = chunk.get("id", chunk.get("source", ""))
-
-                if cfg.NLI_CONTRADICTION_ENABLED and c_score > best_contradict:
-                    best_contradict = c_score
-                    best_contradict_id = chunk.get("id", chunk.get("source", ""))
 
             except Exception:
                 continue
 
+        # contradiction 只看 best-entailment chunk 自己的 c 分數：
+        # 若最支持這句話的 chunk 本身也高度矛盾，才算真正的 CONFLICT；
+        # 其他 chunk 的矛盾訊號屬於論文內部不同脈絡，不能歸咎於這句 hypothesis。
         contradiction_detected = (
-            cfg.NLI_CONTRADICTION_ENABLED and best_contradict > 0.7
+            cfg.NLI_CONTRADICTION_ENABLED and best_entail_c > 0.7
         )
 
         if best_entail >= 0.5:
@@ -215,7 +241,7 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
             "confidence": round(best_entail, 3),
             "best_chunk": best_chunk_id,
             "contradiction_detected": contradiction_detected,
-            "contradiction_source": best_contradict_id if contradiction_detected else None,
+            "contradiction_source": best_chunk_id if contradiction_detected else None,
             "status": status,
         })
 

@@ -11,6 +11,35 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# ── Tee stdout/stderr → test_stage5.log ─────────────────────────
+import io
+
+class _Tee:
+    """不繼承 TextIOWrapper，避免 C 層級未初始化導致 transformers 崩潰。"""
+    def __init__(self, stream, log_file):
+        self._stream = stream
+        self._log = log_file
+
+    def write(self, data):
+        self._stream.write(data)
+        self._stream.flush()
+        self._log.write(data)
+        self._log.flush()
+        return len(data)
+
+    def flush(self):
+        self._stream.flush()
+        self._log.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+_LOG_PATH = os.path.join(os.path.dirname(__file__), "..", "test_stage5.log")
+_log_file = open(_LOG_PATH, "w", encoding="utf-8", buffering=1)
+sys.stdout = _Tee(sys.stdout, _log_file)
+sys.stderr = _Tee(sys.stderr, _log_file)  # 共用同一個 file handle，不會截斷
+# ────────────────────────────────────────────────────────────────
+
 # ══════════════════════════════════════════════════════════════
 #  ← 在這裡調整 Stage 5 的參數
 # ══════════════════════════════════════════════════════════════
@@ -25,6 +54,7 @@ TEST_QUESTION    = (
     "請盡量引用論文中的具體數值。"
 )
 TEST_PAPER_NAMES = ["1-s2.0-S2214714425005100-main"]  # 限定論文；留空 [] 則搜全庫
+NLI_CHUNK_TOP_K  = 20   # NLI 用的 raw chunk 數量（比 pipeline 預設值大，提高覆蓋率）
 # ══════════════════════════════════════════════════════════════
 
 import time
@@ -222,7 +252,15 @@ def _get_raw_chunks() -> list[dict]:
         if filter_set and name not in filter_set:
             continue
         retriever = engine._retriever  # QueryFusionRetriever（vector + BM25）
+        # 暫時調高 top_k 以提升 NLI 覆蓋率，不影響 pipeline 設定
+        old_top_k = retriever.similarity_top_k
+        retriever.similarity_top_k = NLI_CHUNK_TOP_K
+        for r in getattr(retriever, '_retrievers', []):   # private attr in QueryFusionRetriever
+            r.similarity_top_k = NLI_CHUNK_TOP_K
         nodes = retriever.retrieve(TEST_QUESTION)
+        retriever.similarity_top_k = old_top_k
+        for r in getattr(retriever, '_retrievers', []):
+            r.similarity_top_k = old_top_k
         for node_with_score in nodes:
             chunks.append({
                 "id":   f"{name[:25]}-{node_with_score.node.node_id[:8]}",
