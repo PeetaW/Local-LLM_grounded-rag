@@ -92,7 +92,7 @@ class AnswerVerifier:
         import json
 
         options = {
-            "temperature": 0.3,
+            "temperature": 0.6,
             "num_predict": -1,
             "num_ctx": cfg.STAGE5_NUM_CTX,
             "presence_penalty": 1.2,
