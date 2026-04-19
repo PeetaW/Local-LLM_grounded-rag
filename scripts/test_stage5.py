@@ -278,6 +278,13 @@ def _run_nli_grounding(answer: str):
             continue
 
         has_any = True
+
+        # ── 印出斷句結果（方便 debug split_into_sentences 邏輯）──────
+        print(f"\n  {'─'*60}")
+        print(f"  {section_label}  ← 斷句結果（共 {len(sentences)} 句）")
+        for i, s in enumerate(sentences, 1):
+            print(f"    [{i:02d}] {s[:120]}" + ("…" if len(s) > 120 else ""))
+
         t0 = time.time()
         results = check_citation_grounding(sentences, raw_chunks)
         score = compute_grounding_score(results)
@@ -285,18 +292,24 @@ def _run_nli_grounding(answer: str):
 
         contradictions = [r for r in results if r.get("contradiction_detected")]
 
-        print(f"\n  {'─'*60}")
-        print(f"  {section_label}")
-        print(f"  期望：{expectation}")
-        print(f"  句子數 = {len(sentences)}　grounding score = {score:.1%}　({elapsed:.1f}s)")
+        print(f"\n  期望：{expectation}")
+        print(f"  grounding score = {score:.1%}　({elapsed:.1f}s)")
+
+        # ── 逐句 NLI 分數 ─────────────────────────────────────────────
+        print(f"\n  逐句 NLI 分數：")
+        for r in results:
+            status = r.get("status", "?")
+            ent    = r.get("confidence", 0.0)
+            flag   = " ⚠️ CONTRA" if r.get("contradiction_detected") else ""
+            print(f"    [{status:<10}] ent={ent:.3f}{flag}")
+            print(f"             {r['sentence'][:100]}" + ("…" if len(r['sentence']) > 100 else ""))
+
         if contradictions:
-            print(f"  ⚠️  發現 {len(contradictions)} 個 contradiction：")
+            print(f"\n  ⚠️  發現 {len(contradictions)} 個 contradiction：")
             for r in contradictions:
                 print(f"     - {r['sentence'][:80]}...")
         else:
-            print(f"  ✅ 無 contradiction 偵測")
-        print(f"\n  詳細報告：")
-        print(format_grounding_report(results))
+            print(f"\n  ✅ 無 contradiction 偵測")
 
     if not has_any:
         # fallback：全文
