@@ -99,6 +99,11 @@ PLAN_EXECUTE_ENABLED = False       # 預設關閉，穩定後開啟
 NLI_CONTRADICTION_ENABLED = True   # 矛盾偵測（預設開啟）
 NLI_DECOMPOSE_ENABLED = False      # 子命題拆解驗證
 NLI_JOINT_VERIFY_ENABLED = False   # 多來源聯合驗證
+# 跨語言補償：中文 hypothesis 批次翻譯成英文後再做 NLI
+# 背景：PDF chunks 為英文，中文 answer 做跨語言 NLI 時短句 entailment 分數偏低；
+#       翻譯後改為 EN-vs-EN 可顯著提升數值型事實句的 entailment 準確度。
+# 注意：開啟後每次 grounding check 增加一次 LLM 批次呼叫（約 5-20s）。
+NLI_TRANSLATE_TO_EN = True        # 翻譯 hypothesis 為英文再送 NLI（預設關閉）
 
 # ── 記憶系統設定 ──────────────────────────────────────
 MEMORY_RECALL_N   = 3    # 每次查詢召回幾筆歷史記憶

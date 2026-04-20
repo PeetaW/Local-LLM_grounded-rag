@@ -146,8 +146,14 @@ def _preprocess_for_nli(text: str) -> str:
     text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
     # LaTeX → 可讀科學表達式（保留化學式語義）
     text = _latex_to_plain(text)
+    # 移除 LLM 結構化子標題前綴（如「試劑與比例：」「操作條件：」「後處理：」等）
+    # 判斷標準：句子開頭到第一個全形/半形冒號之間 ≤12 字元，且前綴不含句子標點
+    # 這些是 LLM 生成的格式標籤，raw PDF chunk 原文不含這類前綴
+    # 例：「試劑與比例：使用 20 wt% 的明膠」→「使用 20 wt% 的明膠」
+    # 保護：「本研究的合成過程分為三個階段：...」(14字元) 不會被誤刪
+    text = re.sub(r'^[^，。！？,.\n]{1,12}[：:]\s*', '', text)
     # 移除行尾孤立冒號（如「試劑與用量：」這類標題行）
-    text = re.sub(r'：\s*$', '', text)
+    text = re.sub(r'[：:]\s*$', '', text)
     # 整理空白
     text = re.sub(r'\s+', ' ', text).strip()
     return text
@@ -176,6 +182,71 @@ def split_into_sentences(text: str) -> list:
     return sentences
 
 
+def _batch_translate_to_en(hypotheses: list[str]) -> list[str]:
+    """
+    將一批中文 hypothesis 一次性翻譯成英文（單次 LLM 呼叫）。
+    只在 NLI_TRANSLATE_TO_EN=True 時使用。
+
+    翻譯規則：
+    - 數值、單位（wt%, °C, rpm, g, mL）原樣保留
+    - 化學式（FeSO4, KBH4, NZVI, G-GEL, GEL）原樣保留
+    - 若翻譯結果行數不符，回傳原始清單作為 fallback
+
+    回傳與輸入等長的翻譯後清單。
+    """
+    import requests as _req, json as _json
+
+    if not hypotheses:
+        return hypotheses
+
+    numbered = "\n".join(f"{i+1}. {h}" for i, h in enumerate(hypotheses))
+    prompt = (
+        "Translate the following sentences from Chinese to English.\n"
+        "Rules:\n"
+        "- Keep numbers, units (wt%, °C, rpm, g, mL, h), and chemical formulas "
+        "(FeSO4, KBH4, NZVI, GEL, G-GEL, TC, DO, OH, etc.) unchanged.\n"
+        "- Output ONLY the translations in the same numbered format (1. ... 2. ...).\n"
+        "- No extra explanation or blank lines between items.\n\n"
+        f"{numbered}"
+    )
+
+    try:
+        resp = _req.post(
+            f"{cfg.OLLAMA_BASE_URL}/api/generate",
+            json={
+                "model":  cfg.SYNTHESIS_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.1, "num_predict": 2048, "num_ctx": 4096},
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        raw = resp.json().get("response", "").strip()
+
+        # 解析 "N. text" 格式，提取翻譯結果
+        translated = []
+        for line in raw.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            m = re.match(r'^\d+\.\s+(.+)', line)
+            if m:
+                translated.append(m.group(1).strip())
+
+        if len(translated) == len(hypotheses):
+            print(f"  [NLI-translate] 批次翻譯完成（{len(translated)} 句）")
+            return translated
+        else:
+            print(f"  [NLI-translate] ⚠️ 翻譯行數不符（預期 {len(hypotheses)}，"
+                  f"實際 {len(translated)}），使用原始中文 hypothesis")
+            return hypotheses
+
+    except Exception as e:
+        print(f"  [NLI-translate] ⚠️ 翻譯失敗（{e}），fallback 至原始中文")
+        return hypotheses
+
+
 def check_citation_grounding(sentences: list, chunks: list) -> list:
     """
     對每個 sentence 在所有 chunks 中找最佳支撐 chunk。
@@ -189,32 +260,51 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
         "contradiction_source": str,      # 矛盾最強的 chunk id
         "status": "SUPPORTED" | "CONFLICT" | "UNSUPPORTED",
     }
+
+    若 NLI_TRANSLATE_TO_EN=True，所有中文 hypothesis 會在 NLI 前批次翻譯成英文，
+    以消除 EN premise vs ZH hypothesis 的跨語言 entailment 落差。
     """
     if not sentences or not chunks:
         return []
 
-    results = []
+    # ── 第一步：預處理所有句子，收集有效的 (sentence, hypothesis) 對 ──────
+    valid_pairs: list[tuple[str, str]] = []   # (原始句子, 預處理後 hypothesis)
+    skipped_sentences: set[int] = set()       # 原始 sentences 中被跳過的 index
 
-    for sentence in sentences:
-        best_entail = 0.0
-        best_chunk_id = None
-        best_entail_c = 0.0   # contradiction score of the best-entailment chunk
-
-        # 預處理：移除引用標籤、Markdown、LaTeX 等格式噪音後再送入 NLI
+    for idx, sentence in enumerate(sentences):
         hypothesis = _preprocess_for_nli(sentence)
         if not hypothesis:
-            continue  # 預處理後為空（例如純標題行），跳過
+            skipped_sentences.add(idx)
+            continue
+        valid_pairs.append((sentence, hypothesis))
+
+    if not valid_pairs:
+        return []
+
+    # ── 第二步：若啟用翻譯，批次將 hypothesis 翻譯為英文 ───────────────────
+    if cfg.NLI_TRANSLATE_TO_EN:
+        raw_hypotheses = [h for _, h in valid_pairs]
+        translated     = _batch_translate_to_en(raw_hypotheses)
+        valid_pairs    = [(s, t) for (s, _), t in zip(valid_pairs, translated)]
+
+    # ── 第三步：逐句跑 NLI ────────────────────────────────────────────────
+    results = []
+
+    for sentence, hypothesis in valid_pairs:
+        best_entail  = 0.0
+        best_chunk_id = None
+        best_entail_c = 0.0   # contradiction score of the best-entailment chunk
 
         for chunk in chunks:
             chunk_text = chunk["text"][:512]
             try:
-                scores = _run_nli(premise=chunk_text, hypothesis=hypothesis)
+                scores  = _run_nli(premise=chunk_text, hypothesis=hypothesis)
                 e_score = scores["entailment"]
                 c_score = scores["contradiction"]
 
                 if e_score > best_entail:
-                    best_entail = e_score
-                    best_entail_c = c_score   # c 跟著 best-e chunk 一起更新
+                    best_entail   = e_score
+                    best_entail_c = c_score
                     best_chunk_id = chunk.get("id", chunk.get("source", ""))
 
             except Exception:
@@ -223,8 +313,14 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
         # contradiction 只看 best-entailment chunk 自己的 c 分數：
         # 若最支持這句話的 chunk 本身也高度矛盾，才算真正的 CONFLICT；
         # 其他 chunk 的矛盾訊號屬於論文內部不同脈絡，不能歸咎於這句 hypothesis。
+        #
+        # 額外門檻：best_entail < 0.25 時，該 chunk 本身就不具代表性，
+        # 其 contradiction 分數是雜訊而非真實矛盾訊號，不應觸發 CONFLICT。
+        # （對根本沒有立論基礎的 chunk 討論矛盾，在邏輯上不成立）
         contradiction_detected = (
-            cfg.NLI_CONTRADICTION_ENABLED and best_entail_c > 0.7
+            cfg.NLI_CONTRADICTION_ENABLED
+            and best_entail >= 0.25
+            and best_entail_c > 0.7
         )
 
         if best_entail >= 0.5:
@@ -232,8 +328,11 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
         else:
             status = "CONFLICT" if contradiction_detected else "UNSUPPORTED"
 
-        print(f"  [NLI-debug] e={best_entail:.3f} c={best_contradict:.3f} "
+        print(f"  [NLI-debug] e={best_entail:.3f} c={best_entail_c:.3f} "
               f"status={status} | {sentence[:60]}")
+        # 顯示預處理後實際送進 NLI 的 hypothesis，方便對照確認前處理效果
+        if hypothesis != sentence[:len(hypothesis)]:
+            print(f"  [NLI-hypo]  → {hypothesis[:80]}")
 
         results.append({
             "sentence": sentence,
