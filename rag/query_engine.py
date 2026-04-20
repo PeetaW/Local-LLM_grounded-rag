@@ -806,11 +806,8 @@ If a paper's query result indicates it does not address this topic, do not fill 
             on_status=on_status,
         )
 
-    # ── EN_DRAFT_PIPELINE：Stage 5 完成後翻譯為繁體中文 ─────────
-    if cfg.EN_DRAFT_PIPELINE and rag_found_anything:
-        full_text = _translate_to_traditional_chinese(full_text, on_status=on_status)
-
-    # ── Citation Grounding + 低分 Fallback 修正 ──────────────────────
+    # ── Citation Grounding（EN_DRAFT_PIPELINE 時在翻譯前執行，確保 EN vs EN）──
+    nli_report = ""
     if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything:
         try:
             from rag.citation_grounding import (
@@ -829,7 +826,6 @@ If a paper's query result indicates it does not address this topic, do not fill 
             citation_results = check_citation_grounding(sentences, chunks)
 
             # ── Grounding Fallback：只針對【論文直接依據】段落 ──
-            # 推論與知識延伸段落 grounding score 低是預期行為，不觸發修正
             direct_section = _extract_direct_citation_section(full_text)
             if direct_section:
                 direct_sentences = split_into_sentences(direct_section)
@@ -837,9 +833,9 @@ If a paper's query result indicates it does not address this topic, do not fill 
                 direct_score = compute_grounding_score(direct_results)
             else:
                 direct_results = []
-                direct_score = 1.0  # 無直引段落，不觸發 fallback
+                direct_score = 1.0
 
-            grounding_score = compute_grounding_score(citation_results)  # 全文分數供報告用
+            grounding_score = compute_grounding_score(citation_results)
             unsupported = [r for r in direct_results if not r["supported"]]
             if unsupported and direct_score < 0.8:
                 print(
@@ -882,18 +878,23 @@ If a paper's query result indicates it does not address this topic, do not fill 
                         if corrected:
                             full_text = corrected
                             print("  ✅ [Grounding Fallback] gemma4 修正完成，重新執行 grounding 審查...")
-                            # 修正後重新做一次 grounding
                             sentences = split_into_sentences(full_text)
                             citation_results = check_citation_grounding(sentences, chunks)
                 except Exception as fe:
                     print(f"  ⚠️  [Grounding Fallback] 修正失敗，保留原答案：{fe}")
 
-            report = format_grounding_report(citation_results)
-            full_text += report
-            print(report)
+            nli_report = format_grounding_report(citation_results)
+            print(nli_report)
 
         except Exception as e:
             print(f"  ⚠️  答案品質審查失敗（不影響主流程）：{e}")
+
+    # ── EN_DRAFT_PIPELINE：NLI 完成後翻譯為繁體中文 ─────────────
+    if cfg.EN_DRAFT_PIPELINE and rag_found_anything:
+        full_text = _translate_to_traditional_chinese(full_text, on_status=on_status)
+
+    if nli_report:
+        full_text += nli_report
 
     return full_text
 
@@ -1130,16 +1131,8 @@ If a paper's query result indicates it does not address this topic, do not fill 
         else:
             yield "[STATUS] ✅ Stage 5 邏輯驗證通過（VERIFY_PASS），答案無需修正\n"
 
-    # ── EN_DRAFT_PIPELINE：Stage 5 完成後翻譯為繁體中文 ─────────
-    if cfg.EN_DRAFT_PIPELINE and rag_found_anything:
-        yield "[STATUS] 🌏 翻譯英文答案為繁體中文...\n"
-        translated = _translate_to_traditional_chinese(full_text, on_status=on_status)
-        if translated != full_text:
-            yield "\n\n---\n🌏 **繁體中文最終版本：**\n\n"
-            yield translated
-            full_text = translated
-
-    # ── Step 5：Citation Grounding + 低分 Fallback 修正 ──────────────
+    # ── Citation Grounding（EN_DRAFT_PIPELINE 時在翻譯前執行，確保 EN vs EN）──
+    nli_report = ""
     if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything:
         try:
             from rag.citation_grounding import (
@@ -1212,7 +1205,19 @@ If a paper's query result indicates it does not address this topic, do not fill 
                 except Exception as fe:
                     yield f"[STATUS] ⚠️ [Grounding Fallback] 修正失敗，保留原答案：{fe}\n"
 
-            report = format_grounding_report(citation_results)
-            yield report
+            nli_report = format_grounding_report(citation_results)
         except Exception as e:
-            yield f"\n\n⚠️ 答案品質審查失敗：{e}"
+            nli_report = f"\n\n⚠️ 答案品質審查失敗：{e}"
+
+    # ── EN_DRAFT_PIPELINE：NLI 完成後翻譯為繁體中文 ─────────────
+    if cfg.EN_DRAFT_PIPELINE and rag_found_anything:
+        yield "[STATUS] 🌏 翻譯英文答案為繁體中文...\n"
+        translated = _translate_to_traditional_chinese(full_text, on_status=on_status)
+        if translated != full_text:
+            yield "\n\n---\n🌏 **繁體中文最終版本：**\n\n"
+            yield translated
+            full_text = translated
+
+    # NLI 報告在翻譯後輸出
+    if nli_report:
+        yield nli_report
