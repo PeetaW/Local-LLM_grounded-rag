@@ -291,11 +291,14 @@ def _run_nli_grounding(answer: str):
     #                    重點看 contradiction（推論不應違背原文）
     #   【知識延伸與推測】→ 模型外推，entailment 低是預期行為，僅供參考
     sections = [
-        ("【論文直接依據】", "論文直接依據|直接依據|直引",
+        ("【論文直接依據】 / [Direct Paper Evidence]",
+         "論文直接依據|直接依據|直引|Direct.*Evidence",
          "entailment 應 ≥ 0.7；低分代表答案超出原文"),
-        ("【跨文獻推論】",   "跨文獻推論|推論",
+        ("【跨文獻推論】 / [Cross-Literature Inference]",
+         "跨文獻推論|推論|Cross.*Inference|Inference",
          "entailment 預期偏低（正常）；contradiction 若高才是問題"),
-        ("【知識延伸與推測】", "知識延伸|推測",
+        ("【知識延伸與推測】 / [Knowledge Extension and Speculation]",
+         "知識延伸|推測|Extension|Speculation",
          "entailment 低屬預期，僅做 contradiction 偵測"),
     ]
 

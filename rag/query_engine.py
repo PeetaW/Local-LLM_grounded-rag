@@ -114,10 +114,59 @@ def _extract_direct_citation_section(text: str) -> str:
     """
     import re
     matches = re.findall(
-        r'(##[^\n]*(?:論文直接依據|直接依據|直引)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
+        r'(##[^\n]*(?:論文直接依據|直接依據|直引|Direct.*Evidence)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
         text
     )
     return "\n\n".join(m.strip() for m in matches)
+
+def _translate_to_traditional_chinese(text: str, on_status=None) -> str:
+    """
+    Translate the verified English answer to Traditional Chinese (final step of EN_DRAFT_PIPELINE).
+    Section headers are mapped back to their Chinese equivalents.
+    """
+    import requests as _req
+
+    def _status(msg):
+        if on_status:
+            on_status(msg)
+        else:
+            print(msg)
+
+    _status("\n  🌏 翻譯英文答案為繁體中文...")
+    prompt = (
+        "Translate the following academic answer from English to Traditional Chinese (繁體中文).\n"
+        "Rules:\n"
+        "- Section headers must be translated as follows:\n"
+        "  '## [Direct Paper Evidence]' → '## 【論文直接依據】'\n"
+        "  '## [Cross-Literature Inference]' → '## 【跨文獻推論】'\n"
+        "  '## [Knowledge Extension and Speculation]' → '## 【知識延伸與推測】'\n"
+        "- Paper name labels [Paper Name] → 【Paper Name】 (keep the name itself unchanged)\n"
+        "- Preserve all numbers, units (wt%, °C, rpm, g, mL, h), and chemical formulas exactly.\n"
+        "- Keep label tags unchanged: [Fact N], [Insufficient Evidence], [Unverified], VERIFY_PASS, VERIFY_FAIL.\n"
+        "- Do not add any explanation, preamble, or markdown fence.\n\n"
+        f"Answer to translate:\n{text}"
+    )
+    try:
+        resp = _req.post(
+            f"{cfg.OLLAMA_BASE_URL}/api/generate",
+            json={
+                "model": cfg.SYNTHESIS_MODEL,
+                "system": "You are a professional academic translator specializing in Traditional Chinese (繁體中文).",
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.1, "num_predict": -1, "num_ctx": 65536},
+            },
+            timeout=cfg.LLM_TIMEOUT,
+        )
+        if resp.ok:
+            translated = resp.json().get("response", "").strip()
+            if translated:
+                _status(f"  ✅ 翻譯完成（{len(translated):,} 字元）")
+                return translated
+    except Exception as e:
+        _status(f"  ⚠️  翻譯失敗，保留英文版本：{e}")
+    return text
+
 
 def _clean_for_embed(text: str) -> str:
     """
@@ -636,7 +685,41 @@ def execute_structured_query(
         if cfg.REASONING_MODE == "reasoning":
             # ── 推理模式：允許跨文獻推論與知識延伸，但標注認知層次 ──
             print("  🧠 推理模式（reasoning）：允許跨文獻推論")
-            synthesis_prompt = f"""
+            if cfg.EN_DRAFT_PIPELINE:
+                synthesis_prompt = f"""The following is a list of known facts extracted from academic papers:
+
+{knowledge_base}
+
+{memory_section}
+
+---
+Original question: {question}
+
+Please write a comprehensive answer in English. The answer must be organized into the following three tiers, with each statement clearly attributed to its tier:
+
+## [Direct Paper Evidence]
+Content drawn directly from the papers above.
+Each statement must be labeled with its source as [Paper Name].
+Only state facts explicitly recorded in the papers; do not add any inference.
+
+## [Cross-Literature Inference]
+Conclusions that combine information from multiple papers and are reasonably derivable even if not directly stated.
+Format: "Cross-paper inference (based on [Paper A] and [Paper B]): ..."
+The reasoning must be explained; readers should be able to trace the derivation.
+
+## [Knowledge Extension and Speculation]
+Extrapolations beyond the above papers, based on academic knowledge.
+Format: "Model speculation (insufficient literature basis): ..."
+If the question involves a hypothetical scenario, clearly reason through likely outcomes and state uncertainties.
+
+Key principles:
+- Honesty about epistemic limits is more important than completeness of the answer
+- If the literature is insufficient to support an inference, explicitly state "insufficient literature basis"
+- Speculative content must have academic logical grounding; do not fabricate
+- If a tier has no content, it may be omitted
+"""
+            else:
+                synthesis_prompt = f"""
 以下是從學術論文中整理出的已知事實清單：
 
 {knowledge_base}
@@ -673,7 +756,24 @@ def execute_structured_query(
         else:
             # ── strict 模式：只引用，不推理（原本邏輯）────────────
             print("  📋 嚴格模式（strict）：只引用論文原文")
-            synthesis_prompt = f"""
+            if cfg.EN_DRAFT_PIPELINE:
+                synthesis_prompt = f"""The following are query results for each sub-question:
+
+{knowledge_base}
+
+{memory_section}
+
+---
+Original question: {question}
+
+Based on the above data, write a comprehensive and well-organized synthesized answer in English.
+If there are differences across papers, clearly compare them.
+Only use the content from the above data; do not add your own information.
+Every factual statement must be labeled with its source [Paper Name].
+If a paper's query result indicates it does not address this topic, do not fill the gap with content from other papers; state that this paper has no relevant data.
+"""
+            else:
+                synthesis_prompt = f"""
 以下是針對各子問題的查詢結果：
 
 {knowledge_base}
@@ -705,6 +805,10 @@ def execute_structured_query(
             knowledge_base=knowledge_base,
             on_status=on_status,
         )
+
+    # ── EN_DRAFT_PIPELINE：Stage 5 完成後翻譯為繁體中文 ─────────
+    if cfg.EN_DRAFT_PIPELINE and rag_found_anything:
+        full_text = _translate_to_traditional_chinese(full_text, on_status=on_status)
 
     # ── Citation Grounding + 低分 Fallback 修正 ──────────────────────
     if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything:
@@ -901,7 +1005,41 @@ def execute_structured_query_stream(
         )
         if cfg.REASONING_MODE == "reasoning":
             yield "[STATUS] 🧠 推理模式，LLM 綜合推論中...\n"
-            synthesis_prompt = f"""
+            if cfg.EN_DRAFT_PIPELINE:
+                synthesis_prompt = f"""The following is a list of known facts extracted from academic papers:
+
+{knowledge_base}
+
+{memory_section}
+
+---
+Original question: {question}
+
+Please write a comprehensive answer in English. The answer must be organized into the following three tiers, with each statement clearly attributed to its tier:
+
+## [Direct Paper Evidence]
+Content drawn directly from the papers above.
+Each statement must be labeled with its source as [Paper Name].
+Only state facts explicitly recorded in the papers; do not add any inference.
+
+## [Cross-Literature Inference]
+Conclusions that combine information from multiple papers and are reasonably derivable even if not directly stated.
+Format: "Cross-paper inference (based on [Paper A] and [Paper B]): ..."
+The reasoning must be explained; readers should be able to trace the derivation.
+
+## [Knowledge Extension and Speculation]
+Extrapolations beyond the above papers, based on academic knowledge.
+Format: "Model speculation (insufficient literature basis): ..."
+If the question involves a hypothetical scenario, clearly reason through likely outcomes and state uncertainties.
+
+Key principles:
+- Honesty about epistemic limits is more important than completeness of the answer
+- If the literature is insufficient to support an inference, explicitly state "insufficient literature basis"
+- Speculative content must have academic logical grounding; do not fabricate
+- If a tier has no content, it may be omitted
+"""
+            else:
+                synthesis_prompt = f"""
 以下是從學術論文中整理出的已知事實清單：
 
 {knowledge_base}
@@ -935,7 +1073,24 @@ def execute_structured_query_stream(
 """
         else:
             yield "[STATUS] 📋 嚴格模式，LLM 整理論文內容中...\n"
-            synthesis_prompt = f"""
+            if cfg.EN_DRAFT_PIPELINE:
+                synthesis_prompt = f"""The following are query results for each sub-question:
+
+{knowledge_base}
+
+{memory_section}
+
+---
+Original question: {question}
+
+Based on the above data, write a comprehensive and well-organized synthesized answer in English.
+If there are differences across papers, clearly compare them.
+Only use the content from the above data; do not add your own information.
+Every factual statement must be labeled with its source [Paper Name].
+If a paper's query result indicates it does not address this topic, do not fill the gap with content from other papers; state that this paper has no relevant data.
+"""
+            else:
+                synthesis_prompt = f"""
 以下是針對各子問題的查詢結果：
 
 {knowledge_base}
@@ -974,6 +1129,15 @@ def execute_structured_query_stream(
             full_text = corrected
         else:
             yield "[STATUS] ✅ Stage 5 邏輯驗證通過（VERIFY_PASS），答案無需修正\n"
+
+    # ── EN_DRAFT_PIPELINE：Stage 5 完成後翻譯為繁體中文 ─────────
+    if cfg.EN_DRAFT_PIPELINE and rag_found_anything:
+        yield "[STATUS] 🌏 翻譯英文答案為繁體中文...\n"
+        translated = _translate_to_traditional_chinese(full_text, on_status=on_status)
+        if translated != full_text:
+            yield "\n\n---\n🌏 **繁體中文最終版本：**\n\n"
+            yield translated
+            full_text = translated
 
     # ── Step 5：Citation Grounding + 低分 Fallback 修正 ──────────────
     if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything:

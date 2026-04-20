@@ -282,7 +282,8 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
         return []
 
     # ── 第二步：若啟用翻譯，批次將 hypothesis 翻譯為英文 ───────────────────
-    if cfg.NLI_TRANSLATE_TO_EN:
+    # EN_DRAFT_PIPELINE=True 時 hypothesis 本身已是英文，跳過翻譯步驟
+    if cfg.NLI_TRANSLATE_TO_EN and not cfg.EN_DRAFT_PIPELINE:
         raw_hypotheses = [h for _, h in valid_pairs]
         translated     = _batch_translate_to_en(raw_hypotheses)
         valid_pairs    = [(s, t) for (s, _), t in zip(valid_pairs, translated)]
