@@ -24,7 +24,7 @@ VERIFY_SYSTEM_PROMPT = """
   [推論跳躍]、[前提不存在]、[與事實矛盾]、[推測過度延伸]
   格式：問題類型｜引用或句子內容｜問題說明
 
-完成分析後，至多重複確認一次之後，就直接輸出你的判斷。
+完成分析後直接輸出判斷，不要在回應中重複引用格式規則或指令內容。
 使用繁體中文輸出。
 """
 
@@ -80,7 +80,8 @@ Output format:
   [Logical Leap], [Missing Premise], [Contradicts Facts], [Excessive Speculation]
   Format: IssueType | Quoted sentence or claim | Explanation of the problem
 
-After completing your analysis, confirm at most once more, then output your verdict directly.
+Do NOT repeat the output format rules in your response. Do NOT quote the instructions back.
+Output your verdict immediately after finishing your analysis. One pass only.
 Output in English.
 """
 
