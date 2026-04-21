@@ -114,10 +114,88 @@ def _extract_direct_citation_section(text: str) -> str:
     """
     import re
     matches = re.findall(
-        r'(##[^\n]*(?:論文直接依據|直接依據|直引)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
+        r'(##[^\n]*(?:論文直接依據|直接依據|直引|Direct.*Evidence)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
         text
     )
     return "\n\n".join(m.strip() for m in matches)
+
+
+def _partition_results_by_section(citation_results: list, full_text: str) -> dict:
+    """
+    把 citation_results 依答案 section 分組，避免重複執行 NLI。
+    回傳 {"direct": [...], "inference": [...], "speculation": [...]}
+    各 section 的 key 只有在 section 確實存在且有 sentence 時才出現。
+    """
+    import re
+    from rag.citation_grounding import split_into_sentences
+
+    _SECTION_PATTERNS = {
+        "direct":      r'(##[^\n]*(?:論文直接依據|直接依據|Direct.*Evidence)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
+        "inference":   r'(##[^\n]*(?:跨文獻推論|Cross.*Literature.*Inference)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
+        "speculation": r'(##[^\n]*(?:知識延伸|Knowledge.*Extension)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
+    }
+
+    partitioned = {}
+    for key, pattern in _SECTION_PATTERNS.items():
+        matches = re.findall(pattern, full_text)
+        if not matches:
+            continue
+        section_text = "\n\n".join(m.strip() for m in matches)
+        section_sent_set = set(split_into_sentences(section_text))
+        section_results = [r for r in citation_results if r["sentence"] in section_sent_set]
+        if section_results:
+            partitioned[key] = section_results
+
+    return partitioned
+
+def _translate_to_traditional_chinese(text: str, on_status=None) -> str:
+    """
+    Translate the verified English answer to Traditional Chinese (final step of EN_DRAFT_PIPELINE).
+    Section headers are mapped back to their Chinese equivalents.
+    """
+    import requests as _req
+
+    def _status(msg):
+        if on_status:
+            on_status(msg)
+        else:
+            print(msg)
+
+    _status("\n  🌏 翻譯英文答案為繁體中文...")
+    prompt = (
+        "Translate the following academic answer from English to Traditional Chinese (繁體中文).\n"
+        "Rules:\n"
+        "- Section headers must be translated as follows:\n"
+        "  '## [Direct Paper Evidence]' → '## 【論文直接依據】'\n"
+        "  '## [Cross-Literature Inference]' → '## 【跨文獻推論】'\n"
+        "  '## [Knowledge Extension and Speculation]' → '## 【知識延伸與推測】'\n"
+        "- Paper name labels [Paper Name] → 【Paper Name】 (keep the name itself unchanged)\n"
+        "- Preserve all numbers, units (wt%, °C, rpm, g, mL, h), and chemical formulas exactly.\n"
+        "- Keep label tags unchanged: [Fact N], [Insufficient Evidence], [Unverified], VERIFY_PASS, VERIFY_FAIL.\n"
+        "- Do not add any explanation, preamble, or markdown fence.\n\n"
+        f"Answer to translate:\n{text}"
+    )
+    try:
+        resp = _req.post(
+            f"{cfg.OLLAMA_BASE_URL}/api/generate",
+            json={
+                "model": cfg.SYNTHESIS_MODEL,
+                "system": "You are a professional academic translator specializing in Traditional Chinese (繁體中文).",
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.1, "num_predict": -1, "num_ctx": 65536},
+            },
+            timeout=cfg.LLM_TIMEOUT,
+        )
+        if resp.ok:
+            translated = resp.json().get("response", "").strip()
+            if translated:
+                _status(f"  ✅ 翻譯完成（{len(translated):,} 字元）")
+                return translated
+    except Exception as e:
+        _status(f"  ⚠️  翻譯失敗，保留英文版本：{e}")
+    return text
+
 
 def _clean_for_embed(text: str) -> str:
     """
@@ -527,7 +605,8 @@ def plan_sub_questions(question: str, paper_names: list) -> list:
 def execute_structured_query(
     question: str,
     paper_engines: dict,
-    memory_context: str = ""
+    memory_context: str = "",
+    on_status=None,
 ) -> str:
     """
     StructuredPlanning 主流程：
@@ -540,34 +619,39 @@ def execute_structured_query(
     - 若所有子查詢均未返回有效內容（rag_found_anything = False），
       自動切換為模型自身知識推理，並在回答開頭標注來源說明。
     """
+    def _status(msg):
+        if on_status:
+            on_status(msg)
+        else:
+            print(msg)
+
     all_paper_names = list(paper_engines.keys())
 
     # ── Step 0：先篩選相關論文 ────────────────────────────────────
     detected = detect_target_paper(question, all_paper_names)
     if cfg.REVIEW_MODE:
-        # Review 模式：強制使用所有論文，不篩選
-        print("\n  📖 REVIEW_MODE 已啟用，使用全部論文，跳過篩選")
+        _status("\n  📖 REVIEW_MODE 已啟用，使用全部論文，跳過篩選")
         paper_names = all_paper_names
         paper_engines_to_use = paper_engines
     elif detected:
         paper_names = all_paper_names
         paper_engines_to_use = paper_engines
     else:
-        print("\n  🔎 先篩選相關論文...")
+        _status("\n  🔎 先篩選相關論文...")
         prefiltered = _keyword_prefilter(question, all_paper_names)
         selected_names = select_relevant_papers(question, prefiltered)
         paper_names = selected_names
         paper_engines_to_use = {k: v for k, v in paper_engines.items() if k in selected_names}
 
-    print("\n  📋 拆解子問題中...")
+    _status("\n  📋 拆解子問題中...")
     sub_questions = plan_sub_questions(question, paper_names)
-    print(f"  → 拆出 {len(sub_questions)} 個子問題")
+    _status(f"  → 拆出 {len(sub_questions)} 個子問題")
 
     sub_answers = []
     rag_found_anything = False
 
     # ── Stage 2：並行子查詢 ────────────────────────────────────────
-    print(f"\n  ⚡ 並行檢索 {len(sub_questions)} 個子問題中（workers={cfg.SUBQUERY_MAX_WORKERS}）...")
+    _status(f"\n  ⚡ 並行檢索 {len(sub_questions)} 個子問題中（workers={cfg.SUBQUERY_MAX_WORKERS}）...")
     valid_tasks, prefilled = _build_subquery_tasks(sub_questions, paper_engines_to_use, paper_engines)
     ordered_results = _run_subqueries_parallel(valid_tasks, prefilled)
 
@@ -575,29 +659,29 @@ def execute_structured_query(
         sub_answers.append(f"{label}\n{result}")
         if not _is_empty_result(result):
             rag_found_anything = True
-        print(f"\n  ── {label} 回覆 ──\n  {result[:200]}")
+        _status(f"\n  ── {label} 回覆 ──\n  {result[:200]}")
 
-    # ── 根據 RAG 是否找到內容，決定走哪條 prompt 路徑 ────────────
-    print("\n  🔗 綜合所有子答案中...")
+    _status("\n  🔗 綜合所有子答案中...")
     combined = "\n\n".join(sub_answers)
 
     # ── Stage 3：知識蒸餾 ────────────────────────────────────
     if cfg.SYNTHESIS_ENABLED and rag_found_anything:
-        print("\n  🧪 Stage 3: 知識蒸餾中...")
+        _status("\n  🧪 Stage 3: 知識蒸餾中...")
         synthesis_chunks = [
             {"text": ans, "source": _extract_paper_name(ans, f"retrieved_chunk_{i}")}
             for i, ans in enumerate(sub_answers)
         ]
         knowledge_base = _synthesizer.synthesize(
             chunks=synthesis_chunks,
-            query=question
+            query=question,
+            on_status=on_status,
         )
     else:
         knowledge_base = combined
 
     if not rag_found_anything:
         # ── Fallback：RAG 完全沒找到，切換至模型自身知識 ──────────
-        print("  ℹ️  RAG 資料庫未找到相關內容，切換至模型推理模式...")
+        _status("  ℹ️  RAG 資料庫未找到相關內容，切換至模型推理模式...")
         fallback_notice = (
             "⚠️ **資料來源說明**：本地學術文獻資料庫中未找到與此問題直接相關的內容。"
             "以下回答來自模型自身知識，非論文原文，請謹慎參考並自行查證。\n\n"
@@ -630,7 +714,41 @@ def execute_structured_query(
         if cfg.REASONING_MODE == "reasoning":
             # ── 推理模式：允許跨文獻推論與知識延伸，但標注認知層次 ──
             print("  🧠 推理模式（reasoning）：允許跨文獻推論")
-            synthesis_prompt = f"""
+            if cfg.EN_DRAFT_PIPELINE:
+                synthesis_prompt = f"""The following is a list of known facts extracted from academic papers:
+
+{knowledge_base}
+
+{memory_section}
+
+---
+Original question: {question}
+
+Please write a comprehensive answer in English. The answer must be organized into the following three tiers, with each statement clearly attributed to its tier:
+
+## [Direct Paper Evidence]
+Content drawn directly from the papers above.
+Each statement must be labeled with its source as [Paper Name].
+Only state facts explicitly recorded in the papers; do not add any inference.
+
+## [Cross-Literature Inference]
+Conclusions that combine information from multiple papers and are reasonably derivable even if not directly stated.
+Format: "Cross-paper inference (based on [Paper A] and [Paper B]): ..."
+The reasoning must be explained; readers should be able to trace the derivation.
+
+## [Knowledge Extension and Speculation]
+Extrapolations beyond the above papers, based on academic knowledge.
+Format: "Model speculation (insufficient literature basis): ..."
+If the question involves a hypothetical scenario, clearly reason through likely outcomes and state uncertainties.
+
+Key principles:
+- Honesty about epistemic limits is more important than completeness of the answer
+- If the literature is insufficient to support an inference, explicitly state "insufficient literature basis"
+- Speculative content must have academic logical grounding; do not fabricate
+- If a tier has no content, it may be omitted
+"""
+            else:
+                synthesis_prompt = f"""
 以下是從學術論文中整理出的已知事實清單：
 
 {knowledge_base}
@@ -667,7 +785,24 @@ def execute_structured_query(
         else:
             # ── strict 模式：只引用，不推理（原本邏輯）────────────
             print("  📋 嚴格模式（strict）：只引用論文原文")
-            synthesis_prompt = f"""
+            if cfg.EN_DRAFT_PIPELINE:
+                synthesis_prompt = f"""The following are query results for each sub-question:
+
+{knowledge_base}
+
+{memory_section}
+
+---
+Original question: {question}
+
+Based on the above data, write a comprehensive and well-organized synthesized answer in English.
+If there are differences across papers, clearly compare them.
+Only use the content from the above data; do not add your own information.
+Every factual statement must be labeled with its source [Paper Name].
+If a paper's query result indicates it does not address this topic, do not fill the gap with content from other papers; state that this paper has no relevant data.
+"""
+            else:
+                synthesis_prompt = f"""
 以下是針對各子問題的查詢結果：
 
 {knowledge_base}
@@ -693,13 +828,15 @@ def execute_structured_query(
 
     # ── Stage 5：邏輯自洽驗證 ────────────────────────────────────
     if cfg.VERIFY_ENABLED and rag_found_anything:
-        print("\n  🔍 Stage 5: 邏輯自洽驗證中...")
+        _status("\n  🔍 Stage 5: 邏輯自洽驗證中...")
         full_text = _verifier.verify_and_correct(
             draft_answer=full_text,
-            knowledge_base=knowledge_base
+            knowledge_base=knowledge_base,
+            on_status=on_status,
         )
 
-    # ── Citation Grounding + 低分 Fallback 修正 ──────────────────────
+    # ── Citation Grounding（EN_DRAFT_PIPELINE 時在翻譯前執行，確保 EN vs EN）──
+    nli_report = ""
     if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything:
         try:
             from rag.citation_grounding import (
@@ -717,45 +854,70 @@ def execute_structured_query(
             ]
             citation_results = check_citation_grounding(sentences, chunks)
 
-            # ── Grounding Fallback：只針對【論文直接依據】段落 ──
-            # 推論與知識延伸段落 grounding score 低是預期行為，不觸發修正
-            direct_section = _extract_direct_citation_section(full_text)
-            if direct_section:
-                direct_sentences = split_into_sentences(direct_section)
-                direct_results = check_citation_grounding(direct_sentences, chunks)
-                direct_score = compute_grounding_score(direct_results)
-            else:
-                direct_results = []
-                direct_score = 1.0  # 無直引段落，不觸發 fallback
+            # ── 分段分組（避免重跑 NLI）──────────────────────────────
+            partitioned = _partition_results_by_section(citation_results, full_text)
+            direct_results   = partitioned.get("direct", [])
+            direct_score     = compute_grounding_score(direct_results) if direct_results else 1.0
 
-            grounding_score = compute_grounding_score(citation_results)  # 全文分數供報告用
+            # 建立分段顯示用的 section_scores
+            section_scores = {
+                key: {
+                    "score":       compute_grounding_score(results),
+                    "n_supported": sum(1 for r in results if r["supported"]),
+                    "n_total":     len(results),
+                }
+                for key, results in partitioned.items()
+            }
+
+            grounding_score = compute_grounding_score(citation_results)
             unsupported = [r for r in direct_results if not r["supported"]]
             if unsupported and direct_score < 0.8:
                 print(
                     f"  🔄 [Grounding Fallback] {len(unsupported)} 個陳述依據不足"
                     f"（整體 {grounding_score:.1%}），送回 gemma4 重新引用..."
                 )
-                bad_sentences = "\n".join(
-                    f"- {r['sentence']}（信心度：{r['confidence']:.1%}）"
-                    for r in unsupported
-                )
-                fallback_prompt = (
-                    f"以下陳述在論文中找不到明確依據，請根據「已知事實清單」重新確認：\n\n"
-                    f"{bad_sentences}\n\n"
-                    f"已知事實清單：\n{knowledge_base}\n\n"
-                    f"原始答案：\n{full_text}\n\n"
-                    "請針對上列低依據陳述，在原始答案中找到對應句子並修正：\n"
-                    "- 若事實清單有對應依據：修正引用標注使其精確\n"
-                    "- 若事實清單完全沒有依據：標注 [待確認] 並說明原因\n"
-                    "輸出完整修正後的答案，不要輸出說明或前言。"
-                )
+                if cfg.EN_DRAFT_PIPELINE:
+                    bad_sentences = "\n".join(
+                        f"- {r['sentence']} (confidence: {r['confidence']:.1%})"
+                        for r in unsupported
+                    )
+                    fallback_prompt = (
+                        f"The following statements lack clear evidence in the papers. "
+                        f"Please re-verify them against the Known Facts List:\n\n"
+                        f"{bad_sentences}\n\n"
+                        f"Known Facts List:\n{knowledge_base}\n\n"
+                        f"Original answer:\n{full_text}\n\n"
+                        "For each low-evidence statement, find the corresponding sentence in the original answer and correct it:\n"
+                        "- If the Facts List has supporting evidence: correct the citation to be precise\n"
+                        "- If the Facts List has no supporting evidence: mark it as [Unverified] with a brief reason\n"
+                        "Output the complete corrected answer in English. No preamble or explanation.\n"
+                        "IMPORTANT: Preserve all section headers exactly as they appear "
+                        "(## [Direct Paper Evidence], ## [Cross-Literature Inference], ## [Knowledge Extension and Speculation])."
+                    )
+                    fallback_system = "You are a professional academic answer editor. Output only the corrected answer in English."
+                else:
+                    bad_sentences = "\n".join(
+                        f"- {r['sentence']}（信心度：{r['confidence']:.1%}）"
+                        for r in unsupported
+                    )
+                    fallback_prompt = (
+                        f"以下陳述在論文中找不到明確依據，請根據「已知事實清單」重新確認：\n\n"
+                        f"{bad_sentences}\n\n"
+                        f"已知事實清單：\n{knowledge_base}\n\n"
+                        f"原始答案：\n{full_text}\n\n"
+                        "請針對上列低依據陳述，在原始答案中找到對應句子並修正：\n"
+                        "- 若事實清單有對應依據：修正引用標注使其精確\n"
+                        "- 若事實清單完全沒有依據：標注 [待確認] 並說明原因\n"
+                        "輸出完整修正後的答案，不要輸出說明或前言。"
+                    )
+                    fallback_system = cfg.LLM_SYSTEM_PROMPT
                 try:
                     import requests as _req
                     resp = _req.post(
                         f"{cfg.OLLAMA_BASE_URL}/api/generate",
                         json={
                             "model": cfg.SYNTHESIS_MODEL,
-                            "system": cfg.LLM_SYSTEM_PROMPT,
+                            "system": fallback_system,
                             "prompt": fallback_prompt,
                             "stream": False,
                             "options": {
@@ -771,18 +933,23 @@ def execute_structured_query(
                         if corrected:
                             full_text = corrected
                             print("  ✅ [Grounding Fallback] gemma4 修正完成，重新執行 grounding 審查...")
-                            # 修正後重新做一次 grounding
                             sentences = split_into_sentences(full_text)
                             citation_results = check_citation_grounding(sentences, chunks)
                 except Exception as fe:
                     print(f"  ⚠️  [Grounding Fallback] 修正失敗，保留原答案：{fe}")
 
-            report = format_grounding_report(citation_results)
-            full_text += report
-            print(report)
+            nli_report = format_grounding_report(citation_results, section_scores=section_scores)
+            print(nli_report)
 
         except Exception as e:
             print(f"  ⚠️  答案品質審查失敗（不影響主流程）：{e}")
+
+    # ── EN_DRAFT_PIPELINE：NLI 完成後翻譯為繁體中文 ─────────────
+    if cfg.EN_DRAFT_PIPELINE and rag_found_anything:
+        full_text = _translate_to_traditional_chinese(full_text, on_status=on_status)
+
+    if nli_report:
+        full_text += nli_report
 
     return full_text
 
@@ -794,7 +961,8 @@ def execute_structured_query(
 def execute_structured_query_stream(
     question: str,
     paper_engines: dict,
-    memory_context: str = ""
+    memory_context: str = "",
+    on_status=None,
 ):
     """
     execute_structured_query 的 streaming generator 版本。
@@ -855,7 +1023,8 @@ def execute_structured_query_stream(
         ]
         knowledge_base = _synthesizer.synthesize(
             chunks=synthesis_chunks,
-            query=question
+            query=question,
+            on_status=on_status,
         )
         yield "[STATUS] 📋 事實清單已整理完成\n"
     else:
@@ -892,7 +1061,41 @@ def execute_structured_query_stream(
         )
         if cfg.REASONING_MODE == "reasoning":
             yield "[STATUS] 🧠 推理模式，LLM 綜合推論中...\n"
-            synthesis_prompt = f"""
+            if cfg.EN_DRAFT_PIPELINE:
+                synthesis_prompt = f"""The following is a list of known facts extracted from academic papers:
+
+{knowledge_base}
+
+{memory_section}
+
+---
+Original question: {question}
+
+Please write a comprehensive answer in English. The answer must be organized into the following three tiers, with each statement clearly attributed to its tier:
+
+## [Direct Paper Evidence]
+Content drawn directly from the papers above.
+Each statement must be labeled with its source as [Paper Name].
+Only state facts explicitly recorded in the papers; do not add any inference.
+
+## [Cross-Literature Inference]
+Conclusions that combine information from multiple papers and are reasonably derivable even if not directly stated.
+Format: "Cross-paper inference (based on [Paper A] and [Paper B]): ..."
+The reasoning must be explained; readers should be able to trace the derivation.
+
+## [Knowledge Extension and Speculation]
+Extrapolations beyond the above papers, based on academic knowledge.
+Format: "Model speculation (insufficient literature basis): ..."
+If the question involves a hypothetical scenario, clearly reason through likely outcomes and state uncertainties.
+
+Key principles:
+- Honesty about epistemic limits is more important than completeness of the answer
+- If the literature is insufficient to support an inference, explicitly state "insufficient literature basis"
+- Speculative content must have academic logical grounding; do not fabricate
+- If a tier has no content, it may be omitted
+"""
+            else:
+                synthesis_prompt = f"""
 以下是從學術論文中整理出的已知事實清單：
 
 {knowledge_base}
@@ -926,7 +1129,24 @@ def execute_structured_query_stream(
 """
         else:
             yield "[STATUS] 📋 嚴格模式，LLM 整理論文內容中...\n"
-            synthesis_prompt = f"""
+            if cfg.EN_DRAFT_PIPELINE:
+                synthesis_prompt = f"""The following are query results for each sub-question:
+
+{knowledge_base}
+
+{memory_section}
+
+---
+Original question: {question}
+
+Based on the above data, write a comprehensive and well-organized synthesized answer in English.
+If there are differences across papers, clearly compare them.
+Only use the content from the above data; do not add your own information.
+Every factual statement must be labeled with its source [Paper Name].
+If a paper's query result indicates it does not address this topic, do not fill the gap with content from other papers; state that this paper has no relevant data.
+"""
+            else:
+                synthesis_prompt = f"""
 以下是針對各子問題的查詢結果：
 
 {knowledge_base}
@@ -956,14 +1176,18 @@ def execute_structured_query_stream(
         yield "[STATUS] 🔍 Stage 5: 邏輯自洽驗證中...\n"
         corrected = _verifier.verify_and_correct(
             draft_answer=full_text,
-            knowledge_base=knowledge_base
+            knowledge_base=knowledge_base,
+            on_status=on_status,
         )
         if corrected != full_text:
             yield "\n\n---\n📝 **已根據邏輯自洽驗證修正如下：**\n\n"
             yield corrected
             full_text = corrected
+        else:
+            yield "[STATUS] ✅ Stage 5 邏輯驗證通過（VERIFY_PASS），答案無需修正\n"
 
-    # ── Step 5：Citation Grounding + 低分 Fallback 修正 ──────────────
+    # ── Citation Grounding（EN_DRAFT_PIPELINE 時在翻譯前執行，確保 EN vs EN）──
+    nli_report = ""
     if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything:
         try:
             from rag.citation_grounding import (
@@ -979,15 +1203,20 @@ def execute_structured_query_stream(
             ]
             citation_results = check_citation_grounding(sentences, chunks_data)
 
-            # ── Grounding Fallback：只針對【論文直接依據】段落 ──
-            direct_section = _extract_direct_citation_section(full_text)
-            if direct_section:
-                direct_sentences = split_into_sentences(direct_section)
-                direct_results = check_citation_grounding(direct_sentences, chunks_data)
-                direct_score = compute_grounding_score(direct_results)
-            else:
-                direct_results = []
-                direct_score = 1.0
+            # ── 分段分組（避免重跑 NLI）──────────────────────────────
+            partitioned = _partition_results_by_section(citation_results, full_text)
+            direct_results   = partitioned.get("direct", [])
+            direct_score     = compute_grounding_score(direct_results) if direct_results else 1.0
+
+            # 建立分段顯示用的 section_scores
+            section_scores = {
+                key: {
+                    "score":       compute_grounding_score(results),
+                    "n_supported": sum(1 for r in results if r["supported"]),
+                    "n_total":     len(results),
+                }
+                for key, results in partitioned.items()
+            }
 
             unsupported = [r for r in direct_results if not r["supported"]]
             if unsupported and direct_score < 0.8:
@@ -995,27 +1224,48 @@ def execute_structured_query_stream(
                     f"[STATUS] 🔄 [Grounding Fallback] 直引段落 {len(unsupported)} 個陳述依據不足"
                     f"（直引 {direct_score:.1%}），送回 gemma4 重新引用...\n"
                 )
-                bad_sentences = "\n".join(
-                    f"- {r['sentence']}（信心度：{r['confidence']:.1%}）"
-                    for r in unsupported
-                )
-                fallback_prompt = (
-                    f"以下陳述在論文中找不到明確依據，請根據「已知事實清單」重新確認：\n\n"
-                    f"{bad_sentences}\n\n"
-                    f"已知事實清單：\n{knowledge_base}\n\n"
-                    f"原始答案：\n{full_text}\n\n"
-                    "請針對上列低依據陳述，在原始答案中找到對應句子並修正：\n"
-                    "- 若事實清單有對應依據：修正引用標注使其精確\n"
-                    "- 若事實清單完全沒有依據：標注 [待確認] 並說明原因\n"
-                    "輸出完整修正後的答案，不要輸出說明或前言。"
-                )
+                if cfg.EN_DRAFT_PIPELINE:
+                    bad_sentences = "\n".join(
+                        f"- {r['sentence']} (confidence: {r['confidence']:.1%})"
+                        for r in unsupported
+                    )
+                    fallback_prompt = (
+                        f"The following statements lack clear evidence in the papers. "
+                        f"Please re-verify them against the Known Facts List:\n\n"
+                        f"{bad_sentences}\n\n"
+                        f"Known Facts List:\n{knowledge_base}\n\n"
+                        f"Original answer:\n{full_text}\n\n"
+                        "For each low-evidence statement, find the corresponding sentence in the original answer and correct it:\n"
+                        "- If the Facts List has supporting evidence: correct the citation to be precise\n"
+                        "- If the Facts List has no supporting evidence: mark it as [Unverified] with a brief reason\n"
+                        "Output the complete corrected answer in English. No preamble or explanation.\n"
+                        "IMPORTANT: Preserve all section headers exactly as they appear "
+                        "(## [Direct Paper Evidence], ## [Cross-Literature Inference], ## [Knowledge Extension and Speculation])."
+                    )
+                    fallback_system = "You are a professional academic answer editor. Output only the corrected answer in English."
+                else:
+                    bad_sentences = "\n".join(
+                        f"- {r['sentence']}（信心度：{r['confidence']:.1%}）"
+                        for r in unsupported
+                    )
+                    fallback_prompt = (
+                        f"以下陳述在論文中找不到明確依據，請根據「已知事實清單」重新確認：\n\n"
+                        f"{bad_sentences}\n\n"
+                        f"已知事實清單：\n{knowledge_base}\n\n"
+                        f"原始答案：\n{full_text}\n\n"
+                        "請針對上列低依據陳述，在原始答案中找到對應句子並修正：\n"
+                        "- 若事實清單有對應依據：修正引用標注使其精確\n"
+                        "- 若事實清單完全沒有依據：標注 [待確認] 並說明原因\n"
+                        "輸出完整修正後的答案，不要輸出說明或前言。"
+                    )
+                    fallback_system = cfg.LLM_SYSTEM_PROMPT
                 try:
                     import requests as _req
                     resp = _req.post(
                         f"{cfg.OLLAMA_BASE_URL}/api/generate",
                         json={
                             "model": cfg.SYNTHESIS_MODEL,
-                            "system": cfg.LLM_SYSTEM_PROMPT,
+                            "system": fallback_system,
                             "prompt": fallback_prompt,
                             "stream": False,
                             "options": {
@@ -1036,7 +1286,19 @@ def execute_structured_query_stream(
                 except Exception as fe:
                     yield f"[STATUS] ⚠️ [Grounding Fallback] 修正失敗，保留原答案：{fe}\n"
 
-            report = format_grounding_report(citation_results)
-            yield report
+            nli_report = format_grounding_report(citation_results, section_scores=section_scores)
         except Exception as e:
-            yield f"\n\n⚠️ 答案品質審查失敗：{e}"
+            nli_report = f"\n\n⚠️ 答案品質審查失敗：{e}"
+
+    # ── EN_DRAFT_PIPELINE：NLI 完成後翻譯為繁體中文 ─────────────
+    if cfg.EN_DRAFT_PIPELINE and rag_found_anything:
+        yield "[STATUS] 🌏 翻譯英文答案為繁體中文...\n"
+        translated = _translate_to_traditional_chinese(full_text, on_status=on_status)
+        if translated != full_text:
+            yield "\n\n---\n🌏 **繁體中文最終版本：**\n\n"
+            yield translated
+            full_text = translated
+
+    # NLI 報告在翻譯後輸出
+    if nli_report:
+        yield nli_report

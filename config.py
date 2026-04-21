@@ -10,6 +10,9 @@ PROJECTS_BASE_DIR = "projects"
 
 
 # ── 路徑設定 ──────────────────────────────────────────
+# NOTE: 以下路徑在 module import 時就計算完成（module-level 靜態值）。
+# ACTIVE_PROJECT 切換需重啟 server 才會生效，不支援 runtime 動態切換。
+# 若未來需要 runtime 切換 project，路徑應改為函數：get_papers_dir(project_name)。
 PAPERS_DIR        = f"{PROJECTS_BASE_DIR}/{ACTIVE_PROJECT}/papers"
 INDEX_BASE_DIR    = f"{PROJECTS_BASE_DIR}/{ACTIVE_PROJECT}/index_storage"
 INDEX_CONFIG_PATH = f"{PROJECTS_BASE_DIR}/{ACTIVE_PROJECT}/index_storage/config.json"
@@ -82,6 +85,31 @@ MAX_VERIFY_RETRIES  = 2             # fallback 最多重試幾次
 
 # ── Stage 2：並行子查詢 ────────────────────────────────
 SUBQUERY_MAX_WORKERS = 4   # 並行子查詢的 thread pool 大小
+
+# ── 各 Stage num_ctx 設定 ──────────────────────────────
+# Stage 1（qwen2.5:14b）與 Stage 4（gemma4:31b）透過 LlamaIndex 呼叫，
+# 不支援 per-call num_ctx override，沿用 LLM_CONTEXT_WINDOW / planning_llm context_window。
+STAGE3_NUM_CTX = 16384    # 知識蒸餾（knowledge_synthesizer.py）
+STAGE5_NUM_CTX = 65536    # 邏輯驗證（answer_verifier.py）
+
+# ── Plan-and-Execute 架構開關 ─────────────────────────
+PLAN_EXECUTE_ENABLED = False       # 預設關閉，穩定後開啟
+
+# ── NLI 擴展開關 ──────────────────────────────────────
+NLI_CONTRADICTION_ENABLED = True   # 矛盾偵測（預設開啟）
+NLI_DECOMPOSE_ENABLED = True       # 子命題拆解驗證
+NLI_JOINT_VERIFY_ENABLED = True    # 多來源聯合驗證
+# English-first pipeline：全流程用英文（Stage 4 輸出英文 → Stage 5 英文驗證 → NLI EN-vs-EN → 最後翻譯成繁體中文）
+# 優點：NLI 從跨語言變單語言（大幅提升 entailment 準確度），Verifier 推論邏輯更穩定
+# 注意：開啟後 NLI_TRANSLATE_TO_EN 會自動跳過（draft 已是英文，不需要再翻）
+EN_DRAFT_PIPELINE = True          # True = 英文 draft 全流程（預設關閉）
+
+# 跨語言補償：中文 hypothesis 批次翻譯成英文後再做 NLI
+# EN_DRAFT_PIPELINE=True 時此設定自動無效（draft 本身已是英文）
+# 背景：PDF chunks 為英文，中文 answer 做跨語言 NLI 時短句 entailment 分數偏低；
+#       翻譯後改為 EN-vs-EN 可顯著提升數值型事實句的 entailment 準確度。
+# 注意：開啟後每次 grounding check 增加一次 LLM 批次呼叫（約 5-20s）。
+NLI_TRANSLATE_TO_EN = True        # 翻譯 hypothesis 為英文再送 NLI
 
 # ── 記憶系統設定 ──────────────────────────────────────
 MEMORY_RECALL_N   = 3    # 每次查詢召回幾筆歷史記憶

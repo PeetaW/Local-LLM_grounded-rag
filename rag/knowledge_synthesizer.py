@@ -52,7 +52,8 @@ class KnowledgeSynthesizer:
     def synthesize(
         self,
         chunks: list[dict],
-        query: str = ""
+        query: str = "",
+        on_status=None,
     ) -> str:
         """
         將 chunks 轉化為結構化已知事實清單。
@@ -69,6 +70,12 @@ class KnowledgeSynthesizer:
             f"請將以下論文段落整理為結構化已知事實清單：\n\n"
             f"--- 論文段落開始 ---\n{formatted}\n--- 論文段落結束 ---"
         )
+
+        def _status(msg):
+            if on_status:
+                on_status(msg)
+            else:
+                print(msg)
 
         logger.info(
             "[Synthesizer] Starting: %d chunks (%d chars), query=\"%s\"",
@@ -87,7 +94,7 @@ class KnowledgeSynthesizer:
                     "options": {
                         "temperature": 0.1,
                         "num_predict": 8192,
-                        "num_ctx": 32768,
+                        "num_ctx": cfg.STAGE3_NUM_CTX,
                     }
                 },
                 timeout=self.timeout,
@@ -118,7 +125,7 @@ class KnowledgeSynthesizer:
                 "[Synthesizer] Done: input %d chars → output %d chars (%.1fs)",
                 total_chars, len(result), elapsed
             )
-            print(
+            _status(
                 f"  📋 [Synthesizer] {len(chunks)} chunks → "
                 f"{len(result)} chars ({elapsed:.1f}s)"
             )
@@ -127,7 +134,7 @@ class KnowledgeSynthesizer:
         except Exception as e:
             elapsed = time.time() - t0
             logger.warning("[Synthesizer] FALLBACK: %s (%.1fs)", e, elapsed)
-            print(f"  ⚠️  [Synthesizer] 失敗，使用原始 chunks ({e})")
+            _status(f"  ⚠️  [Synthesizer] 失敗，使用原始 chunks ({e})")
             # Fallback：直接串接原始 chunk text
             return "\n\n".join(
                 f"[Chunk {i+1}] {c.get('text','')}"
