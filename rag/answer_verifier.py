@@ -7,8 +7,7 @@ logger = logging.getLogger(__name__)
 
 VERIFY_SYSTEM_PROMPT = """
 你是一個學術推論驗證器。
-你的任務是針對「跨文獻推論」與「知識延伸與推測」兩個段落，
-以「已知事實清單」為唯一立論基礎，判斷這些推論是否邏輯合理。
+以「已知事實清單」為唯一立論基礎，判斷「跨文獻推論」與「知識延伸與推測」段落的邏輯是否合理。
 
 注意：引用正確性已由其他系統處理，你不需要重新比對引用。
 你的焦點是：
@@ -16,15 +15,6 @@ VERIFY_SYSTEM_PROMPT = """
 2. 從前提到結論的推導是否有邏輯跳躍
 3. 「知識延伸」段落的推測是否超出合理推論範圍，或與事實清單矛盾
 
-你的輸出格式：
-- 若推論整體合理，輸出第一行為：VERIFY_PASS
-  之後不需要其他內容。
-- 若有問題，輸出第一行為：VERIFY_FAIL
-  之後逐條列出發現的問題，每個問題標注類型：
-  [推論跳躍]、[前提不存在]、[與事實矛盾]、[推測過度延伸]
-  格式：問題類型｜引用或句子內容｜問題說明
-
-完成分析後直接輸出判斷，不要在回應中重複引用格式規則或指令內容。
 使用繁體中文輸出。
 """
 
@@ -63,8 +53,8 @@ CORRECTION_SYSTEM_PROMPT = """
 # ── English versions for EN_DRAFT_PIPELINE mode ───────────────────
 VERIFY_SYSTEM_PROMPT_EN = """
 You are an academic reasoning verifier.
-Your task is to examine the "[Cross-Literature Inference]" and "[Knowledge Extension and Speculation]" sections,
-using the "Known Facts List" as the sole evidentiary basis, to determine whether the reasoning is logically sound.
+Examine the "[Cross-Literature Inference]" and "[Knowledge Extension and Speculation]" sections,
+using the "Known Facts List" as the sole evidentiary basis.
 
 Note: Citation accuracy has been handled by another system; you do not need to re-verify citations.
 Your focus is:
@@ -72,16 +62,6 @@ Your focus is:
 2. Whether the reasoning from premises to conclusions contains logical leaps
 3. Whether the speculations in the "Knowledge Extension" section exceed reasonable inference bounds or contradict the Known Facts List
 
-Output format:
-- If the reasoning is overall sound, output VERIFY_PASS on the first line.
-  No further content required.
-- If there are issues, output VERIFY_FAIL on the first line.
-  Then list each issue with its type:
-  [Logical Leap], [Missing Premise], [Contradicts Facts], [Excessive Speculation]
-  Format: IssueType | Quoted sentence or claim | Explanation of the problem
-
-Do NOT repeat the output format rules in your response. Do NOT quote the instructions back.
-Output your verdict immediately after finishing your analysis. One pass only.
 Output in English.
 """
 
@@ -274,13 +254,15 @@ class AnswerVerifier:
             prompt = (
                 f"Known Facts List:\n{knowledge_base}\n\n"
                 f"Draft answer (partial sections):\n{answer_chunk}\n\n"
-                "Please verify each point according to the verification rules."
+                "Verdict: output VERIFY_PASS if reasoning is sound, or VERIFY_FAIL followed by issues "
+                "(format: IssueType | Quoted claim | Explanation). First line must be VERIFY_PASS or VERIFY_FAIL."
             )
         else:
             prompt = (
                 f"已知事實清單：\n{knowledge_base}\n\n"
                 f"初稿回答（部分段落）：\n{answer_chunk}\n\n"
-                "請根據驗證規則逐項檢查。"
+                "判斷：推論整體合理則輸出 VERIFY_PASS，有問題則輸出 VERIFY_FAIL 並逐條說明"
+                "（格式：問題類型｜引用句子｜說明）。第一行必須是 VERIFY_PASS 或 VERIFY_FAIL。"
             )
         try:
             result = self._call_ollama(self.verify_model, active_sys, prompt, on_status=on_status)

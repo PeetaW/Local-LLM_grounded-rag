@@ -141,6 +141,10 @@ def _preprocess_for_nli(text: str) -> str:
     text = re.sub(r'（原文：「[^」]*」）', '', text)
     text = re.sub(r'\[事實\d+\]', '', text)
     text = re.sub(r'\[待確認\]|\[資訊不足\]', '', text)
+    # EN 模式：移除論文 citation ID，如 [1-s2.0-S2214714425005100-main]
+    text = re.sub(r'\[\d+-s[\d.]+-[A-Za-z0-9\-_]+\]', '', text)
+    # 移除 EN 狀態標記
+    text = re.sub(r'\[Unverified\]|\[Insufficient Evidence\]|\[Fact \d+\]', '', text)
     # 移除 markdown 格式
     text = re.sub(r'^\s*\*+\s*', '', text, flags=re.MULTILINE)
     text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
@@ -160,25 +164,49 @@ def _preprocess_for_nli(text: str) -> str:
 
 
 def split_into_sentences(text: str) -> list:
-    # 移除 markdown 粗體與標題符號，保留內容
+    # Step 1：合併 word-wrap 換行（LLM 長句跨行時，continuation line 接在前一行後面）
+    # continuation line 判斷：不以 *、-、#、數字列表、[ 開頭的非空行
+    lines = text.split('\n')
+    joined_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            joined_lines.append('')
+            continue
+        is_new_item = bool(re.match(r'^(\*+\s|-\s|\d+\.\s|\#{1,6}\s|\[)', stripped))
+        if joined_lines and not is_new_item and joined_lines[-1]:
+            joined_lines[-1] = joined_lines[-1] + ' ' + stripped
+        else:
+            joined_lines.append(stripped)
+    text = '\n'.join(joined_lines)
+
+    # Step 2：移除 markdown 粗體與標題符號，保留內容
     text = re.sub(r'\*\*|##|###|【.*?】', '', text)
-    # 只在中文句號／問號／驚嘆號及英文 !? 後切分；
+
+    # Step 3：只在中文句號／問號／驚嘆號及英文 !? 後切分；
     # 不使用 \. 以避免在「0.6」「1.5:1」等數值的小數點處誤切
     sentences = re.split(r'(?<=[。！？\!\?])\s*|\n+', text)
+
     # 最小長度 20 字元，過濾截斷片段與純標點符號行
     sentences = [s.strip() for s in sentences if len(s.strip()) >= 20]
-    # 過濾純標題行（非命題，不送 NLI）：
-    # 1. 數字編號標題：「2. 明膠氣凝膠的角色」（無句末標點）
-    # 2. Bullet 階段標題：「*   第一階段：GEL 碳化氣凝膠的製備」（無句末標點）
-    def _is_title(s: str) -> bool:
-        if re.search(r'[。！？!?]', s):
-            return False  # 有句末標點 → 是正常句子
-        if re.match(r'^\d+\.\s+\S', s):
-            return True   # "2. ..." 格式
+
+    # Step 4：過濾非命題行（不送 NLI）
+    def _is_non_proposition(s: str) -> bool:
+        # 純括號標籤行：[Direct Paper Evidence]、[Cross-Literature Inference] 等
+        if re.match(r'^\[.*\]\s*$', s):
+            return True
+        # 只是子標題標籤（無句末標點且結尾是冒號）
+        if re.search(r'[：:]\s*$', s) and not re.search(r'[。！？!?]', s):
+            return True
+        # 數字編號標題（無句末標點）
+        if re.match(r'^\d+[\.\s]\s*\S', s) and not re.search(r'[。！？!?]', s):
+            return True
+        # Bullet 中文階段標題（無句末標點）
         if re.match(r'^\*\s+第[一二三四五六七八九十百千\d]+[階段步品]', s):
-            return True   # "*   第一階段：..." 格式
+            return True
         return False
-    sentences = [s for s in sentences if not _is_title(s)]
+
+    sentences = [s for s in sentences if not _is_non_proposition(s)]
     return sentences
 
 

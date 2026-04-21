@@ -842,27 +842,46 @@ If a paper's query result indicates it does not address this topic, do not fill 
                     f"  🔄 [Grounding Fallback] {len(unsupported)} 個陳述依據不足"
                     f"（整體 {grounding_score:.1%}），送回 gemma4 重新引用..."
                 )
-                bad_sentences = "\n".join(
-                    f"- {r['sentence']}（信心度：{r['confidence']:.1%}）"
-                    for r in unsupported
-                )
-                fallback_prompt = (
-                    f"以下陳述在論文中找不到明確依據，請根據「已知事實清單」重新確認：\n\n"
-                    f"{bad_sentences}\n\n"
-                    f"已知事實清單：\n{knowledge_base}\n\n"
-                    f"原始答案：\n{full_text}\n\n"
-                    "請針對上列低依據陳述，在原始答案中找到對應句子並修正：\n"
-                    "- 若事實清單有對應依據：修正引用標注使其精確\n"
-                    "- 若事實清單完全沒有依據：標注 [待確認] 並說明原因\n"
-                    "輸出完整修正後的答案，不要輸出說明或前言。"
-                )
+                if cfg.EN_DRAFT_PIPELINE:
+                    bad_sentences = "\n".join(
+                        f"- {r['sentence']} (confidence: {r['confidence']:.1%})"
+                        for r in unsupported
+                    )
+                    fallback_prompt = (
+                        f"The following statements lack clear evidence in the papers. "
+                        f"Please re-verify them against the Known Facts List:\n\n"
+                        f"{bad_sentences}\n\n"
+                        f"Known Facts List:\n{knowledge_base}\n\n"
+                        f"Original answer:\n{full_text}\n\n"
+                        "For each low-evidence statement, find the corresponding sentence in the original answer and correct it:\n"
+                        "- If the Facts List has supporting evidence: correct the citation to be precise\n"
+                        "- If the Facts List has no supporting evidence: mark it as [Unverified] with a brief reason\n"
+                        "Output the complete corrected answer in English. No preamble or explanation."
+                    )
+                    fallback_system = "You are a professional academic answer editor. Output only the corrected answer in English."
+                else:
+                    bad_sentences = "\n".join(
+                        f"- {r['sentence']}（信心度：{r['confidence']:.1%}）"
+                        for r in unsupported
+                    )
+                    fallback_prompt = (
+                        f"以下陳述在論文中找不到明確依據，請根據「已知事實清單」重新確認：\n\n"
+                        f"{bad_sentences}\n\n"
+                        f"已知事實清單：\n{knowledge_base}\n\n"
+                        f"原始答案：\n{full_text}\n\n"
+                        "請針對上列低依據陳述，在原始答案中找到對應句子並修正：\n"
+                        "- 若事實清單有對應依據：修正引用標注使其精確\n"
+                        "- 若事實清單完全沒有依據：標注 [待確認] 並說明原因\n"
+                        "輸出完整修正後的答案，不要輸出說明或前言。"
+                    )
+                    fallback_system = cfg.LLM_SYSTEM_PROMPT
                 try:
                     import requests as _req
                     resp = _req.post(
                         f"{cfg.OLLAMA_BASE_URL}/api/generate",
                         json={
                             "model": cfg.SYNTHESIS_MODEL,
-                            "system": cfg.LLM_SYSTEM_PROMPT,
+                            "system": fallback_system,
                             "prompt": fallback_prompt,
                             "stream": False,
                             "options": {
@@ -1164,27 +1183,46 @@ If a paper's query result indicates it does not address this topic, do not fill 
                     f"[STATUS] 🔄 [Grounding Fallback] 直引段落 {len(unsupported)} 個陳述依據不足"
                     f"（直引 {direct_score:.1%}），送回 gemma4 重新引用...\n"
                 )
-                bad_sentences = "\n".join(
-                    f"- {r['sentence']}（信心度：{r['confidence']:.1%}）"
-                    for r in unsupported
-                )
-                fallback_prompt = (
-                    f"以下陳述在論文中找不到明確依據，請根據「已知事實清單」重新確認：\n\n"
-                    f"{bad_sentences}\n\n"
-                    f"已知事實清單：\n{knowledge_base}\n\n"
-                    f"原始答案：\n{full_text}\n\n"
-                    "請針對上列低依據陳述，在原始答案中找到對應句子並修正：\n"
-                    "- 若事實清單有對應依據：修正引用標注使其精確\n"
-                    "- 若事實清單完全沒有依據：標注 [待確認] 並說明原因\n"
-                    "輸出完整修正後的答案，不要輸出說明或前言。"
-                )
+                if cfg.EN_DRAFT_PIPELINE:
+                    bad_sentences = "\n".join(
+                        f"- {r['sentence']} (confidence: {r['confidence']:.1%})"
+                        for r in unsupported
+                    )
+                    fallback_prompt = (
+                        f"The following statements lack clear evidence in the papers. "
+                        f"Please re-verify them against the Known Facts List:\n\n"
+                        f"{bad_sentences}\n\n"
+                        f"Known Facts List:\n{knowledge_base}\n\n"
+                        f"Original answer:\n{full_text}\n\n"
+                        "For each low-evidence statement, find the corresponding sentence in the original answer and correct it:\n"
+                        "- If the Facts List has supporting evidence: correct the citation to be precise\n"
+                        "- If the Facts List has no supporting evidence: mark it as [Unverified] with a brief reason\n"
+                        "Output the complete corrected answer in English. No preamble or explanation."
+                    )
+                    fallback_system = "You are a professional academic answer editor. Output only the corrected answer in English."
+                else:
+                    bad_sentences = "\n".join(
+                        f"- {r['sentence']}（信心度：{r['confidence']:.1%}）"
+                        for r in unsupported
+                    )
+                    fallback_prompt = (
+                        f"以下陳述在論文中找不到明確依據，請根據「已知事實清單」重新確認：\n\n"
+                        f"{bad_sentences}\n\n"
+                        f"已知事實清單：\n{knowledge_base}\n\n"
+                        f"原始答案：\n{full_text}\n\n"
+                        "請針對上列低依據陳述，在原始答案中找到對應句子並修正：\n"
+                        "- 若事實清單有對應依據：修正引用標注使其精確\n"
+                        "- 若事實清單完全沒有依據：標注 [待確認] 並說明原因\n"
+                        "輸出完整修正後的答案，不要輸出說明或前言。"
+                    )
+                    fallback_system = cfg.LLM_SYSTEM_PROMPT
                 try:
                     import requests as _req
                     resp = _req.post(
                         f"{cfg.OLLAMA_BASE_URL}/api/generate",
                         json={
                             "model": cfg.SYNTHESIS_MODEL,
-                            "system": cfg.LLM_SYSTEM_PROMPT,
+                            "system": fallback_system,
                             "prompt": fallback_prompt,
                             "stream": False,
                             "options": {
