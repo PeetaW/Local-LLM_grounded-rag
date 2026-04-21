@@ -890,7 +890,9 @@ If a paper's query result indicates it does not address this topic, do not fill 
                         "For each low-evidence statement, find the corresponding sentence in the original answer and correct it:\n"
                         "- If the Facts List has supporting evidence: correct the citation to be precise\n"
                         "- If the Facts List has no supporting evidence: mark it as [Unverified] with a brief reason\n"
-                        "Output the complete corrected answer in English. No preamble or explanation."
+                        "Output the complete corrected answer in English. No preamble or explanation.\n"
+                        "IMPORTANT: Preserve all section headers exactly as they appear "
+                        "(## [Direct Paper Evidence], ## [Cross-Literature Inference], ## [Knowledge Extension and Speculation])."
                     )
                     fallback_system = "You are a professional academic answer editor. Output only the corrected answer in English."
                 else:
@@ -1236,7 +1238,9 @@ If a paper's query result indicates it does not address this topic, do not fill 
                         "For each low-evidence statement, find the corresponding sentence in the original answer and correct it:\n"
                         "- If the Facts List has supporting evidence: correct the citation to be precise\n"
                         "- If the Facts List has no supporting evidence: mark it as [Unverified] with a brief reason\n"
-                        "Output the complete corrected answer in English. No preamble or explanation."
+                        "Output the complete corrected answer in English. No preamble or explanation.\n"
+                        "IMPORTANT: Preserve all section headers exactly as they appear "
+                        "(## [Direct Paper Evidence], ## [Cross-Literature Inference], ## [Knowledge Extension and Speculation])."
                     )
                     fallback_system = "You are a professional academic answer editor. Output only the corrected answer in English."
                 else:
