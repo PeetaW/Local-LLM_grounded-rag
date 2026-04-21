@@ -160,6 +160,9 @@ def _preprocess_for_nli(text: str) -> str:
     text = re.sub(r'[：:]\s*$', '', text)
     # 整理空白
     text = re.sub(r'\s+', ' ', text).strip()
+    # 清洗後太短（< 15 字元）→ 跳過，避免孤立數值/標籤送進 NLI 產生誤判
+    if len(text) < 15:
+        return ""
     return text
 
 
@@ -339,20 +342,35 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
             except Exception:
                 continue
 
+        # ── 升級一：多來源聯合驗證（NLI_JOINT_VERIFY_ENABLED）────────────
+        # 個別 chunk 都不夠支撐，但 top-3 合併後可以 → INFERENCE_BRIDGE
+        is_bridge = False
+        if best_entail < 0.5 and cfg.NLI_JOINT_VERIFY_ENABLED:
+            joint = joint_verify(hypothesis, chunks)
+            if joint["is_inference_bridge"]:
+                is_bridge = True
+                print(f"  [NLI-bridge] joint_score={joint['joint_score']:.3f} → INFERENCE_BRIDGE")
+
+        # ── 升級二：子命題拆解驗證（NLI_DECOMPOSE_ENABLED）──────────────
+        # 長句整句 NLI 不過，拆成子命題分別驗後全通過 → 視為 SUPPORTED
+        if best_entail < 0.5 and not is_bridge and cfg.NLI_DECOMPOSE_ENABLED:
+            decomp = decompose_and_verify(hypothesis, chunks)
+            if decomp["chain_complete"] and decomp["sub_claims"]:
+                best_entail = 0.7  # 合成分數，標記為有效支撐
+                print(f"  [NLI-decomp] chain_complete → upgrade to SUPPORTED")
+
         # contradiction 只看 best-entailment chunk 自己的 c 分數：
         # 若最支持這句話的 chunk 本身也高度矛盾，才算真正的 CONFLICT；
-        # 其他 chunk 的矛盾訊號屬於論文內部不同脈絡，不能歸咎於這句 hypothesis。
-        #
-        # 額外門檻：best_entail < 0.25 時，該 chunk 本身就不具代表性，
-        # 其 contradiction 分數是雜訊而非真實矛盾訊號，不應觸發 CONFLICT。
-        # （對根本沒有立論基礎的 chunk 討論矛盾，在邏輯上不成立）
+        # 額外門檻：best_entail < 0.25 時 contradiction 分數是雜訊，不觸發 CONFLICT
         contradiction_detected = (
             cfg.NLI_CONTRADICTION_ENABLED
             and best_entail >= 0.25
             and best_entail_c > 0.7
         )
 
-        if best_entail >= 0.5:
+        if is_bridge:
+            status = "INFERENCE_BRIDGE"
+        elif best_entail >= 0.5:
             status = "CONFLICT" if contradiction_detected else "SUPPORTED"
         else:
             status = "CONFLICT" if contradiction_detected else "UNSUPPORTED"
@@ -365,7 +383,7 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
 
         results.append({
             "sentence": sentence,
-            "supported": best_entail >= 0.5,
+            "supported": best_entail >= 0.5 or is_bridge,
             "confidence": round(best_entail, 3),
             "best_chunk": best_chunk_id,
             "contradiction_detected": contradiction_detected,
@@ -384,30 +402,75 @@ def compute_grounding_score(citation_results: list) -> float:
     """
     if not citation_results:
         return 1.0  # 沒有句子，預設通過
-    supported = sum(1 for r in citation_results if r["supported"])
+    supported = sum(1 for r in citation_results if r["supported"] or r.get("status") == "INFERENCE_BRIDGE")
     return round(supported / len(citation_results), 3)
 
 
-def format_grounding_report(citation_results: list) -> str:
+def format_grounding_report(citation_results: list, section_scores: dict | None = None) -> str:
     """
-    移除 hallucination_score 參數，改用 citation grounding 結果產生報告。
-    同時在報告末尾附上整體依據率，供 api.py 解析品質門檻用。
+    產生答案品質報告。
+    section_scores 格式（可選）：
+      {
+        "direct":      {"score": float, "n_supported": int, "n_total": int},
+        "inference":   {"score": float, "n_supported": int, "n_total": int},
+        "speculation": {"score": float, "n_supported": int, "n_total": int},
+      }
+    有 section_scores 時顯示分段依據率；direct_score 作為品質門檻依據。
+    沒有時退回整體依據率（向下相容）。
     """
     lines = ["\n\n---", "📋 **答案品質報告**\n"]
 
-    grounding_score = compute_grounding_score(citation_results)
+    _SECTION_LABELS = {
+        "direct":      "【論文直接依據】",
+        "inference":   "【跨文獻推論】",
+        "speculation": "【知識延伸推測】",
+    }
+    _SECTION_NOTES = {
+        "inference":   "  ← 跨論文推論，低分為預期範圍",
+        "speculation": "  ← 知識延伸推測，低分為預期範圍",
+    }
 
-    if grounding_score >= 0.8:
-        emoji = "✅"
-        label = "高（答案高度忠實於論文內容）"
-    elif grounding_score >= 0.5:
-        emoji = "⚠️"
-        label = "中（部分陳述需要確認）"
+    def _score_emoji(score: float) -> str:
+        if score >= 0.8: return "✅"
+        if score >= 0.5: return "⚠️"
+        return "❌"
+
+    if section_scores:
+        # ── 分段依據率顯示 ───────────────────────────────────
+        direct_info   = section_scores.get("direct")
+        primary_score = direct_info["score"] if direct_info else compute_grounding_score(citation_results)
+
+        if primary_score >= 0.8:
+            overall_label = "高（直接引用高度忠實於論文）"
+        elif primary_score >= 0.5:
+            overall_label = "中（部分直引陳述需確認）"
+        else:
+            overall_label = "低（建議縮小問題範圍）"
+
+        lines.append("📊 **分段論文依據率：**\n")
+        for key in ("direct", "inference", "speculation"):
+            info = section_scores.get(key)
+            if info is None:
+                continue
+            emoji = _score_emoji(info["score"])
+            label = _SECTION_LABELS.get(key, key)
+            note  = _SECTION_NOTES.get(key, "")
+            lines.append(
+                f"  {emoji} {label}：{info['score']:.1%}"
+                f"（{info['n_supported']}/{info['n_total']} 句）{note}"
+            )
+        lines.append(f"\n{_score_emoji(primary_score)} **直引依據率**：{primary_score:.1%}　{overall_label}\n")
     else:
-        emoji = "❌"
-        label = "低（建議重新查詢或縮小問題範圍）"
-
-    lines.append(f"{emoji} **整體論文依據率**：{grounding_score:.1%}　{label}\n")
+        # ── fallback：無 section 資訊，顯示整體依據率 ────────
+        grounding_score = compute_grounding_score(citation_results)
+        primary_score   = grounding_score
+        if grounding_score >= 0.8:
+            emoji, label = "✅", "高（答案高度忠實於論文內容）"
+        elif grounding_score >= 0.5:
+            emoji, label = "⚠️", "中（部分陳述需要確認）"
+        else:
+            emoji, label = "❌", "低（建議重新查詢或縮小問題範圍）"
+        lines.append(f"{emoji} **整體論文依據率**：{grounding_score:.1%}　{label}\n")
 
     # ── 矛盾偵測摘要 ──────────────────────────────────
     if cfg.NLI_CONTRADICTION_ENABLED:
@@ -419,7 +482,7 @@ def format_grounding_report(citation_results: list) -> str:
                 lines.append(f"- [CONFLICT] {r['sentence']}{src}")
             lines.append("")
 
-    unsupported = [r for r in citation_results if not r["supported"] and r.get("status") != "CONFLICT"]
+    unsupported = [r for r in citation_results if not r["supported"] and r.get("status") not in ("CONFLICT", "INFERENCE_BRIDGE")]
     if not unsupported and not [r for r in citation_results if r.get("status") == "CONFLICT"]:
         lines.append("✅ **所有陳述均有論文依據**\n")
     elif unsupported:
@@ -430,8 +493,8 @@ def format_grounding_report(citation_results: list) -> str:
             chunk_info = f"，最近似來源：{r['best_chunk']}" if r.get("best_chunk") else ""
             lines.append(f"- {r['sentence']}（信心度：{r['confidence']:.1%}{chunk_info}）")
 
-    # ★ 附上機器可解析的分數，供 api.py 的品質門檻使用
-    lines.append(f"\n<!-- grounding_score={grounding_score:.3f} -->")
+    # ★ 附上機器可解析的分數，供 api.py 的品質門檻使用（用直引分數，語義最準確）
+    lines.append(f"\n<!-- grounding_score={primary_score:.3f} -->")
     lines.append("---")
     return "\n".join(lines)
 
@@ -551,11 +614,19 @@ def decompose_and_verify(conclusion: str, facts: list[dict]) -> dict:
     import json as _json
 
     # ── Step 1：呼叫 LLM 拆解子命題 ──────────────────────────
-    prompt = (
-        f"請將以下結論句子拆解成 2-4 個獨立的子命題，每個子命題應能獨立被文獻支撐或反駁。\n"
-        f"只輸出 JSON 陣列，格式：[\"子命題1\", \"子命題2\", ...]\n\n"
-        f"結論：{conclusion}"
-    )
+    if cfg.EN_DRAFT_PIPELINE:
+        prompt = (
+            f"Decompose the following conclusion into 2-4 independent sub-claims, "
+            f"each of which can be independently supported or refuted by literature.\n"
+            f"Output ONLY a JSON array: [\"sub-claim 1\", \"sub-claim 2\", ...]\n\n"
+            f"Conclusion: {conclusion}"
+        )
+    else:
+        prompt = (
+            f"請將以下結論句子拆解成 2-4 個獨立的子命題，每個子命題應能獨立被文獻支撐或反駁。\n"
+            f"只輸出 JSON 陣列，格式：[\"子命題1\", \"子命題2\", ...]\n\n"
+            f"結論：{conclusion}"
+        )
     try:
         resp = _req.post(
             f"{cfg.OLLAMA_BASE_URL}/api/generate",

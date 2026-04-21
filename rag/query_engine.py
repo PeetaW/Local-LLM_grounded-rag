@@ -119,6 +119,35 @@ def _extract_direct_citation_section(text: str) -> str:
     )
     return "\n\n".join(m.strip() for m in matches)
 
+
+def _partition_results_by_section(citation_results: list, full_text: str) -> dict:
+    """
+    把 citation_results 依答案 section 分組，避免重複執行 NLI。
+    回傳 {"direct": [...], "inference": [...], "speculation": [...]}
+    各 section 的 key 只有在 section 確實存在且有 sentence 時才出現。
+    """
+    import re
+    from rag.citation_grounding import split_into_sentences
+
+    _SECTION_PATTERNS = {
+        "direct":      r'(##[^\n]*(?:論文直接依據|直接依據|Direct.*Evidence)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
+        "inference":   r'(##[^\n]*(?:跨文獻推論|Cross.*Literature.*Inference)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
+        "speculation": r'(##[^\n]*(?:知識延伸|Knowledge.*Extension)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
+    }
+
+    partitioned = {}
+    for key, pattern in _SECTION_PATTERNS.items():
+        matches = re.findall(pattern, full_text)
+        if not matches:
+            continue
+        section_text = "\n\n".join(m.strip() for m in matches)
+        section_sent_set = set(split_into_sentences(section_text))
+        section_results = [r for r in citation_results if r["sentence"] in section_sent_set]
+        if section_results:
+            partitioned[key] = section_results
+
+    return partitioned
+
 def _translate_to_traditional_chinese(text: str, on_status=None) -> str:
     """
     Translate the verified English answer to Traditional Chinese (final step of EN_DRAFT_PIPELINE).
@@ -825,15 +854,20 @@ If a paper's query result indicates it does not address this topic, do not fill 
             ]
             citation_results = check_citation_grounding(sentences, chunks)
 
-            # ── Grounding Fallback：只針對【論文直接依據】段落 ──
-            direct_section = _extract_direct_citation_section(full_text)
-            if direct_section:
-                direct_sentences = split_into_sentences(direct_section)
-                direct_results = check_citation_grounding(direct_sentences, chunks)
-                direct_score = compute_grounding_score(direct_results)
-            else:
-                direct_results = []
-                direct_score = 1.0
+            # ── 分段分組（避免重跑 NLI）──────────────────────────────
+            partitioned = _partition_results_by_section(citation_results, full_text)
+            direct_results   = partitioned.get("direct", [])
+            direct_score     = compute_grounding_score(direct_results) if direct_results else 1.0
+
+            # 建立分段顯示用的 section_scores
+            section_scores = {
+                key: {
+                    "score":       compute_grounding_score(results),
+                    "n_supported": sum(1 for r in results if r["supported"]),
+                    "n_total":     len(results),
+                }
+                for key, results in partitioned.items()
+            }
 
             grounding_score = compute_grounding_score(citation_results)
             unsupported = [r for r in direct_results if not r["supported"]]
@@ -902,7 +936,7 @@ If a paper's query result indicates it does not address this topic, do not fill 
                 except Exception as fe:
                     print(f"  ⚠️  [Grounding Fallback] 修正失敗，保留原答案：{fe}")
 
-            nli_report = format_grounding_report(citation_results)
+            nli_report = format_grounding_report(citation_results, section_scores=section_scores)
             print(nli_report)
 
         except Exception as e:
@@ -1167,15 +1201,20 @@ If a paper's query result indicates it does not address this topic, do not fill 
             ]
             citation_results = check_citation_grounding(sentences, chunks_data)
 
-            # ── Grounding Fallback：只針對【論文直接依據】段落 ──
-            direct_section = _extract_direct_citation_section(full_text)
-            if direct_section:
-                direct_sentences = split_into_sentences(direct_section)
-                direct_results = check_citation_grounding(direct_sentences, chunks_data)
-                direct_score = compute_grounding_score(direct_results)
-            else:
-                direct_results = []
-                direct_score = 1.0
+            # ── 分段分組（避免重跑 NLI）──────────────────────────────
+            partitioned = _partition_results_by_section(citation_results, full_text)
+            direct_results   = partitioned.get("direct", [])
+            direct_score     = compute_grounding_score(direct_results) if direct_results else 1.0
+
+            # 建立分段顯示用的 section_scores
+            section_scores = {
+                key: {
+                    "score":       compute_grounding_score(results),
+                    "n_supported": sum(1 for r in results if r["supported"]),
+                    "n_total":     len(results),
+                }
+                for key, results in partitioned.items()
+            }
 
             unsupported = [r for r in direct_results if not r["supported"]]
             if unsupported and direct_score < 0.8:
@@ -1243,7 +1282,7 @@ If a paper's query result indicates it does not address this topic, do not fill 
                 except Exception as fe:
                     yield f"[STATUS] ⚠️ [Grounding Fallback] 修正失敗，保留原答案：{fe}\n"
 
-            nli_report = format_grounding_report(citation_results)
+            nli_report = format_grounding_report(citation_results, section_scores=section_scores)
         except Exception as e:
             nli_report = f"\n\n⚠️ 答案品質審查失敗：{e}"
 
