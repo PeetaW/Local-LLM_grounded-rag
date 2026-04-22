@@ -52,8 +52,8 @@ def _run_nli(premise: str, hypothesis: str) -> dict:
 
     model, tokenizer, label_map = _get_nli_model()
     inputs = tokenizer(
-        premise[:512], hypothesis[:256],
-        return_tensors="pt", truncation=True, max_length=512,
+        premise, hypothesis,
+        return_tensors="pt", truncation="only_first", max_length=512,
     )
     device = next(model.parameters()).device
     inputs = {k: v.to(device) for k, v in inputs.items()}

@@ -3,6 +3,7 @@
 
 import os
 import sys
+import shutil
 from llama_index.core import (
     VectorStoreIndex,
     StorageContext,
@@ -64,6 +65,23 @@ def load_or_build_index(pdf_file: str):
     return index
 
 
+def _cleanup_orphan_indexes(existing_paper_names: set):
+    """
+    刪除 index_storage/ 中沒有對應 PDF 的孤兒索引目錄。
+    """
+    if not os.path.isdir(cfg.INDEX_BASE_DIR):
+        return
+    skip = {os.path.basename(cfg.INDEX_CONFIG_PATH).replace(".json", ""), ".gitkeep"}
+    for entry in os.listdir(cfg.INDEX_BASE_DIR):
+        entry_path = os.path.join(cfg.INDEX_BASE_DIR, entry)
+        if not os.path.isdir(entry_path):
+            continue
+        if entry in existing_paper_names or entry in skip:
+            continue
+        print(f"  🗑️  刪除孤兒索引（對應 PDF 已移除）：{entry}")
+        shutil.rmtree(entry_path)
+
+
 def load_all_papers():
     """
     掃描 papers/ 資料夾，對每篇 PDF 建立或載入索引。
@@ -72,6 +90,8 @@ def load_all_papers():
     pdf_files = sorted([
         f for f in os.listdir(cfg.PAPERS_DIR) if f.endswith(".pdf")
     ])
+    paper_names = {f.replace(".pdf", "") for f in pdf_files}
+    _cleanup_orphan_indexes(paper_names)
     print(f"找到 {len(pdf_files)} 篇論文，開始建立索引...\n")
 
     indexes = {}

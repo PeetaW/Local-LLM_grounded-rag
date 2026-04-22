@@ -5,7 +5,7 @@
 # ══════════════════════════════════════════════════════
 
 # ── Project 設定 ───────────────────────────────────────
-ACTIVE_PROJECT = "zvi"   # ← 切換 project 改這裡
+ACTIVE_PROJECT = "boron_bnct"   # ← 切換 project 改這裡
 PROJECTS_BASE_DIR = "projects"
 
 
