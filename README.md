@@ -126,6 +126,7 @@ Pull the following models before running:
 ollama pull gemma4:31b          # Stage 3 synthesis + Stage 4 generation + Stage 5 correction
 ollama pull qwen3.5:35b-a3b     # Stage 5 verification (thinking model)
 ollama pull qwen2.5:14b         # Paper selection + sub-question planning
+ollama pull qwen3-vl:32b        # Vision-language figure analysis
 ollama pull bge-m3              # Embedding model
 ```
 
@@ -187,6 +188,18 @@ python scripts/test_query.py
 ```
 
 Edit the `questions` list in [scripts/test_query.py](scripts/test_query.py) to change your queries.
+
+### Re-scan failed VL images
+
+If a paper has figures that failed VL analysis (shown as warnings on startup), re-run only those images without affecting other indexes:
+
+```bash
+python main.py --rerun-vl <paper_name>
+# Example:
+python main.py --rerun-vl 41467_2024_Article_45464
+```
+
+If any images are fixed, the paper's index is automatically rebuilt. If you manually deleted a problem image file beforehand, it will be marked as `skipped` and removed from the warning list.
 
 ### API server + Open WebUI
 
@@ -290,6 +303,12 @@ All parameters are centralized in `config.py`:
 | `SIMILARITY_TOP_K` | `8` | Candidates per retrieval method |
 | `RERANKER_TOP_N` | `8` | Final chunks after reranking |
 
+| `VL_AUTO_RUN` | `True` | Auto-run VL analysis on new PDFs |
+| `CONTEXT_SUMMARY_ENABLED` | `True` | Generate LLM summary header per chunk |
+| `EN_DRAFT_PIPELINE` | `True` | Full English draft pipeline (improves NLI accuracy) |
+| `NLI_TRANSLATE_TO_EN` | `True` | Translate hypotheses to English before NLI |
+| `NLI_CONTRADICTION_ENABLED` | `True` | Enable contradiction detection |
+
 > ⚠️ If you change `CHUNK_SIZE`, `CHUNK_OVERLAP`, or `EMBED_MODEL`, delete `projects/<project>/index_storage/` and re-run to rebuild the index.
 
 ---
@@ -390,6 +409,7 @@ All parameters are centralized in `config.py`:
 ollama pull gemma4:31b          # Stage 3 蒸餾 + Stage 4 生成 + Stage 5 修正
 ollama pull qwen3.5:35b-a3b     # Stage 5 驗證（思考型模型）
 ollama pull qwen2.5:14b         # 論文篩選 + 子問題規劃
+ollama pull qwen3-vl:32b        # 視覺語言圖表分析
 ollama pull bge-m3              # Embedding 模型
 ```
 
@@ -451,6 +471,18 @@ python scripts/test_query.py
 ```
 
 在 [scripts/test_query.py](scripts/test_query.py) 中修改 `questions` 清單來更換測試問題。
+
+### 重新掃描失敗的 VL 圖片
+
+若某篇論文有 VL 分析失敗的圖片（啟動時會顯示警告），可只重新掃描失敗的圖片，不影響其他已建好的索引：
+
+```bash
+python main.py --rerun-vl <論文名稱>
+# 範例：
+python main.py --rerun-vl 41467_2024_Article_45464
+```
+
+若有圖片修復成功，該論文的索引會自動重建。若事先手動刪除了有問題的圖片檔案，系統會將其標記為 `skipped`，從警告清單中移除。
 
 ### API server + Open WebUI
 
@@ -553,5 +585,11 @@ rag_project/
 | `CHUNK_SIZE` | `1024` | 每個 chunk 的 token 數 |
 | `SIMILARITY_TOP_K` | `8` | 每種檢索方法的候選數量 |
 | `RERANKER_TOP_N` | `8` | Rerank 後保留的 chunk 數 |
+
+| `VL_AUTO_RUN` | `True` | 新增 PDF 時自動執行 VL 圖表分析 |
+| `CONTEXT_SUMMARY_ENABLED` | `True` | 為每個 chunk 生成 LLM 摘要標頭 |
+| `EN_DRAFT_PIPELINE` | `True` | 全英文 draft 流程（提升 NLI 準確度） |
+| `NLI_TRANSLATE_TO_EN` | `True` | NLI 前將 hypothesis 翻譯為英文 |
+| `NLI_CONTRADICTION_ENABLED` | `True` | 啟用矛盾偵測 |
 
 > ⚠️ 若修改 `CHUNK_SIZE`、`CHUNK_OVERLAP` 或 `EMBED_MODEL`，請刪除 `projects/<project>/index_storage/` 後重新執行以重建索引。
