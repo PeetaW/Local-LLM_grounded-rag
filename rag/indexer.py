@@ -12,7 +12,7 @@ from llama_index.core import (
 
 import config as cfg
 from rag.pdf_loader import load_pdf_with_pymupdf
-from rag.vl_processor import needs_vl_analysis, run_vl_analysis
+from rag.vl_processor import needs_vl_analysis, run_vl_analysis, has_failed_vl_images, rerun_failed_vl, backfill_needs_review
 from rag.metadata_manager import ensure_metadata
 from rag.chunk_summarizer import add_summaries_to_nodes
 from llama_index.core.node_parser import SentenceSplitter
@@ -101,7 +101,39 @@ def load_all_papers():
         indexes[paper_name] = index
         print(f"  ✓ 完成：{pdf_file}")
 
+    # 補丁：修正舊版 JSON 中漏標的失敗圖片
+    for pdf_file in pdf_files:
+        n = backfill_needs_review(pdf_file.replace(".pdf", ""))
+        if n:
+            print(f"  🔧 補標 {n} 張舊版漏標失敗圖片：{pdf_file}")
+
+    # 啟動時彙整所有待審查圖片，提醒使用者
+    pending = {
+        f.replace(".pdf", ""): has_failed_vl_images(f.replace(".pdf", ""))
+        for f in pdf_files
+    }
+    pending_papers = [name for name, has_failed in pending.items() if has_failed]
+    if pending_papers:
+        print("\n" + "="*60)
+        print("⚠️  以下論文有 VL 解析失敗的圖片，建議人工審查：")
+        for name in pending_papers:
+            print(f"   - {name}")
+        print("💡 執行 python main.py --rerun-vl <paper_name> 重新掃描")
+        print("="*60 + "\n")
+
     return pdf_files, indexes
+
+
+def reindex_paper(pdf_file: str) -> object:
+    """
+    刪除並重建單篇論文的 index（用於 VL 重掃後更新索引內容）。
+    """
+    paper_name = pdf_file.replace(".pdf", "")
+    index_dir = os.path.join(cfg.INDEX_BASE_DIR, paper_name)
+    if os.path.exists(index_dir):
+        shutil.rmtree(index_dir)
+        print(f"  🗑️  已刪除舊索引：{paper_name}")
+    return load_or_build_index(pdf_file)
 
 
 # ── 新增在 indexer.py 最底部 ──────────────────────────

@@ -11,15 +11,31 @@ import fitz  # PyMuPDF
 import config as cfg
 
 
+def _vl_result_path(paper_name: str) -> str:
+    return os.path.join(cfg.VL_OUTPUT_DIR, paper_name, "vl_test_result.json")
+
+
 def needs_vl_analysis(paper_name: str) -> bool:
     """
-    檢查這篇論文是否需要跑 VL 分析。
-    條件：vl_test_output/{paper_name}/vl_test_result.json 不存在
+    檢查這篇論文是否需要跑全量 VL 分析（JSON 不存在）。
     """
-    vl_result_path = os.path.join(
-        cfg.VL_OUTPUT_DIR, paper_name, "vl_test_result.json"
-    )
-    return not os.path.exists(vl_result_path)
+    return not os.path.exists(_vl_result_path(paper_name))
+
+
+def get_failed_vl_images(paper_name: str) -> list:
+    """
+    回傳 vl_test_result.json 中所有 needs_review=True 的圖片 entry。
+    """
+    path = _vl_result_path(paper_name)
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return [img for img in data.get("images", []) if img.get("needs_review") and not img.get("skipped")]
+
+
+def has_failed_vl_images(paper_name: str) -> bool:
+    return bool(get_failed_vl_images(paper_name))
 
 
 def extract_images_from_pdf(pdf_path: str, output_dir: str) -> list:
@@ -131,11 +147,14 @@ def run_vl_analysis(pdf_path: str) -> bool:
         print(f"  🖼️  分析圖片 [{i}/{len(images)}]：{img_info['filename']}")
         description = analyze_image_with_vl(img_info["path"], paper_name)
 
+        failed = not bool(description)
+        if failed:
+            print(f"  ❌ 圖片解析失敗，已標記待人工審查：{img_info['filename']}")
         results.append({
             "filename": img_info["filename"],
             "page": img_info["page"],
-            "success": bool(description),
-            "needs_review": False,
+            "success": not failed,
+            "needs_review": failed,
             "description": description,
         })
 
@@ -143,5 +162,91 @@ def run_vl_analysis(pdf_path: str) -> bool:
     with open(vl_result_path, "w", encoding="utf-8") as f:
         json.dump({"images": results}, f, ensure_ascii=False, indent=2)
 
-    print(f"  ✅ VL 分析完成，共 {len(results)} 張圖片描述已儲存")
+    failed = [r for r in results if r["needs_review"]]
+    if failed:
+        print(f"  ✅ VL 分析完成，共 {len(results)} 張圖片")
+        print(f"  ⚠️  {len(failed)} 張圖片解析失敗，需人工審查：")
+        for r in failed:
+            print(f"       - {r['filename']} (第 {r['page']} 頁)")
+        print(f"  💡 執行 python main.py --rerun-vl {paper_name} 可重新掃描失敗圖片")
+    else:
+        print(f"  ✅ VL 分析完成，共 {len(results)} 張圖片描述已儲存")
     return True
+
+
+def backfill_needs_review(paper_name: str) -> int:
+    """
+    補丁函數：修正舊版 JSON 中 success=False 但 needs_review=False 的漏標問題。
+    回傳補標的圖片數量。
+    """
+    path = _vl_result_path(paper_name)
+    if not os.path.exists(path):
+        return 0
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    images = data.get("images", [])
+    fixed = 0
+    for img in images:
+        if not img.get("success") and not img.get("needs_review"):
+            img["needs_review"] = True
+            fixed += 1
+    if fixed:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"images": images}, f, ensure_ascii=False, indent=2)
+    return fixed
+
+
+def rerun_failed_vl(pdf_path: str) -> int:
+    """
+    只重新分析 needs_review=True 的失敗圖片，更新 JSON。
+    回傳成功修復的圖片數量。
+    若有任何圖片從失敗變成成功，呼叫端應重建該論文的 index。
+    """
+    pdf_filename = os.path.basename(pdf_path)
+    paper_name = pdf_filename.replace(".pdf", "")
+    vl_result_path = _vl_result_path(paper_name)
+
+    if not os.path.exists(vl_result_path):
+        print(f"  ⚠️  找不到 VL 結果檔，請先執行完整 VL 分析")
+        return 0
+
+    with open(vl_result_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    images = data.get("images", [])
+    failed = [img for img in images if img.get("needs_review")]
+    if not failed:
+        print(f"  ✅ {paper_name} 沒有待審查的圖片")
+        return 0
+
+    print(f"  🔄 重新分析 {len(failed)} 張失敗圖片...")
+    vl_output_dir = os.path.join(cfg.VL_OUTPUT_DIR, paper_name)
+    fixed = 0
+
+    for img in images:
+        if not img.get("needs_review"):
+            continue
+        img_path = os.path.join(vl_output_dir, img["filename"])
+        if not os.path.exists(img_path):
+            img["needs_review"] = False
+            img["skipped"] = True
+            print(f"  ⏭️  圖片已刪除，標記為手動略過：{img['filename']}")
+            continue
+
+        print(f"  🖼️  重新分析：{img['filename']}")
+        description = analyze_image_with_vl(img_path, paper_name)
+        if description:
+            img["description"] = description
+            img["success"] = True
+            img["needs_review"] = False
+            fixed += 1
+            print(f"  ✅ 修復成功：{img['filename']}")
+        else:
+            print(f"  ❌ 仍然失敗：{img['filename']}")
+
+    with open(vl_result_path, "w", encoding="utf-8") as f:
+        json.dump({"images": images}, f, ensure_ascii=False, indent=2)
+
+    remaining = sum(1 for img in images if img.get("needs_review"))
+    print(f"  📊 修復結果：{fixed} 張成功，{remaining} 張仍需審查")
+    return fixed
