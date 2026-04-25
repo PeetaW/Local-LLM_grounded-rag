@@ -82,6 +82,7 @@ rag/
   query_embedding_guard.py
   query_grounding_flow.py
   query_translation.py
+  query_prompts.py
   query_formatting.py
 ```
 
@@ -192,6 +193,22 @@ Should not contain:
 - retrieval logic
 - grounding orchestration
 
+### `query_prompts.py`
+
+Primary responsibilities:
+
+- build the four synthesis prompt variants: reasoning EN, reasoning ZH, strict EN, strict ZH
+- accept well-defined parameters (`knowledge_base`, `question`, `memory_section`) and return a prompt string
+- serve as the single place to modify prompt strategy without touching pipeline logic
+
+Should not contain:
+
+- LLM calls
+- retrieval logic
+- any pipeline orchestration
+
+Background: the current `query_engine.py` embeds these four prompt variants twice — once in the non-streaming path and once in the streaming path. Extracting them into named builder functions eliminates the duplication and makes future prompt tuning a single-file change.
+
 ### `query_formatting.py`
 
 Primary responsibilities:
@@ -238,8 +255,9 @@ Reasoning:
 | QE-05 | Extract retrieval module | Move subquery task building and retrieval flow | `query_retrieval.py` | retrieval results do not regress |
 | QE-06 | Extract grounding flow module | Move section parsing and grounding fallback logic | `query_grounding_flow.py` | grounding output shape remains stable |
 | QE-07 | Extract translation module | Move final translation helper | `query_translation.py` | translation stage behavior remains stable |
-| QE-08 | Build shared orchestrator | Remove duplicated stream/non-stream core flow | internal runner | major duplicated orchestration is removed |
-| QE-09 | Shrink public entry module | Keep only thin pipeline entrypoints | `query_pipeline.py` | public entrypoints remain stable |
+| QE-07b | Extract prompt builder module | Move four synthesis prompt variants into named builder functions | `query_prompts.py` | prompt output is identical; each variant callable independently |
+| QE-08 | Build shared orchestrator | Remove duplicated stream/non-stream core flow via `_run_pipeline_core` | internal runner | major duplicated orchestration is removed |
+| QE-09 | Shrink public entry module | Keep only thin pipeline entrypoints; update all callers to import from `query_pipeline` | `query_pipeline.py` | public entrypoints remain stable; `query_engine.py` moved to `archive/` |
 | QE-10 | Add stage logs | Add stage start/end/error/timing logs | structured log points | failures can be mapped to pipeline stage |
 | QE-11 | Create regression checklist | Define representative question set | test checklist | before/after behavior can be compared |
 | QE-12 | Update docs | Document module boundaries and extension rules | docs update | future changes are easier to reason about |
@@ -271,6 +289,24 @@ Each stage should ideally:
 - return a well-defined output object
 - emit clear debug or status logs
 - avoid hidden mutation where possible
+
+### Stream / Non-stream Unification
+
+The current `execute_structured_query` and `execute_structured_query_stream` duplicate all seven pipeline stages. The two functions differ only in two points:
+
+- **Status reporting**: the non-streaming path calls an `on_status` callback; the streaming path yields `[STATUS] ...` strings.
+- **LLM output**: the non-streaming path accumulates the full text and returns it; the streaming path yields each chunk as it arrives.
+
+The shared orchestrator (`_run_pipeline_core`) should execute stages 1–6 and carry intermediate state via `PipelineContext`. The two public entrypoints then diverge only at the final output step:
+
+```
+_run_pipeline_core(ctx)          ← planning → retrieval → synthesis → grounding → verification → translation
+  ↑                   ↑
+execute_structured_query     execute_structured_query_stream
+(accumulate → return str)    (yield status + yield chunks)
+```
+
+This means any change to planning, retrieval, grounding, or translation logic is made once and applies to both modes automatically.
 
 ## Logging / Debugging Spec
 
@@ -327,11 +363,12 @@ This refactor is complete when:
 
 1. Public query entrypoints still work.
 2. Streaming and non-streaming modes share one core orchestration flow.
-3. Planning, retrieval, grounding, translation, and embedding guard logic are separated into dedicated modules.
+3. Planning, retrieval, grounding, translation, embedding guard, and prompt building logic are separated into dedicated modules.
 4. No resulting file exceeds 900 lines.
-5. The public entry module is significantly smaller than the original `query_engine.py`.
+5. The public entry module (`query_pipeline.py`) is significantly smaller than the original `query_engine.py`.
 6. A regression checklist exists and has been run.
 7. Logs can identify the stage at which a failure occurred.
+8. `query_engine.py` is moved to `archive/` as a historical reference; all active callers (`api.py`, `main.py`, `scripts/test_query.py`) import from `rag.query_pipeline`.
 
 ## Implementation Notes
 
@@ -356,7 +393,8 @@ Follow these working rules during the refactor:
 
 - create `query_grounding_flow.py`
 - create `query_translation.py`
-- unify stream/non-stream orchestration
+- create `query_prompts.py`
+- unify stream/non-stream orchestration via `_run_pipeline_core`
 
 ### Milestone 3: Maintainability hardening
 
