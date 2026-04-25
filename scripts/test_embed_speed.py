@@ -143,7 +143,7 @@ print("【6】_prepare_query_text 端對端驗證（含截短邏輯）")
 print("=" * 60)
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from rag.query_engine import _prepare_query_text
+from rag.query_embedding_guard import prepare_query_text as _prepare_query_text
 
 result_text = _prepare_query_text(BAD)
 final_status = do_embed(result_text)

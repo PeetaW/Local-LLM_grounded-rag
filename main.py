@@ -85,7 +85,7 @@ for pdf_file in pdf_files:
 
 
 # ── Query Engine ───────────────────────────────────────
-from rag.query_engine import execute_structured_query
+from rag.query_pipeline import execute_structured_query
 
 
 # ── 記憶系統初始化 ─────────────────────────────────────
