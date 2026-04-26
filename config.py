@@ -124,9 +124,10 @@ MEMORY_COLLECTION_PREFERENCE = "preference_memory"
 #    不要手動修改，它會自動同步上方的值
 # ══════════════════════════════════════════════════════
 INDEX_BUILD_CONFIG = {
-    "chunk_size":    CHUNK_SIZE,
-    "chunk_overlap": CHUNK_OVERLAP,
-    "embed_model":   EMBED_MODEL,
-    "parser":        "pymupdf",
-    "include_vl":    True,
+    "chunk_size":          CHUNK_SIZE,
+    "chunk_overlap":       CHUNK_OVERLAP,
+    "embed_model":         EMBED_MODEL,
+    "parser":              "pymupdf",
+    "include_vl":          True,
+    "context_summary":     CONTEXT_SUMMARY_ENABLED,
 }
