@@ -159,7 +159,9 @@ def execute_structured_query(
         _status("\n[grounding] 開始")
         try:
             full_text, nli_report = run_grounding_check(
-                full_text, sub_answers, knowledge_base, on_status=_status,
+                full_text, sub_answers, knowledge_base,
+                question=question, paper_engines_to_use=paper_engines_to_use,
+                on_status=_status,
             )
             print(nli_report)
         except Exception as e:
@@ -309,6 +311,7 @@ def execute_structured_query_stream(
             grounding_msgs = []
             full_text, nli_report = run_grounding_check(
                 full_text, sub_answers, knowledge_base,
+                question=question, paper_engines_to_use=paper_engines_to_use,
                 on_status=lambda msg: grounding_msgs.append(msg),
             )
             for msg in grounding_msgs:

@@ -49,6 +49,53 @@ def _partition_results_by_section(citation_results: list, full_text: str) -> dic
     return partitioned
 
 
+def _fetch_grounding_chunks(question: str, paper_engines_to_use: dict) -> list[dict]:
+    """
+    Retrieve raw PDF chunks from the vector index for NLI grounding.
+    Uses GROUNDING_TOP_K (higher than SIMILARITY_TOP_K) for broader sentence coverage.
+    Returns [] on any failure; caller must fall back to sub_answers.
+    """
+    from rag.query_embedding_guard import prepare_query_text
+
+    try:
+        query_text = prepare_query_text(question)
+    except Exception:
+        return []
+
+    chunks = []
+    for name, engine in paper_engines_to_use.items():
+        try:
+            retriever = engine.retriever if hasattr(engine, "retriever") else None
+            if retriever is None:
+                continue
+
+            # Temporarily raise top_k; restore via finally to survive retrieval errors
+            old_top_k = getattr(retriever, "similarity_top_k", cfg.SIMILARITY_TOP_K)
+            retriever.similarity_top_k = cfg.GROUNDING_TOP_K
+            for r in getattr(retriever, "_retrievers", []):
+                r.similarity_top_k = cfg.GROUNDING_TOP_K
+
+            try:
+                nodes = retriever.retrieve(query_text)
+            finally:
+                retriever.similarity_top_k = old_top_k
+                for r in getattr(retriever, "_retrievers", []):
+                    r.similarity_top_k = old_top_k
+
+            for nws in nodes:
+                chunks.append({
+                    "id":     f"{name[:25]}-{nws.node.node_id[:8]}",
+                    "text":   nws.node.get_content(),
+                    "source": name,
+                    "score":  nws.score or 0.0,
+                })
+        except Exception as e:
+            print(f"  ⚠️  [Grounding] {name} raw chunk 取得失敗：{e}")
+
+    chunks.sort(key=lambda c: c["score"], reverse=True)
+    return chunks
+
+
 def _run_grounding_fallback(full_text: str, unsupported: list, knowledge_base: str) -> str | None:
     """
     Send low-evidence statements back to the LLM for re-citation.
@@ -116,11 +163,17 @@ def run_grounding_check(
     full_text: str,
     sub_answers: list,
     knowledge_base: str,
+    question: str | None = None,
+    paper_engines_to_use: dict | None = None,
     on_status=None,
 ) -> tuple[str, str]:
     """
     Run citation grounding NLI check and optionally apply fallback correction.
     Returns (updated_full_text, nli_report).
+
+    When question + paper_engines_to_use are provided, NLI premises are raw PDF
+    chunks retrieved from the vector index (true grounding against source text).
+    Otherwise falls back to sub_answers (LLM-generated summaries) as premises.
 
     on_status is called with progress messages; falls back to print() if None.
     """
@@ -137,12 +190,26 @@ def run_grounding_check(
         else:
             print(msg)
 
-    _status("  🔍 執行答案品質審查...")
+    if question and paper_engines_to_use:
+        _status("  🔍 執行答案品質審查（對象：PDF raw chunks）...")
+        raw_chunks = _fetch_grounding_chunks(question, paper_engines_to_use)
+        if raw_chunks:
+            chunks = raw_chunks
+            _status(f"  → 取得 {len(chunks)} 個 raw chunks（top_k={cfg.GROUNDING_TOP_K}）")
+        else:
+            _status("  ⚠️  raw chunk 取得失敗，改用 sub_answers 作為比對基準")
+            chunks = [
+                {"id": f"CHUNK-{i:03d}", "text": ans}
+                for i, ans in enumerate(sub_answers)
+            ]
+    else:
+        _status("  🔍 執行答案品質審查...")
+        chunks = [
+            {"id": f"CHUNK-{i:03d}", "text": ans}
+            for i, ans in enumerate(sub_answers)
+        ]
+
     sentences = split_into_sentences(full_text)
-    chunks = [
-        {"id": f"CHUNK-{i:03d}", "text": ans}
-        for i, ans in enumerate(sub_answers)
-    ]
     citation_results = check_citation_grounding(sentences, chunks)
 
     partitioned = _partition_results_by_section(citation_results, full_text)

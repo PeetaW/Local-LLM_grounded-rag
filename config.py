@@ -64,6 +64,7 @@ CHUNK_OVERLAP     = 256
 
 # ── 檢索設定 ──────────────────────────────────────────
 SIMILARITY_TOP_K  = 8    # vector & BM25 各取幾個候選
+GROUNDING_TOP_K   = 20   # Stage 6 NLI 用，比一般檢索多取以提升 grounding 覆蓋率
 
 # ── Review 模式開關（測試用）─────────────────────────
 # True  = 查詢所有論文，不篩選，專用於 mini-review 生成
