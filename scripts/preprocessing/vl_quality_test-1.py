@@ -9,6 +9,7 @@ vl_quality_test.py
 
 import os
 import re
+import sys
 import json
 import fitz  # PyMuPDF
 import httpx
@@ -16,11 +17,19 @@ import base64
 import time
 from datetime import datetime
 
+# ── 路徑修正：確保從任何工作目錄執行都能找到 config.py ──
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))       # scripts/preprocessing/
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(_SCRIPT_DIR))  # rag_project/
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+import config as cfg
+
 # ── 設定區 ─────────────────────────────────────────────
-OLLAMA_BASE_URL = "http://localhost:11434"
-VL_MODEL = "qwen3-vl:32b"
-PAPERS_DIR = "papers"
-OUTPUT_DIR = "vl_test_output"
+OLLAMA_BASE_URL = cfg.OLLAMA_BASE_URL
+VL_MODEL = cfg.VL_MODEL
+PAPERS_DIR = cfg.PAPERS_DIR
+OUTPUT_DIR = cfg.VL_OUTPUT_DIR
 
 MAX_IMAGES_PER_PAPER = 9999
 MIN_WIDTH = 150
@@ -232,6 +241,28 @@ def extract_all_images(papers_dir: str) -> list:
                         print(f"  ⚠️ 抽取失敗：page{page_num}_img{img_index+1} → {e}")
 
             doc.close()
+
+            # ── 清除 JSON 中已不存在的過期條目 ──────────────
+            # 重新抽取後檔名可能改變（如 page7_img1.jpg → page7_raster.png），
+            # 過期描述若留著，pdf_loader.py 建索引時仍會讀入造成污染。
+            new_filenames = {
+                img["filename"]
+                for img in all_images
+                if img["paper_name"] == paper_name
+            }
+            result_file = os.path.join(paper_output_dir, "vl_test_result.json")
+            if os.path.exists(result_file) and new_filenames:
+                with open(result_file, "r", encoding="utf-8") as f:
+                    old_data = json.load(f)
+                old_images = old_data.get("images", [])
+                kept = [img for img in old_images if img["filename"] in new_filenames]
+                stale_count = len(old_images) - len(kept)
+                if stale_count > 0:
+                    old_data["images"] = kept
+                    with open(result_file, "w", encoding="utf-8") as f:
+                        json.dump(old_data, f, ensure_ascii=False, indent=2)
+                    print(f"  🧹 清除 {stale_count} 筆過期 JSON 條目（對應圖片已不存在）")
+
             print(f"  → 本篇抽取 {paper_count} 張")
 
     print(f"\n✅ Phase 1 完成！共 {len(all_images)} 張圖片準備送入分析")
@@ -343,138 +374,159 @@ def validate_description(description: str) -> dict:
         "issues": issues,
     }
 
-def analyze_all_images(all_images: list):
+def _analyze_single_image(img_data: dict, existing: dict) -> tuple[dict, bool]:
     """
-    Phase 2：逐一queue進VL模型分析
-    - 已成功分析的圖片 → 跳過
-    - 未分析或失敗的 → 重新分析
+    分析單張圖片，回傳 (img_result, was_skipped)。
+    供 analyze_all_images 呼叫，保持邏輯集中。
     """
-    total = len(all_images)
-    success_count = 0
-    skip_count = 0
+    filename = img_data["filename"]
 
-    # 彙整每篇paper的結果（含已存在的）
-    paper_results = {}
+    # 斷點續跑：已成功分析則跳過
+    if filename in existing:
+        print(f"    ⏭️  {filename}：已有結果，跳過")
+        return existing[filename], True
 
-    # 預先載入所有已存在的結果
-    for img_data in all_images:
-        paper_name = img_data["paper_name"]
-        if paper_name not in paper_results:
-            result_file = os.path.join(
-                img_data["paper_output_dir"], "vl_test_result.json"
-            )
-            paper_results[paper_name] = {
-                "source_pdf": img_data["pdf_file"],
-                "tested_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "model": VL_MODEL,
-                "existing": load_existing_results(result_file),  # 已成功的結果
-                "images": []
-            }
+    attempt = 0
+    result = {"success": False, "description": "", "error": "NOT_RUN", "elapsed_seconds": 0}
+    validation = {"valid": False, "issues": ["NOT_RUN"]}
 
-    print(f"\n{'='*65}")
-    print(f"Phase 2：開始分析（共 {total} 張圖片）")
-    print(f"{'='*65}")
+    for attempt in range(1, MAX_RETRY + 2):
+        if attempt == 1:
+            print(f"    分析中...（可能需數分鐘）", end="", flush=True)
+        else:
+            print(f"    第{attempt-1}次重跑...（驗證未通過）", end="", flush=True)
 
-    for idx, img_data in enumerate(all_images, 1):
-        pdf_file = img_data["pdf_file"]
-        filename = img_data["filename"]
-        paper_name = img_data["paper_name"]
-        existing = paper_results[paper_name]["existing"]
+        result = analyze_image_with_vl(
+            img_bytes=img_data["bytes"],
+            img_ext=img_data["ext"],
+        )
 
-        print(f"\n[{idx}/{total}] {pdf_file} → {filename}")
+        if not result["success"]:
+            print(f" ❌ 失敗：{result.get('error', '未知錯誤')}")
+            validation = {"valid": False, "issues": ["API_ERROR"]}
+            break
 
-        # ── 斷點續跑：已成功分析則跳過 ────────────────────
-        if filename in existing:
-            skip_count += 1
-            success_count += 1
-            print(f"  ⏭️  已有分析結果，跳過")
-            paper_results[paper_name]["images"].append(existing[filename])
-            continue
+        validation = validate_description(result["description"])
+        result["validation"] = validation
 
-        attempt = 0
-        validation = {"valid": False, "issues": ["NOT_RUN"]}
-
-        for attempt in range(1, MAX_RETRY + 2):  # 第1次正常跑 + 最多MAX_RETRY次重跑
-            if attempt == 1:
-                print(f"  分析中...（可能需要數分鐘）", end="", flush=True)
+        if validation["valid"]:
+            print(f" ✅ 完成！耗時 {result['elapsed_seconds']} 秒")
+            preview = result["description"][:300]
+            if len(result["description"]) > 300:
+                preview += "...(以下省略)"
+            print(f"\n    📝 預覽：\n{preview}\n")
+            break
+        else:
+            print(f" ⚠️ 驗證未通過：{validation['issues']}")
+            if attempt <= MAX_RETRY:
+                print(f"    → 準備第{attempt}次重跑...")
             else:
-                print(f"  第{attempt - 1}次重跑中...（驗證未通過）", end="", flush=True)
-
-            result = analyze_image_with_vl(
-                img_bytes=img_data["bytes"],
-                img_ext=img_data["ext"],
-            )
-
-            if not result["success"]:
-                # API層面失敗，不重跑
-                print(f" ❌ 失敗：{result.get('error', '未知錯誤')}")
-                validation = {"valid": False, "issues": ["API_ERROR"]}
-                break
-
-            # 分析成功 → 驗證品質
-            validation = validate_description(result["description"])
-            result["validation"] = validation
-
-            if validation["valid"]:
-                # 驗證通過
-                success_count += 1
-                print(f" ✅ 完成！耗時 {result['elapsed_seconds']} 秒")
+                print(f"    → 已重跑{MAX_RETRY}次，標記 needs_review")
                 preview = result["description"][:300]
                 if len(result["description"]) > 300:
                     preview += "...(以下省略)"
-                print(f"\n  📝 預覽：\n{preview}\n")
-                break
-            else:
-                # 驗證失敗
-                print(f" ⚠️ 驗證未通過：{validation['issues']}")
-                if attempt <= MAX_RETRY:
-                    print(f"  → 準備第{attempt}次重跑...")
-                else:
-                    # 重跑次數用盡
-                    success_count += 1  # 仍算success（API有回應），但標記需檢查
-                    print(f"  → 已重跑{MAX_RETRY}次，標記 needs_review")
-                    preview = result["description"][:300]
-                    if len(result["description"]) > 300:
-                        preview += "...(以下省略)"
-                    print(f"\n  📝 最後一次預覽：\n{preview}\n")
+                print(f"\n    📝 最後一次預覽：\n{preview}\n")
 
-        img_result = {
-            "filename": filename,
-            "page": img_data["page"],
-            "size": f"{img_data.get('width', '?')}x{img_data.get('height', '?')}",
-            "is_raster": img_data.get("is_raster", False),
-            "raster_reason": img_data.get("raster_reason", ""),
-            "success": result["success"],
-            "description": result.get("description", ""),
-            "error": result.get("error", ""),
-            "elapsed_seconds": result["elapsed_seconds"],
-            "validation": validation,
-            "retry_count": attempt - 1,
-            "needs_review": not validation.get("valid", False),
-        }
-        paper_results[paper_name]["images"].append(img_result)
+    img_result = {
+        "filename": filename,
+        "page": img_data["page"],
+        "size": f"{img_data.get('width', '?')}x{img_data.get('height', '?')}",
+        "is_raster": img_data.get("is_raster", False),
+        "raster_reason": img_data.get("raster_reason", ""),
+        "success": result["success"],
+        "description": result.get("description", ""),
+        "error": result.get("error", ""),
+        "elapsed_seconds": result["elapsed_seconds"],
+        "validation": validation,
+        "retry_count": attempt - 1,
+        "needs_review": not validation.get("valid", False),
+    }
+    return img_result, False
 
-        # 每張分析完立即存檔（防止crash遺失）
-        result_file = os.path.join(
-            img_data["paper_output_dir"], "vl_test_result.json"
-        )
-        save_data = {
-            "source_pdf": paper_results[paper_name]["source_pdf"],
-            "tested_at": paper_results[paper_name]["tested_at"],
-            "model": VL_MODEL,
-            "images": paper_results[paper_name]["images"]
-        }
-        with open(result_file, "w", encoding="utf-8") as f:
-            json.dump(save_data, f, ensure_ascii=False, indent=2)
+
+def analyze_all_images(all_images: list):
+    """
+    Phase 2：先將圖片依paper分組，逐篇完成後再進下一篇。
+    - 已成功分析的圖片 → 跳過（斷點續跑）
+    - 每張分析完立即寫入 JSON（防止 crash 遺失）
+    """
+    # ── 依paper分組，保留 Phase 1 的抽取順序 ────────────
+    papers_order = []
+    papers_images = {}
+    for img_data in all_images:
+        pname = img_data["paper_name"]
+        if pname not in papers_images:
+            papers_order.append(pname)
+            papers_images[pname] = []
+        papers_images[pname].append(img_data)
+
+    total_papers = len(papers_order)
+    total_images = len(all_images)
+    global_success = 0
+    global_skip = 0
+    paper_results = {}
 
     print(f"\n{'='*65}")
-    print(f"✅ Phase 2 完成！")
-    print(f"   成功（含跳過）：{success_count}/{total}")
-    print(f"   跳過（已有結果）：{skip_count}/{total}")
-    print(f"   失敗：{total - success_count}/{total}")
+    print(f"Phase 2：逐篇分析（{total_papers} 篇 paper，共 {total_images} 張圖片）")
+    print(f"{'='*65}")
+
+    for paper_idx, paper_name in enumerate(papers_order, 1):
+        imgs = papers_images[paper_name]
+        first = imgs[0]
+        pdf_file = first["pdf_file"]
+        paper_output_dir = first["paper_output_dir"]
+        result_file = os.path.join(paper_output_dir, "vl_test_result.json")
+
+        existing = load_existing_results(result_file)
+        paper_results[paper_name] = {
+            "source_pdf": pdf_file,
+            "tested_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "model": VL_MODEL,
+            "images": [],
+        }
+
+        paper_success = 0
+        paper_skip = 0
+
+        print(f"\n{'─'*65}")
+        print(f"[{paper_idx}/{total_papers}] {pdf_file}（{len(imgs)} 張圖片）")
+        print(f"{'─'*65}")
+
+        for img_idx, img_data in enumerate(imgs, 1):
+            print(f"\n  圖片 [{img_idx}/{len(imgs)}] {img_data['filename']}")
+
+            img_result, was_skipped = _analyze_single_image(img_data, existing)
+            paper_results[paper_name]["images"].append(img_result)
+
+            if was_skipped:
+                paper_skip += 1
+                paper_success += 1
+            elif img_result["success"]:
+                paper_success += 1
+
+            # 每張分析完立即存檔（防止 crash 遺失）
+            save_data = {
+                "source_pdf": pdf_file,
+                "tested_at": paper_results[paper_name]["tested_at"],
+                "model": VL_MODEL,
+                "images": paper_results[paper_name]["images"],
+            }
+            with open(result_file, "w", encoding="utf-8") as f:
+                json.dump(save_data, f, ensure_ascii=False, indent=2)
+
+        global_success += paper_success
+        global_skip += paper_skip
+        needs_review = sum(1 for r in paper_results[paper_name]["images"] if r.get("needs_review"))
+        print(f"\n  ✅ {pdf_file} 完成：{paper_success}/{len(imgs)} 張"
+              f"（跳過 {paper_skip}，需複查 {needs_review}）")
+
+    print(f"\n{'='*65}")
+    print(f"✅ Phase 2 全部完成！")
+    print(f"   成功（含跳過）：{global_success}/{total_images}")
+    print(f"   跳過（已有結果）：{global_skip}/{total_images}")
+    print(f"   失敗：{total_images - global_success}/{total_images}")
     print(f"\n📁 結果存放在：{OUTPUT_DIR}/")
     print(f"{'='*65}")
-    # 印出驗證摘要報告
     print_summary_report(paper_results)
     
 
