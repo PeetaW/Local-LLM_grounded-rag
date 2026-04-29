@@ -27,6 +27,13 @@ MIN_WIDTH = 150
 MIN_HEIGHT = 150
 MAX_RETRY = 2 #驗證失敗最多跑幾次
 
+# 細碎圖片偵測：單頁嵌入圖片數量 >= 此值時，改光柵化整頁
+FRAGMENTED_PAGE_THRESHOLD = 8
+# 向量圖偵測：無嵌入圖片但 drawing commands >= 此值時，改光柵化整頁
+# 數據依據：表格邊框/裝飾線通常 <100，向量圖表通常 100-2000+
+VECTOR_DRAWING_THRESHOLD = 100
+RASTER_DPI = 400  # 光柵化解析度（DPI）
+
 ANALYSIS_PROMPT = """你是一個專業的學術論文圖表分析助手，專精於材料科學與奈米技術領域。
 請詳細描述這張來自ZVI（零價鐵奈米粒子）學術論文的圖片。
 
@@ -122,6 +129,7 @@ def extract_all_images(papers_dir: str) -> list:
                     "bytes": img_bytes,
                     "width": 0,   # 已存圖片不重新讀尺寸
                     "height": 0,
+                    "is_raster": "_raster." in filename,  # 識別光柵化整頁
                 })
                 print(f"  📂 載入：{filename}")
         else:
@@ -135,6 +143,51 @@ def extract_all_images(papers_dir: str) -> list:
                     break
 
                 image_list = page.get_images(full=True)
+
+                # ── 細碎點陣圖偵測：改光柵化整頁 ─────────────────
+                if len(image_list) >= FRAGMENTED_PAGE_THRESHOLD:
+                    raster_reason = f"細碎嵌入圖片 x{len(image_list)}"
+                # ── 向量圖偵測：無嵌入圖片但有大量 drawing commands ─
+                elif len(image_list) == 0:
+                    drawing_count = len(page.get_drawings())
+                    if drawing_count >= VECTOR_DRAWING_THRESHOLD:
+                        raster_reason = f"向量圖 ({drawing_count} drawing commands)"
+                    else:
+                        if drawing_count > 0:
+                            print(f"  ⬜ 第{page_num}頁：無嵌入圖、drawings={drawing_count}（低於閾值{VECTOR_DRAWING_THRESHOLD}），跳過")
+                        continue
+                else:
+                    raster_reason = None  # 走下方的正常個別抽取
+
+                if raster_reason is not None:
+                    print(f"  🔲 第{page_num}頁偵測到【{raster_reason}】，改用整頁光柵化（{RASTER_DPI} DPI）")
+                    try:
+                        mat = fitz.Matrix(RASTER_DPI / 72, RASTER_DPI / 72)
+                        pix = page.get_pixmap(matrix=mat, alpha=False)
+                        img_bytes = pix.tobytes("png")
+                        filename = f"page{page_num}_raster.png"
+                        save_path = os.path.join(paper_output_dir, filename)
+                        with open(save_path, "wb") as f:
+                            f.write(img_bytes)
+                        all_images.append({
+                            "pdf_file": pdf_file,
+                            "paper_name": paper_name,
+                            "paper_output_dir": paper_output_dir,
+                            "page": page_num,
+                            "ext": "png",
+                            "width": pix.width,
+                            "height": pix.height,
+                            "filename": filename,
+                            "save_path": save_path,
+                            "bytes": img_bytes,
+                            "is_raster": True,
+                            "raster_reason": raster_reason,
+                        })
+                        paper_count += 1
+                        print(f"  ✅ 光柵化：{filename} ({pix.width}x{pix.height}px)")
+                    except Exception as e:
+                        print(f"  ⚠️ 光柵化失敗：page{page_num} → {e}")
+                    continue
 
                 for img_index, img_info in enumerate(image_list):
                     if paper_count >= MAX_IMAGES_PER_PAPER:
@@ -389,6 +442,8 @@ def analyze_all_images(all_images: list):
             "filename": filename,
             "page": img_data["page"],
             "size": f"{img_data.get('width', '?')}x{img_data.get('height', '?')}",
+            "is_raster": img_data.get("is_raster", False),
+            "raster_reason": img_data.get("raster_reason", ""),
             "success": result["success"],
             "description": result.get("description", ""),
             "error": result.get("error", ""),

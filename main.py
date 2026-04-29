@@ -55,6 +55,39 @@ import os
 import sys
 
 
+# ── --rerun-vl 模式：在所有重度初始化之前攔截 ──────────────
+if "--rerun-vl" in sys.argv:
+    from rag.vl_processor import rerun_failed_vl, get_failed_vl_images
+    from rag.indexer import reindex_paper
+
+    idx = sys.argv.index("--rerun-vl")
+    if idx + 1 >= len(sys.argv):
+        print("⚠️  請指定論文名稱，例如：python main.py --rerun-vl 論文名稱")
+        sys.exit(1)
+
+    target_name = sys.argv[idx + 1]
+    target_pdf  = target_name if target_name.endswith(".pdf") else f"{target_name}.pdf"
+    pdf_path    = os.path.join(cfg.PAPERS_DIR, target_pdf)
+
+    if not os.path.exists(pdf_path):
+        print(f"⚠️  找不到 PDF：{pdf_path}")
+        sys.exit(1)
+
+    print(f"\n🔄 重新掃描失敗圖片：{target_name}")
+    fixed = rerun_failed_vl(pdf_path)
+    if fixed > 0:
+        print(f"\n✅ {fixed} 張圖片修復成功，重建索引中...")
+        reindex_paper(target_pdf)
+        print(f"✅ 索引重建完成：{target_name}")
+    else:
+        remaining = get_failed_vl_images(target_name)
+        if remaining:
+            print(f"\n⚠️  {len(remaining)} 張圖片仍需人工審查，索引未重建")
+        else:
+            print(f"✅ {target_name} 沒有待審查的圖片")
+    sys.exit(0)
+
+
 # ── LlamaIndex 核心 ────────────────────────────────────
 from llama_index.core import Settings
 
@@ -103,37 +136,6 @@ from rag.chunk_inspector import inspect_chunks
 
 
 # ── 主程式 ─────────────────────────────────────────────
-
-# --rerun-vl 模式：重新分析失敗圖片，成功後重建該論文索引
-if "--rerun-vl" in sys.argv:
-    from rag.vl_processor import rerun_failed_vl, get_failed_vl_images
-    from rag.indexer import reindex_paper
-
-    idx = sys.argv.index("--rerun-vl")
-    if idx + 1 >= len(sys.argv):
-        print("⚠️  請指定論文名稱，例如：python main.py --rerun-vl 1-s2.0-xxx-main")
-        sys.exit(1)
-    target_name = sys.argv[idx + 1]
-    target_pdf = target_name if target_name.endswith(".pdf") else f"{target_name}.pdf"
-    pdf_path = os.path.join(cfg.PAPERS_DIR, target_pdf)
-
-    if not os.path.exists(pdf_path):
-        print(f"⚠️  找不到 PDF：{pdf_path}")
-        sys.exit(1)
-
-    print(f"\n🔄 重新掃描失敗圖片：{target_name}")
-    fixed = rerun_failed_vl(pdf_path)
-    if fixed > 0:
-        print(f"\n✅ {fixed} 張圖片修復成功，重建索引中...")
-        reindex_paper(target_pdf)
-        print(f"✅ 索引重建完成：{target_name}")
-    else:
-        remaining = get_failed_vl_images(target_name)
-        if remaining:
-            print(f"\n⚠️  {len(remaining)} 張圖片仍需人工審查，索引未重建")
-        else:
-            print(f"\n✅ 該論文沒有待修復的圖片")
-    sys.exit(0)
 
 # --test-chunks 模式：只做 chunk 檢查，不執行問答
 if "--test-chunks" in sys.argv:
