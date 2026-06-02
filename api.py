@@ -23,7 +23,7 @@ from rag.answer_processor import post_process_answer, parse_grounding_score
 
 app = FastAPI(
     title="ZVI RAG Pipeline",
-    description="學術論文 RAG 問答系統，專門分析 ZVI 奈米粒子相關論文",
+    description="學術論文 RAG 問答系統，專門分析學術相關論文",
     version="1.0.0",
 )
 

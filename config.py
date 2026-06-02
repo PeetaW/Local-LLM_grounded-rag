@@ -72,8 +72,13 @@ GROUNDING_TOP_K   = 20   # Stage 6 NLI 用，比一般檢索多取以提升 grou
 REVIEW_MODE = False
 
 # ── Reranker 設定 ─────────────────────────────────────
-RERANKER_MODEL    = "BAAI/bge-reranker-v2-m3"
-RERANKER_TOP_N    = 8    # rerank 後保留幾個送進 LLM
+# 檢索漏斗：BM25 / 向量各取 RERANK_CANDIDATE_K 個候選 → 融合 →
+# cross-encoder reranker 從中精選 RERANKER_TOP_N 個送進 LLM。
+# ⚠️ RERANK_CANDIDATE_K 必須 > RERANKER_TOP_N，否則 reranker 拿到幾個就回幾個，
+#    形同「只重排不過濾」，cross-encoder 等於白跑。
+RERANKER_MODEL     = "BAAI/bge-reranker-v2-m3"
+RERANK_CANDIDATE_K = 24   # 進 reranker 前的候選數（每路檢索與融合都用這個）
+RERANKER_TOP_N     = 8    # rerank 後保留幾個送進 LLM
 
 # ── Stage 3：知識蒸餾 ─────────────────────────────────────
 SYNTHESIS_ENABLED = True
