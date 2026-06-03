@@ -3,10 +3,10 @@
 > A local, citation-grounded RAG pipeline for academic paper analysis — built as a personal research thinking partner.
 
 This project is a local RAG pipeline designed for deep academic paper analysis.
-Unlike simple retrieve-and-answer systems, it uses a 5-stage pipeline —
-sub-question decomposition, hybrid retrieval, knowledge synthesis,
-and logical verification — to produce citation-grounded answers
-you can actually trace back to the source.
+Unlike simple retrieve-and-answer systems, it uses a 7-stage pipeline —
+sub-question decomposition, hybrid retrieval, knowledge distillation,
+logical verification, and sentence-level NLI citation grounding — to produce
+citation-grounded answers you can actually trace back to the source.
 
 Built for researchers who want a stable, controllable thinking partner
 rather than a black-box AI that changes without notice.
@@ -40,13 +40,18 @@ rather than a black-box AI that changes without notice.
 
 ## Features
 
-- **5-Stage Pipeline**: Paper selection → Sub-question planning → Hybrid retrieval → Knowledge synthesis → Answer verification & correction
-- **Hybrid Retrieval**: BM25 sparse search + vector dense search + cross-encoder reranking
-- **Knowledge Synthesis (Stage 3)**: LLM distills retrieved chunks into a structured fact list before answer generation
-- **Answer Verification (Stage 5)**: A second LLM verifies hallucinations, citation gaps, and unsupported inferences; a corrector LLM rewrites the answer if issues are found
-- **Multi-project support**: Manage multiple paper collections (e.g., `zvi`, `boron_bnct`) by switching `ACTIVE_PROJECT` in `config.py`
+- **7-Stage Pipeline**: Paper pre-filter → ① Sub-question planning → ② Hybrid retrieval → ③ Knowledge distillation → ④ Three-tier answer generation → ⑤ Verification & correction → ⑥ NLI citation grounding → ⑦ Traditional Chinese translation
+- **Hybrid Retrieval**: BM25 sparse + vector dense search → cross-encoder reranking (retrieve 24 candidates, rerank down to 8)
+- **Three-Tier Answers**: Every answer separates `[Direct Paper Evidence]` / `[Cross-Literature Inference]` / `[Knowledge Extension & Speculation]`, each with its own grounding score — epistemic honesty over completeness
+- **Knowledge Distillation (Stage 3)**: LLM distills retrieved chunks into a structured fact list before answer generation
+- **Answer Verification (Stage 5)**: A reasoning model verifies logical leaps and unsupported inferences; a corrector LLM rewrites the answer if issues are found
+- **NLI Citation Grounding (Stage 6)**: mDeBERTa multilingual NLI checks each sentence against the **raw PDF chunks** (not LLM summaries); low-evidence statements are sent back for re-citation; includes contradiction detection
+- **English-first pipeline**: Reasoning, verification and NLI run in English (monolingual NLI is far more accurate), then the final answer is translated to Traditional Chinese
+- **Contextual chunk summarization**: Each chunk gets an LLM-generated summary header before embedding (Anthropic Contextual-Retrieval style)
 - **Vision-Language support**: Extracts and describes figures from PDFs using a VL model — with smart rasterization for fragmented images and vector drawings
+- **Multi-project support**: Manage multiple paper collections (e.g., `zvi`, `boron_bnct`) by switching `ACTIVE_PROJECT` in `config.py`
 - **Cross-session memory**: ChromaDB stores episodic reasoning results and user preferences across sessions
+- **Evaluation harness**: `eval/run_eval.py` runs a labeled question set and reports paper-selection recall, retrieval coverage, grounding score and per-stage latency — for data-driven regression testing
 - **OpenAI-compatible API**: Connect directly to Open WebUI as a custom model — no tool-call needed
 - **Streaming output**: Real-time pipeline progress streamed to Open WebUI as blockquote status messages
 
@@ -95,6 +100,19 @@ rather than a black-box AI that changes without notice.
                           │  Correct                 │
                           │  Verifier: qwen3.5:35b   │  ← finds issues
                           │  Corrector: gemma4:31b   │  ← rewrites answer
+                          └────────────┬────────────┘
+                                       │
+                          ┌────────────▼────────────┐
+                          │  Stage 6 · Grounding     │
+                          │  mDeBERTa NLI: each      │
+                          │  sentence vs raw chunks; │
+                          │  weak cites → re-cite    │
+                          └────────────┬────────────┘
+                                       │
+                          ┌────────────▼────────────┐
+                          │  Stage 7 · Translation   │
+                          │  EN draft → 繁體中文      │
+                          │  (if EN_DRAFT_PIPELINE)  │
                           └────────────┬────────────┘
                                        │
                         ┌─────────────▼──────────────┐
@@ -247,6 +265,25 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 
 The pipeline progress (paper selection, sub-questions, Stage 3/4/5 status) streams directly into the WebUI chat as blockquote messages.
 
+### Evaluation (regression testing)
+
+Before and after any change to chunking, retrieval, prompts or thresholds, run the
+evaluation harness to confirm the change actually helped — instead of guessing:
+
+```bash
+python eval/run_eval.py --run --label baseline       # run the question set, save results
+# ...make a change (e.g. edit RERANK_CANDIDATE_K)...
+python eval/run_eval.py --run --label experiment
+python eval/run_eval.py --compare baseline experiment # side-by-side metric comparison
+```
+
+The question set lives in [eval/eval_set.json](eval/eval_set.json). It runs in two modes:
+
+- **Mode 1** (gold fields empty): reports grounding score, per-stage latency, and paper/sub-question counts — works immediately, no labeling needed.
+- **Mode 2** (fill `gold_papers` + `gold_spans`): additionally reports **paper-selection recall** (did the planner keep the right papers?) and **retrieval coverage** (did the retriever surface the source text?) — measured against your labeled ground truth.
+
+> The harness calls the pipeline directly and does **not** write to ChromaDB memory, so it won't pollute episodic memory.
+
 ### Switch project
 
 Edit `config.py`:
@@ -277,7 +314,7 @@ rag_project/
 │   ├── reranker.py            # Cross-encoder reranker (bge-reranker-v2-m3)
 │   ├── vl_processor.py        # Vision-language figure analysis (auto-triggered)
 │   │
-│   ├── query_pipeline.py      # 5-stage pipeline entry point
+│   ├── query_pipeline.py      # 7-stage pipeline entry point
 │   ├── query_planning.py      # Stage 1: sub-question decomposition
 │   ├── query_retrieval.py     # Stage 2: hybrid retrieval per paper
 │   ├── query_translation.py   # Query translation / language handling
@@ -314,6 +351,12 @@ rag_project/
 │   └── preprocessing/
 │       └── vl_quality_test-1.py   # Batch VL preprocessing with smart rasterization
 │
+├── eval/                        # Tier 0 evaluation harness (regression ruler)
+│   ├── eval_set.json            # Labeled question set (gold papers + answer spans)
+│   ├── metrics.py               # Selection recall, retrieval coverage, latency, grounding
+│   ├── run_eval.py              # Run the set through the pipeline, compute & compare metrics
+│   └── results/                 # (auto-generated) saved metric runs for A/B comparison
+│
 ├── projects/
 │   ├── zvi/
 │   │   ├── papers/            # (empty — add your PDFs here)
@@ -343,8 +386,11 @@ All parameters are centralized in `config.py`:
 | `SYNTHESIS_ENABLED` | `True` | Enable Stage 3 knowledge synthesis |
 | `VERIFY_ENABLED` | `True` | Enable Stage 5 verification |
 | `CHUNK_SIZE` | `1024` | Token size per chunk |
-| `SIMILARITY_TOP_K` | `8` | Candidates per retrieval method |
-| `RERANKER_TOP_N` | `8` | Final chunks after reranking |
+| `SIMILARITY_TOP_K` | `8` | Base candidate count (grounding-flow fallback) |
+| `RERANK_CANDIDATE_K` | `24` | Candidates retrieved before reranking (must be > `RERANKER_TOP_N`) |
+| `RERANKER_TOP_N` | `8` | Final chunks kept after reranking |
+| `GROUNDING_TOP_K` | `20` | Chunks retrieved for Stage 6 NLI grounding |
+| `EN_DRAFT_PIPELINE` | `True` | Reason/verify/NLI in English, translate at the end |
 | `VL_AUTO_RUN` | `True` | Auto-run VL analysis on new PDFs |
 | `CONTEXT_SUMMARY_ENABLED` | `True` | Generate LLM summary header per chunk |
 | `EN_DRAFT_PIPELINE` | `True` | Full English draft pipeline (improves NLI accuracy) |
@@ -361,21 +407,26 @@ All parameters are centralized in `config.py`:
 > 一套本地運行、有引用根據的學術論文 RAG Pipeline——為個人研究工作流打造的思考夥伴。
 
 這套系統是專為深度學術論文分析設計的本地 RAG Pipeline。
-與單純的「檢索 + 回答」系統不同，它採用 5 階段流程——
-子問題分解、混合檢索、知識蒸餾、邏輯自洽驗證——
+與單純的「檢索 + 回答」系統不同，它採用 7 階段流程——
+子問題分解、混合檢索、知識蒸餾、邏輯自洽驗證、逐句 NLI 引用比對——
 產出每一句都能追溯到原始論文的有根據答案。
 
 為那些需要穩定、可控的思考夥伴，而不是一個隨時會悄悄改變行為的黑盒 AI 的研究者而設計。
 
 ## 功能特色
 
-- **5 階段 Pipeline**：論文篩選 → 子問題規劃 → 混合檢索 → 知識蒸餾 → 答案驗證與修正
-- **混合檢索**：BM25 稀疏搜尋 + 向量稠密搜尋 + Cross-encoder Reranker
+- **7 階段 Pipeline**：論文預篩 → ① 子問題規劃 → ② 混合檢索 → ③ 知識蒸餾 → ④ 三層答案生成 → ⑤ 驗證與修正 → ⑥ NLI 引用比對 → ⑦ 繁體中文翻譯
+- **混合檢索**：BM25 稀疏 + 向量稠密搜尋 → Cross-encoder Reranker（取 24 個候選，rerank 砍到 8）
+- **三層答案結構**：每則回答分為【論文直接依據】/【跨文獻推論】/【知識延伸與推測】，各層各算 grounding 分數——認知誠實優先於答案完整
 - **知識蒸餾（Stage 3）**：LLM 在生成答案前，先將檢索結果蒸餾成結構化事實清單
-- **答案驗證（Stage 5）**：第二個 LLM 驗證幻覺、引用缺漏與無依據推論；若發現問題，由修正 LLM 重寫答案
-- **多專案支援**：在 `config.py` 切換 `ACTIVE_PROJECT` 即可管理多個論文資料庫
+- **答案驗證（Stage 5）**：推理模型驗證推論跳躍與無依據推論；若發現問題，由修正 LLM 重寫答案
+- **NLI 引用比對（Stage 6）**：mDeBERTa 多語言 NLI 逐句比對 **PDF 原文 chunk**（非 LLM 摘要）；依據不足的句子送回重新引用；含矛盾偵測
+- **English-first pipeline**：推理、驗證、NLI 全程用英文（單語 NLI 準確度遠高於跨語言），最後再翻譯成繁體中文
+- **情境式 chunk 摘要**：建索引時為每個 chunk 加上 LLM 生成的摘要標頭（Anthropic Contextual-Retrieval 風格）
 - **視覺語言支援**：使用 VL 模型自動擷取並描述 PDF 圖表，支援碎片圖偵測與向量圖光柵化
+- **多專案支援**：在 `config.py` 切換 `ACTIVE_PROJECT` 即可管理多個論文資料庫
 - **跨 session 記憶**：ChromaDB 儲存推論結論與使用者偏好，跨對話保留
+- **評估骨架**：`eval/run_eval.py` 跑標準題組，回報論文選擇命中率、檢索覆蓋率、grounding 分數與各階段延遲——用數據做回歸測試
 - **OpenAI 相容 API**：直接在 Open WebUI 當成自訂模型使用，無需工具呼叫設定
 - **串流輸出**：Pipeline 進度即時串流至 Open WebUI，以 blockquote 格式顯示
 
@@ -421,6 +472,19 @@ All parameters are centralized in `config.py`:
                           │  Stage 5 · 驗證與修正    │
                           │  Verifier: qwen3.5:35b   │  ← 找出問題
                           │  Corrector: gemma4:31b   │  ← 重寫答案
+                          └────────────┬────────────┘
+                                       │
+                          ┌────────────▼────────────┐
+                          │  Stage 6 · 引用比對      │
+                          │  mDeBERTa NLI：逐句對    │
+                          │  PDF 原文 chunk 比對；    │
+                          │  依據不足 → 重新引用      │
+                          └────────────┬────────────┘
+                                       │
+                          ┌────────────▼────────────┐
+                          │  Stage 7 · 翻譯          │
+                          │  英文初稿 → 繁體中文      │
+                          │  （EN_DRAFT_PIPELINE）   │
                           └────────────┬────────────┘
                                        │
                         ┌─────────────▼──────────────┐
@@ -573,6 +637,25 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 
 Pipeline 進度（論文篩選、子問題、Stage 3/4/5 狀態）會即時串流到 WebUI 對話視窗中，以 blockquote 格式呈現。
 
+### 評估（回歸測試）
+
+在改動 chunking、檢索、prompt 或任何門檻**之前與之後**，都跑一次評估骨架，
+用數據確認改動真的有效，而不是靠感覺：
+
+```bash
+python eval/run_eval.py --run --label baseline       # 跑題組，存結果
+# ...做一個改動（例如改 RERANK_CANDIDATE_K）...
+python eval/run_eval.py --run --label experiment
+python eval/run_eval.py --compare baseline experiment # 並排比較彙總指標
+```
+
+題組放在 [eval/eval_set.json](eval/eval_set.json)，有兩種模式：
+
+- **Mode 1**（gold 欄位留空）：回報 grounding 分數、各階段延遲、論文/子問題數——馬上可跑，不需標註。
+- **Mode 2**（填好 `gold_papers` + `gold_spans`）：額外回報**論文選擇命中率**（planner 有沒有選對論文？）與**檢索覆蓋率**（檢索有沒有撈到原文？）——對照你標註的真相量測。
+
+> 評估骨架直接呼叫 pipeline，**不會**寫入 ChromaDB 記憶，因此不會污染 episodic memory。
+
 ### 切換專案
 
 修改 `config.py`：
@@ -603,7 +686,7 @@ rag_project/
 │   ├── reranker.py            # Cross-encoder Reranker
 │   ├── vl_processor.py        # 視覺語言圖表分析（自動觸發）
 │   │
-│   ├── query_pipeline.py      # 5 階段 Pipeline 主入口
+│   ├── query_pipeline.py      # 7 階段 Pipeline 主入口
 │   ├── query_planning.py      # Stage 1：子問題拆解
 │   ├── query_retrieval.py     # Stage 2：逐篇混合檢索
 │   ├── query_translation.py   # 查詢翻譯 / 語言處理
@@ -640,6 +723,12 @@ rag_project/
 │   └── preprocessing/
 │       └── vl_quality_test-1.py   # 批次 VL 預處理（含智慧光柵化）
 │
+├── eval/                        # Tier 0 評估骨架（回歸量尺）
+│   ├── eval_set.json            # 標準題組（gold 論文 + 答案 span）
+│   ├── metrics.py               # 選擇命中率、檢索覆蓋率、延遲、grounding
+│   ├── run_eval.py              # 跑題組過 pipeline、計算與比較指標
+│   └── results/                 # （自動生成）存放各次指標結果供 A/B 比較
+│
 ├── projects/
 │   ├── zvi/
 │   │   ├── papers/            # （空白 — 放入 PDF）
@@ -669,8 +758,11 @@ rag_project/
 | `SYNTHESIS_ENABLED` | `True` | 啟用 Stage 3 知識蒸餾 |
 | `VERIFY_ENABLED` | `True` | 啟用 Stage 5 驗證 |
 | `CHUNK_SIZE` | `1024` | 每個 chunk 的 token 數 |
-| `SIMILARITY_TOP_K` | `8` | 每種檢索方法的候選數量 |
+| `SIMILARITY_TOP_K` | `8` | 基礎候選數（grounding flow 的 fallback） |
+| `RERANK_CANDIDATE_K` | `24` | 進 reranker 前的候選數（須 > `RERANKER_TOP_N`） |
 | `RERANKER_TOP_N` | `8` | Rerank 後保留的 chunk 數 |
+| `GROUNDING_TOP_K` | `20` | Stage 6 NLI 比對用的 chunk 數 |
+| `EN_DRAFT_PIPELINE` | `True` | 推理/驗證/NLI 全程英文，最後翻譯 |
 | `VL_AUTO_RUN` | `True` | 新增 PDF 時自動執行 VL 圖表分析 |
 | `CONTEXT_SUMMARY_ENABLED` | `True` | 為每個 chunk 生成 LLM 摘要標頭 |
 | `EN_DRAFT_PIPELINE` | `True` | 全英文 draft 流程（提升 NLI 準確度） |
