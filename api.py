@@ -17,13 +17,13 @@ logger = logging.getLogger(__name__)
 
 from main import paper_engines, episodic_collection, preference_collection
 
-from rag.query_engine import execute_structured_query, execute_structured_query_stream
+from rag.query_pipeline import execute_structured_query, execute_structured_query_stream
 from rag.memory import recall_memories, _check_is_preference, _save_preference
 from rag.answer_processor import post_process_answer, parse_grounding_score
 
 app = FastAPI(
     title="ZVI RAG Pipeline",
-    description="學術論文 RAG 問答系統，專門分析 ZVI 奈米粒子相關論文",
+    description="學術論文 RAG 問答系統，專門分析學術相關論文",
     version="1.0.0",
 )
 

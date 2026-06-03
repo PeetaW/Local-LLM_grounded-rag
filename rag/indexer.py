@@ -17,9 +17,18 @@ from rag.metadata_manager import ensure_metadata
 from rag.chunk_summarizer import add_summaries_to_nodes
 from llama_index.core.node_parser import SentenceSplitter
 
+def _index_is_complete(index_dir: str) -> bool:
+    """
+    檢查索引目錄是否完整。
+    目錄存在但缺少 docstore.json，表示上次建立中途被中斷
+    （StorageContext.from_defaults 會因找不到此檔而崩潰）。
+    """
+    return os.path.exists(os.path.join(index_dir, "docstore.json"))
+
+
 def load_or_build_index(pdf_file: str):
     """
-    若索引已存在則直接載入，否則解析 PDF 後建立新索引。
+    若索引已存在且完整則直接載入，否則解析 PDF 後建立新索引。
     回傳 index 物件。
     """
     index_dir = os.path.join(cfg.INDEX_BASE_DIR, pdf_file.replace(".pdf", ""))
@@ -35,8 +44,16 @@ def load_or_build_index(pdf_file: str):
     # ── 自動生成 metadata ─────────────────────────────
     ensure_metadata(pdf_path)
 
+    # ── 索引完整性檢查 ────────────────────────────────
+    # 目錄存在但缺 docstore.json（上次建立被中斷）→ 刪除後重建，避免載入崩潰
+    index_exists   = os.path.exists(index_dir)
+    index_complete = index_exists and _index_is_complete(index_dir)
+    if index_exists and not index_complete:
+        print(f"  ⚠️  偵測到不完整索引（缺 docstore.json），刪除後重建：{pdf_file}")
+        shutil.rmtree(index_dir)
+
     # 如果 VL 剛剛才分析完，即使索引存在也要強制重建（舊索引沒有 VL 內容）
-    if os.path.exists(index_dir) and not vl_was_missing:
+    if index_complete and not vl_was_missing:
         print(f"  載入既有索引：{pdf_file}")
         storage_context = StorageContext.from_defaults(persist_dir=index_dir)
         index = load_index_from_storage(storage_context)

@@ -34,7 +34,7 @@ import time
 import asyncio
 
 from main import paper_engines, episodic_collection, preference_collection
-from rag.query_engine import execute_structured_query
+from rag.query_pipeline import execute_structured_query
 from rag.memory import recall_memories, decide_and_save
 from rag.answer_processor import parse_grounding_score
 

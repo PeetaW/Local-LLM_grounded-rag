@@ -13,18 +13,18 @@ def build_hybrid_retriever(index):
     """
     vector_retriever = VectorIndexRetriever(
         index=index,
-        similarity_top_k=cfg.SIMILARITY_TOP_K,
+        similarity_top_k=cfg.RERANK_CANDIDATE_K,
     )
 
     nodes = list(index.docstore.docs.values())
     bm25_retriever = BM25Retriever.from_defaults(
         nodes=nodes,
-        similarity_top_k=cfg.SIMILARITY_TOP_K,
+        similarity_top_k=cfg.RERANK_CANDIDATE_K,
     )
 
     hybrid_retriever = QueryFusionRetriever(
         retrievers=[vector_retriever, bm25_retriever],
-        similarity_top_k=cfg.SIMILARITY_TOP_K,
+        similarity_top_k=cfg.RERANK_CANDIDATE_K,
         num_queries=1,
         mode="reciprocal_rerank",
         use_async=False,

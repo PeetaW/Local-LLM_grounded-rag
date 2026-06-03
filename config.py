@@ -64,6 +64,7 @@ CHUNK_OVERLAP     = 256
 
 # ── 檢索設定 ──────────────────────────────────────────
 SIMILARITY_TOP_K  = 8    # vector & BM25 各取幾個候選
+GROUNDING_TOP_K   = 20   # Stage 6 NLI 用，比一般檢索多取以提升 grounding 覆蓋率
 
 # ── Review 模式開關（測試用）─────────────────────────
 # True  = 查詢所有論文，不篩選，專用於 mini-review 生成
@@ -71,8 +72,13 @@ SIMILARITY_TOP_K  = 8    # vector & BM25 各取幾個候選
 REVIEW_MODE = False
 
 # ── Reranker 設定 ─────────────────────────────────────
-RERANKER_MODEL    = "BAAI/bge-reranker-v2-m3"
-RERANKER_TOP_N    = 8    # rerank 後保留幾個送進 LLM
+# 檢索漏斗：BM25 / 向量各取 RERANK_CANDIDATE_K 個候選 → 融合 →
+# cross-encoder reranker 從中精選 RERANKER_TOP_N 個送進 LLM。
+# ⚠️ RERANK_CANDIDATE_K 必須 > RERANKER_TOP_N，否則 reranker 拿到幾個就回幾個，
+#    形同「只重排不過濾」，cross-encoder 等於白跑。
+RERANKER_MODEL     = "BAAI/bge-reranker-v2-m3"
+RERANK_CANDIDATE_K = 24   # 進 reranker 前的候選數（每路檢索與融合都用這個）
+RERANKER_TOP_N     = 8    # rerank 後保留幾個送進 LLM
 
 # ── Stage 3：知識蒸餾 ─────────────────────────────────────
 SYNTHESIS_ENABLED = True
@@ -123,9 +129,10 @@ MEMORY_COLLECTION_PREFERENCE = "preference_memory"
 #    不要手動修改，它會自動同步上方的值
 # ══════════════════════════════════════════════════════
 INDEX_BUILD_CONFIG = {
-    "chunk_size":    CHUNK_SIZE,
-    "chunk_overlap": CHUNK_OVERLAP,
-    "embed_model":   EMBED_MODEL,
-    "parser":        "pymupdf",
-    "include_vl":    True,
+    "chunk_size":          CHUNK_SIZE,
+    "chunk_overlap":       CHUNK_OVERLAP,
+    "embed_model":         EMBED_MODEL,
+    "parser":              "pymupdf",
+    "include_vl":          True,
+    "context_summary":     CONTEXT_SUMMARY_ENABLED,
 }
