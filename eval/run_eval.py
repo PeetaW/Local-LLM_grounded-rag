@@ -19,6 +19,7 @@ import sys
 import os
 import json
 import time
+import datetime
 import argparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -86,6 +87,116 @@ def _probe_retrieval(question: str, gold_papers: list, paper_engines: dict) -> l
         except Exception:
             continue
     return texts
+
+
+def _fmt(v, pct=False, suffix=""):
+    """格式化指標值；None → N/A，負數（如 grounding 解析失敗的 -1）→ —。"""
+    if v is None:
+        return "N/A"
+    if isinstance(v, (int, float)) and v < 0:
+        return "—"
+    if pct and isinstance(v, (int, float)):
+        return f"{v:.1%}"
+    return f"{v}{suffix}"
+
+
+def _ms_to_s(ms):
+    return "N/A" if ms is None else f"{ms / 1000:.1f}s"
+
+
+def _q_status(row: dict) -> str:
+    """為每題決定狀態 emoji，方便在報告裡一眼掃出有問題的題目。"""
+    ans = row.get("answer", "")
+    if isinstance(ans, str) and ans.startswith("[PIPELINE ERROR]"):
+        return "❌"
+    sel = row.get("paper_selection_recall")
+    ret = row.get("retrieval_span_recall")
+    gs  = row.get("grounding_score")
+    bad = (
+        (ret is not None and ret < 0.3)
+        or (isinstance(gs, (int, float)) and 0 <= gs < 0.3)
+    )
+    if bad:
+        return "❌"
+    warn = (
+        (sel is not None and sel < 1.0)
+        or (ret is not None and ret < 0.7)
+        or (isinstance(gs, (int, float)) and 0 <= gs < 0.8)
+    )
+    return "⚠️" if warn else "✅"
+
+
+def _write_markdown_report(out: dict, path: str):
+    """產生人類好掃的 Markdown 報告（與 JSON 並存）。"""
+    s = out.get("summary", {})
+    L = []
+    L.append(f"# Eval Report — `{out.get('label')}`")
+    L.append("")
+    mode = "Mode 2（對照 gold 真相）" if out.get("mode") == "gold" else "Mode 1（自評／延遲）"
+    L.append(f"- 模式：{mode}")
+    L.append(f"- 產生時間：{datetime.datetime.now():%Y-%m-%d %H:%M}")
+    L.append(f"- 題數：{s.get('n_questions')}")
+    L.append("")
+
+    L.append("## 彙總")
+    L.append("")
+    L.append("| 指標 | 值 |")
+    L.append("|------|-----|")
+    L.append(f"| 平均 grounding 分數 | {_fmt(s.get('avg_grounding_score'))} |")
+    L.append(f"| 平均論文選擇命中率 | {_fmt(s.get('avg_paper_sel_recall'), pct=True)} |")
+    L.append(f"| 平均檢索覆蓋率 | {_fmt(s.get('avg_retrieval_recall'), pct=True)} |")
+    L.append(f"| 平均總延遲 | {_ms_to_s(s.get('avg_total_ms'))} |")
+    L.append(f"| 平均 planning 延遲 | {_ms_to_s(s.get('avg_planning_ms'))} |")
+    L.append(f"| 平均 retrieval 延遲 | {_ms_to_s(s.get('avg_retrieval_ms'))} |")
+    L.append(f"| 平均 grounding 延遲 | {_ms_to_s(s.get('avg_grounding_ms'))} |")
+    L.append("")
+
+    L.append("## 逐題速覽")
+    L.append("")
+    L.append("| | ID | 類型 | 選擇命中 | 檢索覆蓋 | grounding | 延遲 | 衝突/未支撐 |")
+    L.append("|---|----|------|---------|---------|-----------|------|------|")
+    for r in out.get("rows", []):
+        lat = r.get("latency") or {}
+        iss = r.get("issues") or {}
+        L.append(
+            f"| {_q_status(r)} | {r.get('id')} | {r.get('type','')} | "
+            f"{_fmt(r.get('paper_selection_recall'), pct=True)} | "
+            f"{_fmt(r.get('retrieval_span_recall'), pct=True)} | "
+            f"{_fmt(r.get('grounding_score'))} | "
+            f"{_ms_to_s(lat.get('total'))} | "
+            f"C{iss.get('conflicts', 0)}/U{iss.get('unsupported', 0)} |"
+        )
+    L.append("")
+
+    L.append("## 逐題細節")
+    L.append("")
+    for r in out.get("rows", []):
+        L.append(f"### {_q_status(r)} {r.get('id')} · {r.get('type','')}")
+        L.append("")
+        L.append(f"**問題**：{r.get('question')}")
+        L.append("")
+        L.append(f"- detected_paper：`{r.get('detected_paper')}`")
+        L.append(f"- 選出論文：{r.get('selected_papers')}")
+        L.append(f"- gold_papers：{r.get('gold_papers')}")
+        L.append(
+            f"- 論文選擇命中率：{_fmt(r.get('paper_selection_recall'), pct=True)}　"
+            f"檢索覆蓋率：{_fmt(r.get('retrieval_span_recall'), pct=True)}　"
+            f"grounding：{_fmt(r.get('grounding_score'))}"
+        )
+        L.append(f"- 延遲：{_ms_to_s((r.get('latency') or {}).get('total'))}　問題標記：{r.get('issues')}")
+        L.append("")
+        ans = (r.get("answer") or "").strip()
+        if len(ans) > 800:
+            ans = ans[:800] + " …（完整內容見 JSON）"
+        L.append("**答案預覽**：")
+        L.append("")
+        L.append("> " + ans.replace("\n", "\n> "))
+        L.append("")
+        L.append("---")
+        L.append("")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(L))
 
 
 def _print_row(row: dict):
@@ -171,10 +282,14 @@ def run(label: str):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
 
+    md_path = os.path.join(RESULTS_DIR, f"eval_{label}.md")
+    _write_markdown_report(out, md_path)
+
     print(f"\n{'#'*70}\n# 彙總（label={label}）\n{'#'*70}")
     for k, v in summary.items():
         print(f"  {k:24s}: {v}")
-    print(f"\n結果已存：{path}")
+    print(f"\nJSON 結果（給 Claude 細看）：{path}")
+    print(f"Markdown 報告（給你快速掃）：{md_path}")
 
 
 def compare(label_a: str, label_b: str):
