@@ -125,6 +125,8 @@ def run_subqueries_parallel(valid_tasks: list, prefilled: dict) -> list:
         try:
             query_text = prepare_query_text(sub_q)
             nodes = _retrieve_nodes(engine, query_text)
+            n = "n/a" if nodes is None else len(nodes)
+            print(f"  🔎 [Phase A] {label} 檢索到 {n} 個 node")
             return task_idx, label, engine, query_text, nodes
         except Exception as e:
             print(f"  ⚠️  [Phase A] {label} 檢索失敗：{e}")
@@ -142,8 +144,12 @@ def run_subqueries_parallel(valid_tasks: list, prefilled: dict) -> list:
         label, engine, query_text, nodes = retrieved[task_idx]
         try:
             result = _generate_from_nodes(engine, nodes, query_text)
+            # P1 診斷：區分「檢索回空」與「有 node 但生成回空」
+            tag = "（空/無內容）" if is_empty_result(result) else ""
+            print(f"  ✍️  [Phase B] {label} 生成 {len(result)} 字元 {tag}")
             results[task_idx] = (label, result)
         except Exception as e:
+            print(f"  ❌ [Phase B] {label} 生成例外：{e}")
             results[task_idx] = (label, f"{label}生成失敗：{e}")
 
     return [(label, result) for _, (label, result) in sorted(results.items())]

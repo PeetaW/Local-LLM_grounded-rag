@@ -35,6 +35,24 @@ RESULTS_DIR = os.path.join(EVAL_DIR, "results")
 EVAL_SET    = os.path.join(EVAL_DIR, "eval_set.json")
 
 
+class _Tee:
+    """同時把輸出寫到原本的終端機與一個 log 檔（供深度 debug / 給 Claude 看完整過程）。"""
+    def __init__(self, stream, file_obj):
+        self._stream = stream
+        self._file = file_obj
+
+    def write(self, data):
+        self._stream.write(data)
+        self._file.write(data)
+
+    def flush(self):
+        self._stream.flush()
+        self._file.flush()
+
+    def __getattr__(self, attr):
+        return getattr(self._stream, attr)
+
+
 def _load_questions() -> list:
     with open(EVAL_SET, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -213,13 +231,22 @@ def _print_row(row: dict):
     print(f"  問題標記      : {row['issues']}")
 
 
-def run(label: str):
+def run(label: str, limit: int = None):
+    # ── 把完整 console 輸出（索引載入、逐句 NLI、萬一的 traceback）同步寫進 log 檔 ──
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    log_path = os.path.join(RESULTS_DIR, f"eval_{label}.log")
+    _log_file = open(log_path, "w", encoding="utf-8", buffering=1)
+    sys.stdout = _Tee(sys.stdout, _log_file)
+    sys.stderr = _Tee(sys.stderr, _log_file)
+
     from main import paper_engines
     from rag.query_pipeline import execute_structured_query
 
     questions = _load_questions()
+    if limit:
+        questions = questions[:limit]
+        print(f"⚠️  --limit {limit}：只跑前 {len(questions)} 題（快速測試/重現用）")
     all_names = list(paper_engines.keys())
-    os.makedirs(RESULTS_DIR, exist_ok=True)
 
     has_gold = any(q.get("gold_papers") for q in questions)
     print(f"\n{'#'*70}")
@@ -290,6 +317,12 @@ def run(label: str):
         print(f"  {k:24s}: {v}")
     print(f"\nJSON 結果（給 Claude 細看）：{path}")
     print(f"Markdown 報告（給你快速掃）：{md_path}")
+    print(f"完整 console log：{log_path}")
+
+    # 還原 stdout/stderr 並關閉 log 檔
+    sys.stdout = sys.stdout._stream
+    sys.stderr = sys.stderr._stream
+    _log_file.close()
 
 
 def compare(label_a: str, label_b: str):
@@ -308,12 +341,13 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Tier 0 RAG 評估骨架")
     ap.add_argument("--run", action="store_true", help="跑題組")
     ap.add_argument("--label", default="baseline", help="這次結果的標籤（檔名用）")
+    ap.add_argument("--limit", type=int, default=None, help="只跑前 N 題（快速測試/重現用）")
     ap.add_argument("--compare", nargs=2, metavar=("A", "B"), help="比較兩個 label 的彙總")
     args = ap.parse_args()
 
     if args.compare:
         compare(*args.compare)
     elif args.run:
-        run(args.label)
+        run(args.label, args.limit)
     else:
         ap.print_help()

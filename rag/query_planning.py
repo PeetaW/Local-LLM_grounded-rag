@@ -4,22 +4,48 @@
 
 import re
 import json
+from collections import Counter
+
+
+# 共用檔名樣板：ScienceDirect / 期刊 PDF 常見的非識別性片段。
+# 問題裡出現這些字（如 "main findings"）不該觸發單篇鎖定。
+_FILENAME_BOILERPLATE = {
+    "main", "s2.0", "article", "supplement", "supplementary",
+    "info", "full", "text", "pdf",
+}
 
 
 def detect_target_paper(question: str, paper_names: list) -> str | None:
     """
     Deterministic string match — no LLM.
-    Scans the question for filename segments that identify a specific paper.
+    Scans the question for *distinctive* filename segments that identify a
+    specific paper. 共用樣板片段（如 s2.0、main）與出現在多數檔名中的片段會被排除，
+    避免問題只是含有 "main" 之類的字就誤鎖到錯誤論文（P3）。
     """
     question_lower = question.lower()
+
+    # 計算每個片段的檔名出現頻率：出現在很多檔名中的片段＝非識別性樣板
+    seg_df = Counter()
+    for name in paper_names:
+        for s in set(name.lower().split("-")):
+            seg_df[s] += 1
+    df_threshold = max(2, len(paper_names) // 6)
+
+    def _is_distinctive(seg: str) -> bool:
+        return (
+            len(seg) > 3
+            and seg not in _FILENAME_BOILERPLATE
+            and seg_df[seg] <= df_threshold
+        )
+
     best_match = None
     best_score = 0
-
     for name in paper_names:
-        segments = [s for s in name.lower().split("-") if len(s) > 3]
+        segments = [s for s in name.lower().split("-") if _is_distinctive(s)]
+        if not segments:
+            continue
         matches = sum(1 for seg in segments if seg in question_lower)
-        score = matches / len(segments) if segments else 0
-
+        score = matches / len(segments)
         if score > best_score and score >= 0.3:
             best_score = score
             best_match = name

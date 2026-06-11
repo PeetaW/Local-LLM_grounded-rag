@@ -49,6 +49,18 @@ def _partition_results_by_section(citation_results: list, full_text: str) -> dic
     return partitioned
 
 
+def _retriever_node_count(retriever) -> int | None:
+    """從 hybrid retriever 的子檢索器推得索引的 node 數；推不出回 None。"""
+    for r in getattr(retriever, "_retrievers", []):
+        idx = getattr(r, "_index", None) or getattr(r, "index", None)
+        if idx is not None:
+            try:
+                return len(idx.docstore.docs)
+            except Exception:
+                continue
+    return None
+
+
 def _fetch_grounding_chunks(question: str, paper_engines_to_use: dict) -> list[dict]:
     """
     Retrieve raw PDF chunks from the vector index for NLI grounding.
@@ -69,11 +81,16 @@ def _fetch_grounding_chunks(question: str, paper_engines_to_use: dict) -> list[d
             if retriever is None:
                 continue
 
+            # 夾住 top_k：小論文 chunk 數可能 < GROUNDING_TOP_K，
+            # BM25(bm25s) 在 k > corpus size 時會報錯，導致整篇被跳過、grounding 誤判為 0（P2）。
+            node_count = _retriever_node_count(retriever)
+            effective_k = cfg.GROUNDING_TOP_K if node_count is None else min(cfg.GROUNDING_TOP_K, node_count)
+
             # Temporarily raise top_k; restore via finally to survive retrieval errors
             old_top_k = getattr(retriever, "similarity_top_k", cfg.SIMILARITY_TOP_K)
-            retriever.similarity_top_k = cfg.GROUNDING_TOP_K
+            retriever.similarity_top_k = effective_k
             for r in getattr(retriever, "_retrievers", []):
-                r.similarity_top_k = cfg.GROUNDING_TOP_K
+                r.similarity_top_k = effective_k
 
             try:
                 nodes = retriever.retrieve(query_text)

@@ -71,14 +71,16 @@ GROUNDING_TOP_K   = 20   # Stage 6 NLI 用，比一般檢索多取以提升 grou
 # False = 正常模式，自動篩選最相關 5 篇（預設）
 REVIEW_MODE = False
 
-# ── Reranker 設定 ─────────────────────────────────────
-# 檢索漏斗：BM25 / 向量各取 RERANK_CANDIDATE_K 個候選 → 融合 →
-# cross-encoder reranker 從中精選 RERANKER_TOP_N 個送進 LLM。
-# ⚠️ RERANK_CANDIDATE_K 必須 > RERANKER_TOP_N，否則 reranker 拿到幾個就回幾個，
-#    形同「只重排不過濾」，cross-encoder 等於白跑。
+# ── Reranker / 檢索候選數設定 ─────────────────────────
+# ⚠️ 重要：主 pipeline 的子問題檢索（query_retrieval.py 兩階段路徑）是直接
+#    retrieve → synthesize，**沒有經過 reranker**（reranker 只在 engine.query() 生效）。
+#    所以 RERANK_CANDIDATE_K 實際上 =「直接餵給 gemma4 合成的 chunk 數」。
+#    設太大會：① 小論文 chunk < K 時 bm25s 報錯造成空白；
+#             ② context 膨脹，gemma4 易回 Empty Response 且大幅變慢。
+#    retriever.py 已把 top_k 夾到 min(K, 該篇chunk數) 作保護。
 RERANKER_MODEL     = "BAAI/bge-reranker-v2-m3"
-RERANK_CANDIDATE_K = 24   # 進 reranker 前的候選數（每路檢索與融合都用這個）
-RERANKER_TOP_N     = 8    # rerank 後保留幾個送進 LLM
+RERANK_CANDIDATE_K = 8    # 每篇檢索取幾個 chunk（夾在 min(K, 該篇chunk數)）
+RERANKER_TOP_N     = 8    # reranker 保留數（僅 engine.query() 路徑會用到）
 
 # ── Stage 3：知識蒸餾 ─────────────────────────────────────
 SYNTHESIS_ENABLED = True

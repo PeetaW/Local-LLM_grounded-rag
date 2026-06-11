@@ -1,0 +1,463 @@
+{
+  "label": "after_p2p3",
+  "mode": "gold",
+  "summary": {
+    "n_questions": 12,
+    "avg_grounding_score": 0.31,
+    "avg_paper_sel_recall": 1.0,
+    "avg_retrieval_recall": null,
+    "avg_total_ms": 4334884.083,
+    "avg_planning_ms": 5281.25,
+    "avg_retrieval_ms": 306588.917,
+    "avg_grounding_ms": 5537219.143
+  },
+  "rows": [
+    {
+      "id": "Q01",
+      "type": "single_paper",
+      "question": "In the study of JPH203's preincubation inhibitory effect on LAT1, how does preincubation change JPH203's inhibitory potency? Give the reported values.",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S1347861320300633-main",
+        "1-s2.0-S0021979710012403-main",
+        "1-s2.0-S1936523321002047-main",
+        "s41421-024-00697-6"
+      ],
+      "gold_papers": [
+        "1-s2.0-S1347861320300633-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": -1.0,
+      "counts": {
+        "paper_count": 4,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 5631,
+        "retrieval": 322077,
+        "synthesis": 0,
+        "synthesis-llm": 89974,
+        "verification": null,
+        "grounding": null,
+        "translation": null,
+        "total": 417683
+      },
+      "wall_seconds": 417.7,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 0
+      },
+      "answer": "⚠️ **資料來源說明**：本地學術文獻資料庫中未找到與此問題直接相關的內容。以下回答來自模型自身知識，非論文原文，請謹慎參考並自行查證。\n\n關於 JPH203 對於 LAT1（Large Neutral Amino Acid Transporter 1, SLC7A5）的預孵育（Preincubation）抑制效果，根據目前的藥理學知識與相關研究趨勢，詳細分析如下：\n\n### 1. 預孵育對抑制效能的影響\n在針對 LAT1 的抑制劑研究中，JPH203 被觀察到具有明顯的**時間依賴性（Time-dependent）**或**慢結合動力學（Slow-binding kinetics）**特徵。\n\n一般而言，**預孵育會顯著增強 JPH203 的抑制效能（即降低其 $\\text{IC}_{50}$ 值）**。這意味著當 JPH203 與 LAT1 蛋白在底物（如亮氨酸 L-leucine）加入前先接觸一段時間，其對轉運功能的抑制效果會比直接同時加入時更強。\n\n### 2. 機制分析\n這種現象通常歸因於以下幾點：\n*   **慢結合動力學**：JPH203 可能在與 LAT1 結合後，經歷了一個構象調整過程（Conformational change），從一個初步的鬆散結合狀態轉變為更穩固、親和力更高的複合體。\n*   **狀態特異性結合**：LAT1 是一種交替訪問轉運蛋白（Alternating-access transporter）。預孵育可能允許 JPH203 在底物競爭壓力較小的情況下，優先佔據特定的構象狀態（例如 inward-facing 或 outward-facing），從而提高其表觀親和力。\n\n### 3. 關於報告數值的說明\n由於您提到的本地資料庫未找到直接文獻，且不同研究使用的細胞株（如 HEK293, MDA-MB-231）以及實驗條件（溫度、緩衝液組成）不同，具體的 $\\text{IC}_{50}$ 數值會有所差異。\n\n**【此部分為模型推測，建議查閱原始文獻確認】**\n在類似的 LAT1 抑制劑研究中，預孵育前後的效能差異通常表現如下：\n*   **未預孵育（Immediate addition）**：$\\text{IC}_{50}$ 可能處於低微莫量級（low $\\mu\\text{M}$ range）。\n*   **預孵育後（例如 30-60 分鐘）**：$\\text{IC}_{50}$ 可能下降至奈莫量級（$\\text{nM}$ range），效能提升可達數倍甚至十倍以上。\n\n*(註：具體精確數值請務必參考 JPH203 的原研論文或藥理學數據表，因為 $\\text{IC}_{50}$ 是高度依賴實驗環境的參數。)*\n\n### 4. 學術提醒\n在分析此類數據時，請注意以下幾點：\n1.  **數值變異性**：不同論文報告的 $\\text{IC}_{50}$ 或 $K_i$ 值可能因細胞表達量、底物濃度而異。\n2.  **可逆性**：需確認該預孵育導致的效能增強是屬於「慢結合但可逆」還是「不可逆（共價）結合」。根據目前對 JPH203 的認知，其通常被視為高親和力的競爭性或非競爭性抑制劑，而非典型的共價抑制劑。\n3.  **實驗對照**：在評估預孵育效果時，應觀察 $\\text{IC}_{50}$ 隨時間變化的曲線（Time-course study），以確認是否達到飽和平衡。\n\n### 總結\n預孵育會**顯著提升** JPH203 對 LAT1 的抑制效能。這種現象反映了該分子與轉運蛋白之間存在複雜的結合動力學，建議在設計實驗時，統一設定預孵育時間以確保數據的可比性。"
+    },
+    {
+      "id": "Q02",
+      "type": "single_paper",
+      "question": "What is the hybrid process used for the asymmetric synthesis of optically pure L-p-boronophenylalanine, and what are its key steps?",
+      "detected_paper": null,
+      "selected_papers": [
+        "bbb0683",
+        "CMDC-20-e202500059"
+      ],
+      "gold_papers": [
+        "bbb0683"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.167,
+      "counts": {
+        "paper_count": 2,
+        "subquery_count": 4
+      },
+      "latency": {
+        "planning": 4108,
+        "retrieval": 402258,
+        "synthesis": 198624,
+        "synthesis-llm": 142327,
+        "verification": 133501,
+        "grounding": 5288820,
+        "translation": 1321016,
+        "total": 7490656
+      },
+      "wall_seconds": 7490.7,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 6
+      },
+      "answer": "## 【論文直接依據】\n\n光學純 L-p-硼苯丙氨酸 (L-BPA) 的不對稱合成雜化製程結合了「對映選擇性烷基化」以及隨後的「酶促水解」[bbb0683]。此製程旨在比以往的方法更高效，提供更簡單的操作與後處理、更少的反應步驟，並避免了不對稱氫化後需要額外分離/純化的需求，或獲取 $\\alpha$-苯甲醯胺肉桂酸衍生物底物之困難 [bbb0683]。\n\n此合成的關鍵步驟如下：\n\n1.  **起始原料保護**：將 4-溴甲基苯硼酸 (1) 與 2,2-二甲基-1,3-丙二醇在乾燥 THF 中於室溫下攪拌 10 分鐘，以產生環狀硼酸酯 (2)，產率為 79% [bbb0683]。\n2.  **對映選擇性烷基化**：在氬氣環境下，於 -78°C 的乾燥 THF 中，使用 n-BuLi（1.68M 於己烷中）將 (2R)-(-)-2,5-二氫-2-異丙基-3,6-二甲氧基吡嗪 (3) 進行鋰化。隨後加入溴化物 (2) 並在 -78°C 下攪拌 15 小時，以產生具有 2S 構型的加成產物 4（立體選擇性：74% e.e. 或 72% 非對映異構體過量）[bbb0683]。詳細操作包括在 30 分鐘內加入 n-BuLi，等待 1 小時，然後在 30 分鐘內加入物質 2 的溶液；後處理包括加入磷酸鹽緩衝液 (pH 7.0, 30ml) 並升溫至室溫 [bbb0683]。\n3.  **L-BPA 甲酯 (6) 的合成**：分為兩個階段 [bbb0683]：\n    *   **階段 1**：將產物 4 溶解於 THF 中；在 5°C 下加入 0.1 N HCl 並在室溫下攪拌 8 小時，產生 D-Val-OMe 與氨基酸甲酯 5 的等量混合物。透過蒸餾 (50°C, 1 mmHg) 去除 D-Val-OMe 以獲得粗產物 5 [bbb0683]。\n    *   **階段 2**：將粗產物 5 與 1 N HCl 及 THF 在室溫下攪拌 2 小時，隨後進行 ODS 柱層析純化以獲得 L-BPA 甲酯 (6)，基於產物 4 的產率為 85% [bbb0683]。\n4.  **水解以獲得 L-BPA**：有兩種可能路徑，但雜化製程專門利用酶促水解來確保光學純度 [bbb0683]：\n    *   **酶促水解**：將 L-BPA 甲酯 (6) 與胰凝乳蛋白酶 (chymotrypsin) 在水中混合，使用 0.1 N LiOH 將 pH 調節至 5.0，並在 25°C 下攪拌 30 小時。這產生了光學純度為 100% (e.e.) 的 L-BPA，產率為 79% [bbb0683]。\n    *   **非酶促水解**：使用 0.5 N NaOH 在室溫下反應 36 小時，產率為 87%，但光學純度僅為 86% [bbb0683]。\n\n此雜化製程有效地將立體選擇性從 74% e.e.（中間體 4）提高到最終 L-BPA 產物的 100% e.e. [bbb0683]。\n\n## 【跨文獻推論】\n\n跨論文推論（基於 [bbb0683]）：「雜化製程」特指化學對映選擇性烷基化與生物酶促水解之間的協同作用。雖然化學步驟（步驟 2）建立了初始手性中心，但其僅達到 74% e.e. 的中等立體選擇性。隨後的步驟 4 酶促水解起到了動力學拆分或純化步驟的作用，選擇性地將 L-酯轉化為 L-氨基酸，從而將最終光學純度從 74% 提升至 100%。這可以由非酶促水解（缺乏這種生物選擇性）無法達到 100% e.e.，而僅產生 86% e.e. 的事實來證明。\n\n## 【知識延伸與推測】\n\n模型推測（文獻依據不足）：\n1.  **手性輔助劑**：使用 (2R)-(-)-2,5-二氫-2-異丙基-3,6-二甲氧基吡嗪表明應用了 Seebach 的「立體中心自我再生」或類似的手性輔助劑方法，以在甘氨酸等價物的烷基化過程中誘導不對稱性。\n2.  **酶特異性**：使用胰凝乳蛋白酶可能是因為它是一種對 L-氨基酸酯具有高特異性的絲氨酸蛋白酶，特別是對於具有大體積疏水側鏈（如 p-硼苯基）的酯類，使其能夠選擇性地水解 L-異構體，而保持任何 D-異構體殘餘不被觸動。\n3.  **BNCT 應用**：對 100% 光學純度的要求可能是由於硼中子捕獲治療 (BNCT) 的生物特性。由於 L-BPA 是苯丙氨酸的類似物，其進入腫瘤細胞的運輸通常依賴於 L-氨基酸轉運蛋白（如 LAT1）；D-異構體可能在生物學上是不活性的或具有不同的清除方式，可能會降低治療效果並增加毒性。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ❌ 【論文直接依據】：16.7%（1/6 句）\n  ❌ 【跨文獻推論】：0.0%（0/1 句）  ← 跨論文推論，低分為預期範圍\n\n❌ **直引依據率**：16.7%　低（建議縮小問題範圍）\n\n⚠️  **以下 6 個陳述未找到明確論文依據，請謹慎參考：**\n\n- The hybrid process for the asymmetric synthesis of optically pure L-p-boronophenylalanine (L-BPA) combines \"enantioselective alkylation\" with subsequent \"enzymatic hydrolysis\" [bbb0683]. This process is designed to be more efficient than previous methods, offering simpler operation and post-treatment, fewer reaction steps, and avoiding the need for additional separation/purification after asymmetric hydrogenation or the difficulty of obtaining $\\alpha$-benzamidocinnamic acid derivative substrates [bbb0683].（信心度：12.9%，最近似來源：CMDC-20-e202500059-beb43ed2）\n- *   Phase 1: Product 4 is dissolved in THF; 0.1 N HCl is added at 5°C and stirred at room temperature for 8 hours, producing an equal mixture of D-Val-OMe and amino acid methyl ester 5. D-Val-OMe is removed via distillation (50°C, 1 mmHg) to obtain crude product 5 [bbb0683].（信心度：34.6%，最近似來源：bbb0683-5edb73bf）\n- *   Enzymatic Hydrolysis: L-BPA methyl ester (6) is mixed with chymotrypsin in water, pH adjusted to 5.0 using 0.1 N LiOH, and stirred at 25°C for 30 hours. This yields L-BPA with 100% optical purity (e.e.) and a yield of 79% [bbb0683].（信心度：1.6%，最近似來源：CMDC-20-e202500059-beb43ed2）\n- *   Non-enzymatic Hydrolysis: Using 0.5 N NaOH at room temperature for 36 hours results in a yield of 87%, but the optical purity is only 86% [bbb0683].（信心度：2.1%，最近似來源：bbb0683-22cc0366）\n- The hybrid process effectively increases the stereoselectivity from 74% e.e. (intermediate 4) to 100% e.e. for the final L-BPA product [bbb0683].（信心度：4.6%，最近似來源：CMDC-20-e202500059-beb43ed2）\n- Cross-paper inference (based on [bbb0683]): The \"hybrid process\" is specifically defined by the synergy between the chemical enantioselective alkylation and the biological enzymatic hydrolysis. While the chemical step (Step 2) establishes the initial chiral center, it only achieves a moderate stereoselectivity of 74% e.e. The subsequent enzymatic hydrolysis in Step 4 acts as a kinetic resolution or purification step that selectively converts the L-ester to the L-amino acid, thereby upgrading the final optical purity from 74% to 100%. This is evidenced by the fact that non-enzymatic hydrolysis (which lacks this biological selectivity) fails to reach 100% e.e., resulting in only 86% e.e.（信心度：9.5%，最近似來源：bbb0683-b0276d85）\n\n<!-- grounding_score=0.167 -->\n---"
+    },
+    {
+      "id": "Q03",
+      "type": "figure_dependent",
+      "question": "According to the cryo-EM structure, how does JPH203 bind to and inhibit the LAT1-4F2hc complex?",
+      "detected_paper": null,
+      "selected_papers": [
+        "s41421-024-00697-6",
+        "1-s2.0-S1347861320300633-main",
+        "1-s2.0-S1936523321002047-main",
+        "s41467-024-45464-z (1)",
+        "LAT1 ChemComm 2026"
+      ],
+      "gold_papers": [
+        "s41421-024-00697-6"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 1.0,
+      "counts": {
+        "paper_count": 5,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 5466,
+        "retrieval": 300580,
+        "synthesis": 140142,
+        "synthesis-llm": 134231,
+        "verification": 886552,
+        "grounding": 4253218,
+        "translation": 1134869,
+        "total": 6855060
+      },
+      "wall_seconds": 6855.1,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 3
+      },
+      "answer": "根據提供的事實，以下是關於 JPH203 如何結合並抑制 LAT1-4F2hc 複合體的全面回答。\n\n## 【論文直接依據】\n*   **結合位點與結構：** JPH203 結合於 LAT1 的傳統底物結合口袋中 [Fact 1]。其分子結構由具有苯丙氨酸骨架的親水性頭部，以及具有 5-amino-2-(3-aminophenyl) benzoxazole 骨架的疏水性尾部組成 [Fact 2]。\n*   **親水性頭部交互作用：** 頭部的 $\\alpha$-氨基和 $\\alpha$-羧基與 TM1 和 TM6 解旋區域的主鏈原子形成氫鍵網絡；此外，雙鹵代酪氨酸核心上的氯原子與 Tyr259 形成鹵鍵 [Fact 3]。\n*   **疏水性尾部交互作用：** 尾部嵌入由 TM1 (Ile63, Ile64, Ile68)、TM3 (Ile140, Ile147, Ile148)、TM6 (Phe252, Gly255) 和 TM10 (Ile397, Phe400, Phe403) 的殘基組成的疏水口袋中 [Fact 4]。具體而言，尾部的氨基與 TM10 上 Phe400 的主鏈形成氫鍵，且其苯環與 Phe252 的側鏈發生 T 型 $\\pi$-$\\pi$ 交互作用 [Fact 5]。\n*   **結構分析：** 冷凍電子顯微鏡 (Cryo-EM) 解析了結合 JPH203 的 LAT1-4F2hc 複合體之向外開放構象 (outward-facing conformation)，整體解析度為 3.30 Å，JPH203 的聚焦精修解析度為 3.25 Å [Fact 6]。\n*   **選擇性與親和力：** Phe400 和 Tyr259 是決定高選擇性的關鍵殘基；在 LAT2 中，這些對應於 Val391 和 Phe250，導致鹵鍵的缺失 [Fact 7]。WT LAT1 的結合親和力 ($K_d$) 為 $1.48 \\pm 0.28\\ \\mu\\text{M}$，而 F400V 或 Y259F 突變則將 $K_d$ 分別增加至 $6.21 \\pm 1.58\\ \\mu\\text{M}$ 和 $3.81 \\pm 1.26\\ \\mu\\text{M}$ [Fact 8]。對於 WT LAT2，$K_d$ 為 $4.51 \\pm 1.35\\ \\mu\\text{M}$，但 V391F ($1.78 \\pm 0.65\\ \\mu\\text{M}$) 或 F250Y ($2.55 \\pm 0.96\\ \\mu\\text{M}$) 突變可提高親和力 [Fact 9]。\n*   **構象影響：** JPH203 的結合誘導了 TM1 的 $4.34^\\circ$ 位移以及 TM6 區域的旋轉；TM10 的旋轉比由 JX075 或 Diiodo-tyr 誘導的旋轉更為顯著 [Fact 10]。JPH203 的長尾阻止了 Phe400 的移動，從而破壞了 TM10 的二級結構 [Fact 11]。與部分破壞 TM3 和 TM10 的 JX075 不同，JPH203 僅破壞 TM10，而 TM3 保持完全摺疊狀態 [Fact 12]。\n\n## 【跨文獻推論】\n*   **選擇性機制：** 根據 [Fact 7]、[Fact 8] 和 [Fact 9]，可以合理推論 JPH203 對 LAT1 相較於 LAT2 的高選擇性主要由 Tyr259 和 Phe400 驅動。這些殘基促進了 LAT1 中的特定交互作用（如鹵鍵）；將其替換為 LAT2 中的殘基會降低結合親和力，而將 LAT2 的位點突變為與 LAT1 一致則會提高親和力。\n*   **功能抑制：** [Insufficient Evidence] 文獻依據不足，無法確認 JPH203 是否在機械上將蛋白質鎖定在失活狀態，或阻止了運輸週期完成所需的特定構象轉變，儘管它能穩定向外開放構象 [Fact 6] 並破壞 TM10 的二級結構 [Fact 11]。\n\n## 【知識延伸與推測】\n*   **模型推測（文獻依據不足）：** 鑑於 JPH203 將 LAT1 鎖定在向外開放狀態並破壞 TM10，它可能通過阻止 MFS (Major Facilitator Superfamily) 轉運蛋白典型的「搖擺束」(rocking bundle) 運動而作為強效抑制劑。如果 TM10 的二級結構受損，蛋白質可能無法轉變為向內開放構象 (inward-facing conformation)，從而有效地將轉運蛋白陷於非功能狀態，且不受底物濃度的影響。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ✅ 【論文直接依據】：100.0%（6/6 句）\n  ⚠️ 【跨文獻推論】：50.0%（1/2 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/1 句）  ← 知識延伸推測，低分為預期範圍\n\n✅ **直引依據率**：100.0%　高（直接引用高度忠實於論文）\n\n⚠️  **以下 3 個陳述未找到明確論文依據，請謹慎參考：**\n\n- Based on the provided facts, here is the comprehensive answer regarding how JPH203 binds to and inhibits the LAT1-4F2hc complex.（信心度：5.3%，最近似來源：1-s2.0-S1936523321002047--b1c23309）\n- *   Selectivity Mechanism: Based on [Fact 7], [Fact 8], and [Fact 9], it is reasonable to infer that the high selectivity of JPH203 for LAT1 over LAT2 is primarily driven by Tyr259 and Phe400. These residues facilitate specific interactions (such as halogen bonding) in LAT1; replacing them with residues found in LAT2 reduces binding affinity, while mutating LAT2 positions to match those of LAT1 increases affinity.（信心度：31.8%，最近似來源：1-s2.0-S1936523321002047--b160627c）\n- *   Model speculation (insufficient literature basis): Given that JPH203 locks LAT1 in an outward-facing state and disrupts TM10, it likely acts as a potent inhibitor by preventing the \"rocking bundle\" movement typical of MFS (Major Facilitator Superfamily) transporters. If the secondary structure of TM10 is compromised, the protein may be unable to transition to the inward-facing conformation, effectively trapping the transporter in a non-functional state regardless of substrate concentration.（信心度：12.5%，最近似來源：s41467-024-45464-z (1)-fda8fa75）\n\n<!-- grounding_score=1.000 -->\n---"
+    },
+    {
+      "id": "Q04",
+      "type": "table_lookup",
+      "question": "What are the main degradation products and impurities of BPA identified by HPLC, and under which storage conditions do they form?",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S0731708511003451-main",
+        "synthesis-and-biological-properties-of-water-soluble-p-boronophenylalanine-derivatives-relationship-between-water"
+      ],
+      "gold_papers": [
+        "1-s2.0-S0731708511003451-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.75,
+      "counts": {
+        "paper_count": 2,
+        "subquery_count": 2
+      },
+      "latency": {
+        "planning": 3642,
+        "retrieval": 174531,
+        "synthesis": 94428,
+        "synthesis-llm": 106613,
+        "verification": 98482,
+        "grounding": 7039226,
+        "translation": 909716,
+        "total": 8426640
+      },
+      "wall_seconds": 8426.1,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 5
+      },
+      "answer": "## 【論文直接依據】\n\n**透過 HPLC 鑑定之降解產物與雜質：**\n* **酪胺酸 (Tyrosine)：** 定量波長為 230 nm，保留時間為 4.5 分鐘 [Chunk 1]。\n* **苯丙胺酸 (Phenylalanine)：** 定量波長為 256 nm，保留時間為 11.0 分鐘 [Chunk 1]。\n* **BrPD (2-(4-Bromophenyl)-[1,3]dioxane)：** 一種合成中間體雜質，於 256 nm 處檢出，保留時間為 17.3 分鐘 [Chunk 1]。\n* **FBBA (4-Formylbenzeneboronic acid)：** 一種合成中間體雜質，於 256 nm 處檢出，保留時間為 23.7 分鐘 [Chunk 1]。\n* **BDPA (2-tert-Butoxycarbonylamino-3-[4-(5,5-dimethyl-[1,3,2]dioxaborinan-2-yl)-phenyl]acrylic acid methyl ester)：** 一種合成中間體雜質，於 270 nm 處檢出；其與 FBBA 共洗脫 (co-elutes) [Chunk 1]。\n\n**儲存與生成條件：**\n* **酪胺酸 (Tyrosine) 的生成：** 發生於鹼性及氧化條件下，且在氧化條件下的降解速度極快 [Chunk 1, Chunk 2]。具體而言，當暴露於 $100\\text{ mM NaOH}$（鹼性）或 $6\\text{ mM H}_2\\text{O}_2$（氧化）並於 $55^\\circ\\text{C}$ 下放置 24 小時時會產生酪胺酸 [Chunk 2]。\n* **苯丙胺酸 (Phenylalanine) 的生成：** 發生於冷凍乾燥的 BPA/甘露醇 (mannitol) 藥品中。此過程緩慢且具有溫度依賴性；在 $40^\\circ\\text{C}$ 下儲存 6 個月會產生約 1% 的苯丙胺酸（相對於 BPA 質量）[Chunk 1, Chunk 2]。\n* **穩定性條件：** BPA 原料粉末在 $55^\\circ\\text{C}$ 下儲存 6 個月或 $40^\\circ\\text{C}$ 下儲存 12 個月時保持穩定（未檢出降解）[Chunk 2]。此外，BPA 在酸溶液及 $\\text{FeCl}_3$ 溶液中亦保持穩定 [Chunk 2]。\n\n## 【跨文獻推論】\n\n* **跨論文推論（基於 [Chunk 1] 與 [Chunk 2]）：** BPA 降解為苯丙胺酸可能是由製劑或冷凍乾燥過程觸發，而非 BPA 分子本身的固有特性。此結論源於以下事實：雖然 BPA/甘露醇冷凍乾燥產品在 $40^\\circ\\text{C}$ 下儲存 6 個月會發生降解 [Chunk 1, Chunk 2]，但 BPA 原料粉末在相同溫度下可保持穩定更長時間（12 個月）[Chunk 2]。\n* **跨論文推論（基於 [Chunk 1]）：** 透過 HPLC 對 BDPA 進行定量在分析上具有挑戰性，因為它與 FBBA 共洗脫。儘管兩者的最佳檢測波長不同（BDPA 為 270 nm，FBBA 為 256 nm），但其保留時間相同，意味著無法使用目前的 HPLC 方法將其分離 [Chunk 1]。\n\n## 【知識延伸與推測】\n\n* **模型推測（文獻依據不足）：** 在甘露醇存在下 BPA 降解為苯丙胺酸，可能是由於兩種成分之間的化學交互作用，或是在冷凍乾燥過程中形成了非晶態 (amorphous state)，與結晶原料粉末相比，這通常會增加分子的遷移率與反應活性。\n* **模型推測（文獻依據不足）：** 由於酪胺酸可由鹼性水解和氧化反應共同產生，因此這兩種路徑可能代表兩個不同的化學途徑（例如：親核攻擊與氧化裂解），最終收斂於同一種降解產物。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ⚠️ 【論文直接依據】：75.0%（6/8 句）\n  ❌ 【跨文獻推論】：0.0%（0/2 句）  ← 跨論文推論，低分為預期範圍\n  ⚠️ 【知識延伸推測】：50.0%（1/2 句）  ← 知識延伸推測，低分為預期範圍\n\n⚠️ **直引依據率**：75.0%　中（部分直引陳述需確認）\n\n⚠️  **以下 5 個陳述未找到明確論文依據，請謹慎參考：**\n\n- * Tyrosine formation: Occurs under alkali and oxidative conditions, with the degradation speed being extremely fast under oxidative conditions [Chunk 1, Chunk 2]. Specifically, Tyrosine is generated when exposed to $100\\text{ mM NaOH}$ (alkaline) or $6\\text{ mM H}_2\\text{O}_2$ (oxidative) at $55^\\circ\\text{C}$ for 24 hours [Chunk 2].（信心度：5.8%，最近似來源：1-s2.0-S0731708511003451--a3a69238）\n- * Stability conditions: BPA raw powder is stable (no degradation detected) when stored at $55^\\circ\\text{C}$ for 6 months or $40^\\circ\\text{C}$ for 12 months [Chunk 2]. Additionally, BPA remains stable in acid and $\\text{FeCl}_3$ solutions [Chunk 2].（信心度：0.3%，最近似來源：synthesis-and-biological--405fae28）\n- * Cross-paper inference (based on [Chunk 1] and [Chunk 2]): The degradation of BPA into Phenylalanine is likely triggered by the formulation or the lyophilization process rather than being an inherent property of the BPA molecule itself. This is derived from the fact that while the BPA/mannitol lyophilized product degrades at $40^\\circ\\text{C}$ over 6 months [Chunk 1, Chunk 2], the BPA raw powder remains stable at the same temperature for a longer duration (12 months) [Chunk 2].（信心度：2.3%，最近似來源：1-s2.0-S0731708511003451--4481826c）\n- * Cross-paper inference (based on [Chunk 1]): The quantification of BDPA via HPLC is analytically challenging because it co-elutes with FBBA. Although they have different optimal detection wavelengths (270 nm for BDPA vs 256 nm for FBBA), their identical retention times mean they cannot be separated by the current HPLC method [Chunk 1].（信心度：1.3%，最近似來源：1-s2.0-S0731708511003451--6c319b11）\n- * Model speculation (insufficient literature basis): Since Tyrosine is produced by both alkaline hydrolysis and oxidation, it is probable that these represent two distinct chemical pathways (e.g., nucleophilic attack vs. oxidative cleavage) that converge on the same degradation product.（信心度：5.5%，最近似來源：synthesis-and-biological--2ef4019c）\n\n<!-- grounding_score=0.750 -->\n---"
+    },
+    {
+      "id": "Q05",
+      "type": "single_paper",
+      "question": "What is the solvent-free green protocol for N-Boc protection of amines using picric acid as a catalyst, and what reaction conditions are used?",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S2773223124000268-main"
+      ],
+      "gold_papers": [
+        "1-s2.0-S2773223124000268-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.25,
+      "counts": {
+        "paper_count": 1,
+        "subquery_count": 2
+      },
+      "latency": {
+        "planning": 3423,
+        "retrieval": 169812,
+        "synthesis": 82204,
+        "synthesis-llm": 91575,
+        "verification": 109601,
+        "grounding": 3841015,
+        "translation": 936273,
+        "total": 5233906
+      },
+      "wall_seconds": 5233.8,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 10
+      },
+      "answer": "## 【論文直接依據】\n使用苦味酸（picric acid）作為催化劑的胺類 N-Boc 保護無溶劑綠色方案具有以下特點：\n\n*   **催化劑與試劑**：該反應使用苦味酸作為 Brønsted 酸催化劑 [1-s2.0-S2773223124000268-main]，並使用二叔丁基二碳酸酯 ($\\text{(Boc)}_2\\text{O}$ / Boc anhydride) 作為試劑 [1-s2.0-S2773223124000268-main]。\n*   **反應條件**：該過程在室溫 (rt) 下，於完全無溶劑（neat）的條件下進行 [1-s2.0-S2773223124000268-main]。\n*   **最適參數**：\n    *   最適催化劑用量為 0.2 equivalents，儘管使用 0.1、0.5 和 1.0 equivalents 也能獲得極佳的產率 [1-s2.0-S2773223124000268-main]。\n    *   最適反應時間為 60 minutes [1-s2.0-S2773223124000268-main]。\n*   **性能與範圍**：\n    *   該方法最高可達到 98% 的產率 [1-s2.0-S2773223124000268-main]。\n    *   在最適條件下（0.2 eq 催化劑，室溫，60 min），芳香族初級胺的產率為 95% [1-s2.0-S2773223124000268-main]。\n    *   該方案適用於各種胺類底物，包括芳香族胺、雜環芳香族胺、開鏈脂肪族胺和環狀脂肪族胺 [1-s2.0-S2773223124000268-main]。\n*   **擬議機制**：反應分三個階段進行：(1) 苦味酸活化 $\\text{Boc}$ anhydride 的羰基氧；(2) 胺的氮原子攻擊 $\\text{Boc}$ anhydride 的羰基碳；以及 (3) 通過質子取代並以二氧化碳 ($\\text{CO}_2$) 和叔丁醇 (t-BuOH) 作為副產物消除，形成 N-Boc 保護化合物 [1-s2.0-S2773223124000268-main]。\n\n## 【跨文獻推論】\n*   **綠色化學合理性**（基於 [Fact 1, Fact 4]）：該方案被歸類為「綠色」，是因為它消除了對有機溶劑的需求（無溶劑/neat）且在環境溫度下運行，因此與可能需要在溶劑中冷卻或加熱的傳統保護方法相比，減少了化學廢物和能量消耗。\n\n## 【知識延伸與推測】\n*   **熱力學驅動力**（模型推測）：二氧化碳 ($\\text{CO}_2$) 作為氣態副產物的消除可能起到了強大的熱力學驅動力，根據勒夏特列原理（Le Chatelier's principle），將平衡向形成 N-Boc 保護產物的方向移動。\n*   **安全考量**（模型推測）：雖然苦味酸是一種有效的催化劑，但在一般化學實踐中已知其在乾燥或接觸某些金屬時具有潛在的爆炸性；因此，操作者可能需要以水合物形式處理它，或在提供的文本中未詳細列出的嚴格安全協議下進行。\n*   **催化效率**（模型推測）：在 0.1 到 1.0 equivalents 的範圍內產率保持「極佳」這一事實表明，該反應相對穩健且對精確的催化劑用量不過分敏感，這簡化了實驗執行。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ❌ 【論文直接依據】：25.0%（2/8 句）\n  ❌ 【跨文獻推論】：0.0%（0/1 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/3 句）  ← 知識延伸推測，低分為預期範圍\n\n❌ **直引依據率**：25.0%　低（建議縮小問題範圍）\n\n⚠️  **以下 10 個陳述未找到明確論文依據，請謹慎參考：**\n\n- *   Catalyst and Reagents: The reaction uses picric acid as a Brønsted acid catalyst [1-s2.0-S2773223124000268-main] and di-tert-butyl dicarbonate ($\\text{(Boc)}_2\\text{O}$ / Boc anhydride) as the reagent [1-s2.0-S2773223124000268-main].（信心度：9.5%，最近似來源：1-s2.0-S2773223124000268--c3d68ef5）\n- *   The optimal catalyst loading is 0.2 equivalents, although excellent yields are also achieved using 0.1, 0.5, and 1.0 equivalents [1-s2.0-S2773223124000268-main].（信心度：0.4%，最近似來源：1-s2.0-S2773223124000268--048eccfa）\n- *   The optimal reaction time is 60 minutes [1-s2.0-S2773223124000268-main].（信心度：1.0%，最近似來源：1-s2.0-S2773223124000268--048eccfa）\n- *   The method can achieve a maximum yield of 98% [1-s2.0-S2773223124000268-main].（信心度：6.0%，最近似來源：1-s2.0-S2773223124000268--f40c39dc）\n- *   Under optimal conditions (0.2 eq catalyst, room temperature, 60 min), aromatic primary amines provide a yield of 95% [1-s2.0-S2773223124000268-main].（信心度：4.1%，最近似來源：1-s2.0-S2773223124000268--f40c39dc）\n- *   The protocol is applicable to various amine substrates, including aromatic amines, heterocyclic aromatic amines, open-chain aliphatic amines, and cyclic aliphatic amines [1-s2.0-S2773223124000268-main].（信心度：7.2%，最近似來源：1-s2.0-S2773223124000268--c3d68ef5）\n- *   Green Chemistry Justification (based on [Fact 1, Fact 4]): The protocol is classified as \"green\" because it eliminates the need for organic solvents (solvent-free/neat) and operates at ambient temperature, thereby reducing chemical waste and energy consumption compared to traditional protection methods that may require cooling or heating in solvent.（信心度：6.2%，最近似來源：1-s2.0-S2773223124000268--57ac964d）\n- *   Thermodynamic Driving Force (Model speculation): The elimination of $\\text{CO}_2$ as a gaseous byproduct likely serves as a strong thermodynamic driving force, shifting the equilibrium toward the formation of the N-Boc protected product according to Le Chatelier's principle.（信心度：1.5%，最近似來源：1-s2.0-S2773223124000268--ca4a9a9a）\n- *   Safety Considerations (Model speculation): While picric acid is an effective catalyst, it is known in general chemical practice to be potentially explosive when dry or in contact with certain metals; therefore, practitioners would likely need to handle it as a hydrated form or under strict safety protocols not detailed in the provided text.（信心度：0.8%，最近似來源：1-s2.0-S2773223124000268--ca4a9a9a）\n- *   Catalytic Efficiency (Model speculation): The fact that yields remain \"excellent\" across a range of 0.1 to 1.0 equivalents suggests that the reaction is relatively robust and not overly sensitive to precise catalyst loading, which simplifies experimental execution.（信心度：0.8%，最近似來源：1-s2.0-S2773223124000268--048eccfa）\n\n<!-- grounding_score=0.250 -->\n---"
+    },
+    {
+      "id": "Q06",
+      "type": "multi_chunk",
+      "question": "How does poly(vinyl alcohol) enhance the therapeutic effect of 4-L-boronophenylalanine in neutron capture therapy of thoracic tumors? Explain the proposed mechanism with supporting data.",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S0378517325007926-main",
+        "synthesis-and-biological-properties-of-water-soluble-p-boronophenylalanine-derivatives-relationship-between-water",
+        "CMDC-20-e202500059"
+      ],
+      "gold_papers": [
+        "1-s2.0-S0378517325007926-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.0,
+      "counts": {
+        "paper_count": 4,
+        "subquery_count": 5
+      },
+      "latency": {
+        "planning": 6983,
+        "retrieval": 425530,
+        "synthesis": 34353,
+        "synthesis-llm": 56009,
+        "verification": 963456,
+        "grounding": 1356525,
+        "translation": 146820,
+        "total": 2989679
+      },
+      "wall_seconds": 2989.6,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 2
+      },
+      "answer": "由於提供的來源資料不包含實質資訊（僅由錯誤訊息與「Empty Response」組成），因此無法提供基於特定論文的證據導向答案。\n\n因此，由於缺乏足夠的文獻基礎以填充內容，所有章節均被省略。\n\n---\n📋 **答案品質報告**\n\n❌ **整體論文依據率**：0.0%　低（建議重新查詢或縮小問題範圍）\n\n⚠️  **以下 2 個陳述未找到明確論文依據，請謹慎參考：**\n\n- Because the provided source material contains no substantial information (it consists of error messages and \"Empty Response\"), it is impossible to provide evidence-based answers derived from specific papers.（信心度：3.0%，最近似來源：cas0106-0279-f23bbb8b）\n- Consequently, all sections are omitted as there is insufficient literature basis to populate them.（信心度：0.1%，最近似來源：bbb0683-5edb73bf）\n\n<!-- grounding_score=0.000 -->\n---"
+    },
+    {
+      "id": "Q07",
+      "type": "figure_dependent",
+      "question": "What is the water-stable boroxine structure reported, and what role do the dynamic covalent bonds play in its fluoride binding and hydrogel formation?",
+      "detected_paper": null,
+      "selected_papers": [
+        "41467_2024_Article_45464",
+        "s41467-024-45464-z (1)"
+      ],
+      "gold_papers": [
+        "41467_2024_Article_45464"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": -1.0,
+      "counts": {
+        "paper_count": 2,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 4267,
+        "retrieval": 172690,
+        "synthesis": 0,
+        "synthesis-llm": 108799,
+        "verification": null,
+        "grounding": null,
+        "translation": null,
+        "total": 285757
+      },
+      "wall_seconds": 285.8,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 0
+      },
+      "answer": "⚠️ **資料來源說明**：本地學術文獻資料庫中未找到與此問題直接相關的內容。以下回答來自模型自身知識，非論文原文，請謹慎參考並自行查證。\n\n這是一個高度專業的超分子化學（Supramolecular Chemistry）與材料科學問題。雖然您提到的具體文獻未在本地資料庫中直接命中，但根據硼化學（Boron Chemistry）以及動態共價鍵（Dynamic Covalent Bonds, DCBs）的通用學術原理，我可以為您提供詳細的分析。\n\n這類研究通常聚焦於克服硼氧環（Boroxine）在水溶液中極易水解為硼酸（Boronic acid）的缺陷。以下是針對該問題的學術解答：\n\n### 1. 水穩定硼氧環（Water-stable Boroxine）的結構特徵\n\n一般的硼氧環是由三個 $\\text{B}$ 原子和三個 $\\text{O}$ 原子構成的六元環 ($\\text{B}_3\\text{O}_3$)。在常規情況下，水分子會迅速親核攻擊 $\\text{B}$ 中心的空 $\\text{p}$ 軌域，導致環狀結構崩潰。\n\n為了實現「水穩定性」，研究者通常採取以下兩種策略之一（**此部分為模型根據學術常理之推測，建議查閱原始文獻確認具體分子式**）：\n*   **空間位阻效應（Steric Hindrance）：** 在硼原子周圍引入體積龐大的取代基（例如：間三甲基苯基 Mesityl 或其他具有正交取代的芳香環）。這些龐大的基團能形成物理屏障，阻止水分子接近 $\\text{B}$ 中心，從而動力學上抑制水解。\n*   **電子效應與配位穩定化（Electronic Stabilization）：** 通過引入特定的電子供體或利用鄰近基團的協同作用（如內部配位），增加 $\\text{B}$ 原子的電子密度，降低其路易斯酸性，使其對水分子的親和力下降。\n\n### 2. 動態共價鍵（DCBs）在氟離子結合中的作用\n\n硼氧環中的 $\\text{B-O}$ 鍵屬於典型的動態共價鍵。其在氟離子 ($\\text{F}^-$) 結合過程中的角色如下：\n\n*   **路易斯酸-鹼交互作用：** 硼原子具有空 $\\text{p}$ 軌域，是強路易斯酸；而氟離子是極強的路易斯鹼。$\\text{F}^-$ 能與 $\\text{B}$ 原子形成極強的共價鍵。\n*   **雜化狀態的改變（Hybridization Change）：** 當 $\\text{F}^-$ 結合到硼原子上時，硼原子的雜化狀態會從 **$\\text{sp}^2$（平面三角形）轉變為 $\\text{sp}^3$（四面體結構）**。\n*   **觸發結構解離：** 這種幾何形狀的劇烈改變會導致原本穩定的 $\\text{B}_3\\text{O}_3$ 環張力增加或直接斷裂。因此，動態共價鍵在這裡扮演了「分子開關」的角色：$\\text{F}^-$ 的加入能將閉環的硼氧環結構轉化為開環的氟硼酸鹽（Fluoroborate）物種。\n\n### 3. 動態共價鍵在水凝膠形成中的作用\n\n在水凝膠（Hydrogel）的構建中，動態共價鍵提供了**可逆性**與**自癒能力**：\n\n*   **交聯網絡的建立：** 若硼氧環單元被整合到聚合物鏈中或作為多官能基單體，它們會通過 $\\text{B-O}$ 鍵形成三維交聯網絡。由於 $\\text{B-O}$ 鍵是動態的，網絡可以在熱力學平衡下不斷地斷裂與重組。\n*   **刺激響應性（Stimuli-responsiveness）：** 正如前述，$\\text{F}^-$ 能誘導 $\\text{sp}^2 \\to \\text{sp}^3$ 的轉變。當氟離子進入凝膠系統時，它會競爭性地結合硼原子，導致交聯點（Cross-linking points）被破壞。\n*   **溶膠-凝膠轉化（Sol-Gel Transition）：** 這種機制允許水凝膠在 $\\text{F}^-$ 的作用下發生從「凝膠狀態」（高交聯度）到「溶膠狀態」（低交聯度或單體化）的相變，實現對氟離子的靈敏檢測或受控釋藥。\n\n---\n\n### 總結與提醒\n\n**核心邏輯鏈條為：**\n$\\text{空間位阻/電子效應} \\rightarrow \\text{水穩定硼氧環} \\rightarrow \\text{動態共價交聯} \\rightarrow \\text{形成水凝膠} \\xrightarrow{\\text{F}^- \\text{結合}} \\text{雜化改變}(\\text{sp}^2 \\to \\text{sp}^3) \\rightarrow \\text{網絡解體/信號響應}$。\n\n**重要提醒：**\n1.  **數值與參數：** 關於水穩定性的具體時間（如半衰期）、氟離子的檢測限（LOD）或凝膠的儲能模量（Storage Modulus $G'$），這些數值會因所使用的取代基種類、單體濃度及 pH 值而有顯著差異，請務必以原始論文數據為準。\n2.  **結構確認：** 上述關於「空間位阻」的分析為化學通用機制之推論（模型推測），具體該文獻報告的是哪一種特定的有機硼化合物，建議查閱其 $\\text{X-ray}$ 晶體結構圖或 $\\text{NMR}$ 譜圖確認。"
+    },
+    {
+      "id": "Q08",
+      "type": "cross_paper",
+      "question": "Compare the different synthetic routes to 4-borono-L-phenylalanine reported across the papers, focusing on isotopic enrichment, scalability, and cost-effectiveness.",
+      "detected_paper": null,
+      "selected_papers": [
+        "CMDC-20-e202500059",
+        "synthesis-and-biological-properties-of-water-soluble-p-boronophenylalanine-derivatives-relationship-between-water",
+        "bbb0683",
+        "cas0106-0279",
+        "1-s2.0-S0378517325007926-main"
+      ],
+      "gold_papers": [
+        "CMDC-20-e202500059",
+        "bbb0683"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.0,
+      "counts": {
+        "paper_count": 5,
+        "subquery_count": 6
+      },
+      "latency": {
+        "planning": 8279,
+        "retrieval": 470849,
+        "synthesis": 33148,
+        "synthesis-llm": 70842,
+        "verification": 297791,
+        "grounding": 1016736,
+        "translation": 109649,
+        "total": 2007298
+      },
+      "wall_seconds": 2007.3,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 1
+      },
+      "answer": "由於提供的來源文本不包含實質內容（僅顯示「Empty Response」或系統故障訊息），因此無法從指定的論文中找到可用證據來回答該問題。\n\n---\n📋 **答案品質報告**\n\n❌ **整體論文依據率**：0.0%　低（建議重新查詢或縮小問題範圍）\n\n⚠️  **以下 1 個陳述未找到明確論文依據，請謹慎參考：**\n\n- Due to the fact that the provided source text contains no substantive content (stating only \"Empty Response\" or system failure messages), there is no evidence available from the specified papers to answer the question.（信心度：8.8%，最近似來源：synthesis-and-biological--6465c2e8）\n\n<!-- grounding_score=0.000 -->\n---"
+    },
+    {
+      "id": "Q09",
+      "type": "cross_paper",
+      "question": "Several papers target LAT1 for cancer therapy. What different therapeutic strategies targeting LAT1 are described across the literature, and how do they differ in mechanism?",
+      "detected_paper": null,
+      "selected_papers": [
+        "LAT1 ChemComm 2026",
+        "1-s2.0-S0378517325007926-main",
+        "1-s2.0-S1347861320300633-main",
+        "s41421-024-00697-6",
+        "1-s2.0-S1936523321002047-main"
+      ],
+      "gold_papers": [
+        "1-s2.0-S1347861320300633-main",
+        "1-s2.0-S1936523321002047-main",
+        "LAT1 ChemComm 2026",
+        "s41421-024-00697-6"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.0,
+      "counts": {
+        "paper_count": 5,
+        "subquery_count": 6
+      },
+      "latency": {
+        "planning": 7981,
+        "retrieval": 338315,
+        "synthesis": 28410,
+        "synthesis-llm": 64172,
+        "verification": 101290,
+        "grounding": 15964994,
+        "translation": 655329,
+        "total": 17160495
+      },
+      "wall_seconds": 17160.3,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 8
+      },
+      "answer": "根據提供的輸入，目前沒有可供分析的學術論文或提取的事實（來源文本僅包含顯示「Empty Response」或「Generation Failed」的錯誤訊息）。因此，我無法提供基於特定文獻的證據導向答案。\n\n## 【論文直接依據】\n（無可用內容；輸入中未提供任何論文。）\n\n## 【跨文獻推論】\n文獻基礎不足。\n\n## 【知識延伸與推測】\n模型推測（文獻基礎不足）：由於未提供特定論文，我將根據關於腫瘤學中 LAT1 (SLC7A5) 的一般學術知識進行外推：\n\n*   **治療策略：** [Unverified] 在一般癌症研究中，LAT1 是被標記的目標，因為它在各種腫瘤中經常過度表達，以滿足對必需氨基酸 (EAAs) 的高需求。（原因：已知事實列表中未提供證據。）\n    *   **小分子抑制：** [Unverified] 使用競爭性抑制劑來阻斷 EAAs（如 leucine 和 phenylalanine）的運輸，從而誘導代謝壓力。（原因：已知事實列表中未提供證據。）\n    *   **針對伴隨蛋白 (CD98hc)：** [Unverified] 由於 LAT1 與 CD98hc 以異二聚體形式運作，相關策略可能涉及破壞此交互作用，或使用針對 CD98hc 的抗體以防止 LAT1 到達細胞膜。（原因：已知事實列表中未提供證據。）\n    *   **PROTACs：** [Unverified] 利用蛋白水解靶向嵌合體 (Proteolysis Targeting Chimeras) 完全降解 LAT1 蛋白，而非僅抑制其活性。（原因：已知事實列表中未提供證據。）\n*   **機制差異：** \n    *   [Unverified] 直接抑制劑主要針對運輸功能，導致「氨基酸飢餓」。（原因：已知事實列表中未提供證據。）\n    *   [Unverified] 下游效應通常涉及對 mTORC1 路徑的抑制，因為 leucine 是 mTOR 的關鍵激活劑；因此，LAT1 抑制可作為代謝開關，以關閉蛋白質合成和細胞生長。（原因：已知事實列表中未提供證據。）\n    *   [Unverified] 降解策略 (PROTACs) 可能比抑制劑更強效，因為它們完全移除了蛋白質支架，防止結合位點出現任何潛在的補償性突變。（原因：已知事實列表中未提供證據。）\n\n**不確定性：** 若沒有您原始查詢中提到的特定論文，我無法確定哪些具體策略被重點討論，或者是否討論了新穎的機制（例如針對 LAT1 介導的藥物遞送）。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ❌ 【論文直接依據】：0.0%（0/1 句）\n  ✅ 【跨文獻推論】：100.0%（1/1 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：14.3%（1/7 句）  ← 知識延伸推測，低分為預期範圍\n\n❌ **直引依據率**：0.0%　低（建議縮小問題範圍）\n\n⚠️  **以下 8 個陳述未找到明確論文依據，請謹慎參考：**\n\n- Based on the provided input, there are no academic papers or extracted facts available for analysis (the source text contains only error messages indicating \"Empty Response\" or \"Generation Failed\"). Therefore, I cannot provide evidence-based answers derived from specific literature.（信心度：44.1%，最近似來源：1-s2.0-S0378517325007926--db076894）\n- [Direct Paper Evidence] (No content available; no papers were provided in the input.)（信心度：0.8%，最近似來源：1-s2.0-S0378517325007926--7b1b109c）\n- *   Therapeutic Strategies: [Unverified] In general cancer research, LAT1 is targeted because it is frequently overexpressed in various tumors to meet the high demand for essential amino acids (EAAs). (Reason: No evidence provided in the Known Facts List.)（信心度：3.4%，最近似來源：LAT1 ChemComm 2026-e40e9500）\n- *   Targeting the Chaperone (CD98hc): [Unverified] Since LAT1 functions as a heterodimer with CD98hc, strategies may involve disrupting this interaction or using antibodies against CD98hc to prevent LAT1 from reaching the cell membrane. (Reason: No evidence provided in the Known Facts List.)（信心度：0.6%，最近似來源：LAT1 ChemComm 2026-ca01261e）\n- *   PROTACs: [Unverified] Utilizing Proteolysis Targeting Chimeras to degrade the LAT1 protein entirely rather than just inhibiting its activity. (Reason: No evidence provided in the Known Facts List.)（信心度：0.4%，最近似來源：LAT1 ChemComm 2026-ca01261e）\n- *   [Unverified] Downstream effects often involve the inhibition of the mTORC1 pathway, as leucine is a key activator of mTOR; thus, LAT1 inhibition acts as a metabolic switch to shut down protein synthesis and cell growth. (Reason: No evidence provided in the Known Facts List.)（信心度：0.8%，最近似來源：LAT1 ChemComm 2026-e40e9500）\n- *   [Unverified] Degradation strategies (PROTACs) are potentially more potent than inhibitors because they remove the protein scaffold entirely, preventing any potential compensatory mutations in the binding site. (Reason: No evidence provided in the Known Facts List.)（信心度：0.3%，最近似來源：LAT1 ChemComm 2026-ca01261e）\n- Uncertainties: Without the specific papers mentioned in your original query, I cannot determine which of these specific strategies were highlighted or if novel mechanisms (e.g., targeting LAT1-mediated drug delivery) were discussed.（信心度：5.3%，最近似來源：1-s2.0-S1347861320300633--8e1a791f）\n\n<!-- grounding_score=0.000 -->\n---"
+    },
+    {
+      "id": "Q10",
+      "type": "contradiction_check",
+      "question": "Do the papers agree on the hydrolytic stability of boroxine structures? Describe any agreements or differences between them.",
+      "detected_paper": null,
+      "selected_papers": [
+        "Chemistry A European J - 2023 - Ono - Structural Interconversion Based on Intramolecular Boroxine Formation",
+        "41467_2024_Article_45464",
+        "s41467-024-45464-z (1)",
+        "a-method-for-the-deprotection-of-alkylpinacolyl-boronate-esters"
+      ],
+      "gold_papers": [
+        "41467_2024_Article_45464",
+        "Chemistry A European J - 2023 - Ono - Structural Interconversion Based on Intramolecular Boroxine Formation"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": -1.0,
+      "counts": {
+        "paper_count": 4,
+        "subquery_count": 5
+      },
+      "latency": {
+        "planning": 6666,
+        "retrieval": 418440,
+        "synthesis": 0,
+        "synthesis-llm": 81285,
+        "verification": null,
+        "grounding": null,
+        "translation": null,
+        "total": 506392
+      },
+      "wall_seconds": 506.4,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 0
+      },
+      "answer": "⚠️ **資料來源說明**：本地學術文獻資料庫中未找到與此問題直接相關的內容。以下回答來自模型自身知識，非論文原文，請謹慎參考並自行查證。\n\n關於硼氧環（Boroxine, $\\text{B}_3\\text{O}_3$ 結構）的水解穩定性，學術界在**基本化學原理**上具有高度共識，但在**實際應用場景（如小分子與聚合物/框架材料）的穩定程度**上則存在顯著的討論差異。\n\n以下詳細分析其一致之處與分歧之處：\n\n### 1. 學術界的一致觀點 (Points of Agreement)\n\n絕大多數文獻均認同以下基本化學特性：\n\n*   **熱力學不穩定性（相對於水）：** 硼氧環被普遍認為在水環境中是不穩定的。其核心反應是一個可逆的平衡過程：一個硼氧環分子與三個水分子反應，會水解回三個對應的硼酸（Boronic acid）分子。\n    $$\\text{(R-BO)}_3 + 3\\text{H}_2\\text{O} \\rightleftharpoons 3\\text{R-B(OH)}_2$$\n*   **可逆性：** 文獻一致認為此過程是高度可逆的。透過脫水反應（例如加熱或使用脫水劑），硼酸可以重新縮合形成硼氧環。\n*   **親電性質：** 硼原子在硼氧環中保持 $\\text{sp}^2$ 混成且具有空 $\\text{p}$ 軌域，這使其成為強親電中心，極易受到水分子（親核試劑）的攻擊，這是導致其水解的根本原因。\n\n### 2. 文獻中的差異與討論焦點 (Points of Difference/Nuance)\n\n雖然基本原理一致，但在探討「如何提高穩定性」或「在特定結構中是否穩定」時，不同論文的結論有所不同：\n\n#### A. 立體阻礙與電子效應 (Steric and Electronic Effects)\n*   **共識部分：** 增加硼原子周圍的立體阻礙（例如引入大體積的取代基 $\\text{R}$）可以降低水解速率。\n*   **差異部分：** 不同研究對於「多少程度的立體阻礙足以使其在水溶液中穩定」看法不一。某些文獻強調電子推入效應（Electron-donating groups）能增加硼原子的電子密度，從而減緩親核攻擊；而其他文獻則認為立體屏蔽（Steric shielding）才是主導因素。\n\n#### B. 小分子與共價有機框架 (Small Molecules vs. COFs)\n這是目前學術討論分歧最明顯的地方：\n*   **小分子硼氧環：** 大多數論文同意其在潮濕空氣或水中會迅速水解。\n*   **硼氧環基共價有機框架 (Boroxine-linked COFs)：** \n    *   部分文獻主張，由於 COF 具有高度的結晶性和強大的晶格能（Lattice energy），以及層間的 $\\pi-\\pi$ 堆積作用，可以產生「動力學保護」效應，使其在水中表現出比小分子高得多的穩定性。\n    *   然而，另一部分文獻則指出，儘管有晶格保護，硼氧環 COFs 在長期暴露於水分或特定 $\\text{pH}$ 值下仍會不可避免地崩潰。**（此處為模型推測，建議查閱具體針對 Boroxine-linked COFs 的穩定性對比文獻以確認）**。\n\n#### C. 環境因素的影響\n不同論文在實驗條件上的設定導致結論看似衝突：\n*   **溶劑效應：** 在非極性溶劑中，硼氧環表現穩定；但在極性溶劑或含有微量水分的環境中則迅速分解。\n*   **$\\text{pH}$ 值：** 硼氧環在酸性與鹼性條件下的水解速率截然不同，部分文獻專注於其在特定 $\\text{pH}$ 下的穩定性，而未將其泛化至所有水環境。\n\n### 3. 總結與提醒\n\n**總結：**\n學術界對於「硼氧環本質上易水解」這一點沒有爭議。目前的討論焦點已從「是否穩定」轉移到「如何透過分子設計（立體阻礙、電子效應）或結構工程（結晶度、疏水封裝）來延緩其水解過程」。\n\n**重要提醒：**\n1.  **數值差異：** 若您在文獻中看到關於水解速率常數 ($k$)、半衰期 ($\\text{t}_{1/2}$) 或分解溫度等具體數值，請務必注意這些數值會隨取代基 $\\text{R}$ 的性質、溶劑種類及溫度而劇烈變化，不可直接跨論文比較。\n2.  **結構定義：** 請確認文獻討論的是純粹的硼氧環 ($\\text{B}_3\\text{O}_3$) 還是含有 B-O-B 鍵的硼酸酯（Boronate esters），兩者的水解動力學有所不同。"
+    },
+    {
+      "id": "Q11",
+      "type": "out_of_scope",
+      "question": "What are the phase III clinical trial overall survival results for BNCT in glioblastoma patients?",
+      "detected_paper": null,
+      "selected_papers": [
+        "CMDC-20-e202500059",
+        "1-s2.0-S0378517325007926-main",
+        "cas0106-0279"
+      ],
+      "gold_papers": [],
+      "paper_selection_recall": null,
+      "retrieval_span_recall": null,
+      "grounding_score": -1.0,
+      "counts": {
+        "paper_count": 3,
+        "subquery_count": 2
+      },
+      "latency": {
+        "planning": 3175,
+        "retrieval": 241739,
+        "synthesis": 0,
+        "synthesis-llm": 94207,
+        "verification": null,
+        "grounding": null,
+        "translation": null,
+        "total": 339122
+      },
+      "wall_seconds": 339.1,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 0
+      },
+      "answer": "⚠️ **資料來源說明**：本地學術文獻資料庫中未找到與此問題直接相關的內容。以下回答來自模型自身知識，非論文原文，請謹慎參考並自行查證。\n\n針對您提出的關於硼中子捕獲治療（Boron Neutron Capture Therapy, BNCT）在膠質母細胞瘤（Glioblastoma, GBM）患者中第三期臨床試驗整體生存期（Overall Survival, OS）結果的問題，以下是基於目前學術知識的詳細分析。\n\n### 核心結論：關於第三期臨床試驗的現狀\n\n首先必須明確指出：**截至目前，全球範圍內尚未有針對膠質母細胞瘤（GBM）且具有高度權威性、大規模隨機對照的第三期（Phase III）臨床試驗結果被公認地發表並改變目前的標準治療指南。**\n\n大多數關於 BNCT 治療 GBM 的數據來源於第一期（安全性評估）或第二期（初步療效評估）臨床試驗，以及部分回顧性研究或小規模的前瞻性隊列研究。因此，目前無法提供一個統一的、基於第三期試驗的 OS 標準數值。\n\n---\n\n### 現有臨床數據分析（主要為 Phase I/II 及 Pilot Studies）\n\n雖然缺乏大規模第三期試驗，但從已發表的第二期或初步研究中，可以觀察到以下趨勢：\n\n#### 1. 復發性膠質母細胞瘤 (Recurrent GBM)\n對於已經接受過標準治療（手術、放療、化療）後復發的患者，BNCT 通常被視為挽救療法（Salvage Therapy）。\n*   **生存期表現：** 在部分研究中，復發性 GBM 患者在接受 BNCT 後的中位整體生存期（Median OS）約在 **6 至 12 個月** 之間。\n*   **對比意義：** 此數值通常高於僅接受姑息治療或單純化療的復發患者，但由於缺乏隨機對照組，其統計學顯著性仍有爭議。\n\n#### 2. 初診膠質母細胞瘤 (Newly Diagnosed GBM)\n針對初診患者，BNCT 通常被探索作為標準 Stupp 方案（手術 + 放化療）的替代或補充方案。\n*   **生存期表現：** 部分小規模研究顯示，結合 BNCT 的治療方案可能將 OS 提升至 **20 個月以上**，甚至有少數長期生存者（Long-term survivors）。\n*   **注意：** 此類數據通常來自於較小的樣本量，且患者的分子分型（如 MGMT 啟動子甲基化狀態）對結果有極大影響。\n\n---\n\n### 影響 OS 結果的關鍵變數（數值差異之原因）\n\n如果您在查閱不同文獻時發現 OS 數值差異巨大，請注意以下參數：\n\n1.  **硼載體 (Boron Delivery Agents)：** 使用 BPA (Boronophenylalanine) 或 BSH (Sodium borocaptate) 的分佈與攝取率不同，直接影響治療劑量。\n2.  **中子源 (Neutron Source)：** 傳統的核反應爐（Reactor-based）與現代的加速器（Accelerator-based, AB-BNCT）在能譜和照射時間上有所差異。\n3.  **患者分層：** 患者的 KPS 分數（功能狀態）、腫瘤體積以及是否為全切除後殘餘病灶，均會顯著影響 OS。\n4.  **聯合療法：** 是否同時使用替莫唑胺 (Temozolomide) 或其他化療藥物。\n\n---\n\n### 學術推測與未來展望（模型推測部分）\n\n**【此部分為模型推測，建議查閱原始文獻確認】**\n由於 BNCT 具有高度的細胞選擇性（Cell-selective），理論上它能減少對正常腦組織的損傷並提高腫瘤局部控制率。預計未來的第三期試驗將聚焦於：\n*   **精準分層：** 針對特定硼載體攝取率高的患者亞群進行試驗，以提高 OS 的統計顯著性。\n*   **對比標準方案：** 將「手術 $\\rightarrow$ BNCT」與「手術 $\\rightarrow$ 標準放化療 (Stupp Protocol)」進行直接對比。\n\n### 總結提醒\n\n**請注意：上述提及的生存期數值（如 6-12 個月或 20 個月以上）僅為目前學術文獻中常見的範圍，具體數值會因研究設計、樣本量及患者條件而有顯著差異。在引用這些數據進行臨床決策或學術撰寫時，請務必追溯至具體的原始論文（如日本或芬蘭的 BNCT 臨床報告）。**\n\n若您需要針對特定年份或特定國家（例如日本的 AB-BNCT 研究）的最新進展，建議在 PubMed 或 ClinicalTrials.gov 中使用 `“Boron Neutron Capture Therapy” AND “Glioblastoma” AND “Clinical Trial”` 作為關鍵字進行精確檢索。"
+    },
+    {
+      "id": "Q12",
+      "type": "false_premise",
+      "question": "Since BPA is administered orally in BNCT, what oral bioavailability values are reported in these papers?",
+      "detected_paper": null,
+      "selected_papers": [
+        "cas0106-0279",
+        "Chem Biol Drug Des - 2013 - Achilli - Folic Acid‐Conjugated 4‐Amino‐Phenylboronate  a Boron‐Containing Compound Designed"
+      ],
+      "gold_papers": [],
+      "paper_selection_recall": null,
+      "retrieval_span_recall": null,
+      "grounding_score": -1.0,
+      "counts": {
+        "paper_count": 2,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 3754,
+        "retrieval": 242246,
+        "synthesis": 0,
+        "synthesis-llm": 59921,
+        "verification": null,
+        "grounding": null,
+        "translation": null,
+        "total": 305921
+      },
+      "wall_seconds": 305.9,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 0
+      },
+      "answer": "⚠️ **資料來源說明**：本地學術文獻資料庫中未找到與此問題直接相關的內容。以下回答來自模型自身知識，非論文原文，請謹慎參考並自行查證。\n\n針對您提出的關於硼中子捕獲治療（Boron Neutron Capture Therapy, BNCT）中所使用的 BPA（L-Boronophenylalanine，硼苯丙氨酸）口服生物利用度（Oral Bioavailability）的問題，由於您未提供具體的參考文獻，我將基於目前的學術知識庫為您解答。\n\n### 學術分析與回答\n\n在 BNCT 的臨床實踐中，**BPA 通常是以靜脈注射（Intravenous infusion）的方式給藥**，而非口服。這是為了確保硼化合物能迅速且精確地達到血液循環，並透過 L-型氨基酸轉運蛋白 1（LAT1）高效地積聚在腫瘤細胞中，以維持較高的腫瘤與正常組織之硼濃度比（T/N ratio）。\n\n關於 BPA 的口服生物利用度，目前的學術現況如下：\n\n#### 1. 口服給藥的罕見性與挑戰\n在大多數已發表的 BNCT 臨床試驗中，極少使用口服路徑。主要原因在於：\n*   **吸收率的不確定性**：BPA 作為一種氨基酸類比物，其在腸道的吸收效率可能受到競爭性氨基酸的影響。\n*   **藥代動力學（PK）控制**：BNCT 要求在照射前將腫瘤內的硼濃度提升至峰值，靜脈注射能提供更可預測的血藥濃度曲線。\n\n#### 2. 生物利用度的數值分析\n由於口服 BPA 並非主流給藥方式，**目前缺乏一個被廣泛認可的、標準化的「口服生物利用度百分比」數值**。在少數探討口服路徑的基礎研究或動物實驗中，其生物利用度通常低於靜脈注射（定義上 IV 為 100%）。\n\n若您在特定論文中看到相關數據，請注意以下幾點：\n*   **劑型影響**：BPA 常以 BPA-果糖複合物（BPA-fructose complex）的形式存在以增加溶解度。不同的配方會顯著改變其口服吸收率。\n*   **物種差異**：動物模型（如小鼠或大鼠）的腸道轉運蛋白表達量與人類不同，因此動物實驗得出的生物利用度數值不能直接推論至臨床。\n\n#### 3. 模型推測與機制分析（Model Speculation）\n**此部分為模型推測，建議查閱原始文獻確認：**\n從藥理學角度推測，BPA 的口服吸收可能依賴於腸上皮細胞上的氨基酸轉運體。由於其結構模擬苯丙氨酸（Phenylalanine），它可能會與飲食中的天然氨基酸競爭相同的轉運通道。因此，其口服生物利用度可能會受到**進食狀態（空腹或飽餐）**的強烈影響。若文獻中提到較低的生物利用度，可能是由於腸道吸收受限或經過肝臟的首過效應（First-pass metabolism）所致。\n\n### 重要提醒\n\n1.  **數值變異性**：請務必注意，即便在同一類型的研究中，BPA 的生物利用度數值也會因**給藥劑量、溶劑組成、實驗動物種類以及檢測時間點**而有顯著差異。\n2.  **文獻核對**：由於 BNCT 領域的數據高度依賴於特定的臨床方案（Protocol），建議您直接查閱該論文的「Materials and Methods」或「Pharmacokinetics」章節，尋找 $\\text{AUC}_{\\text{oral}} / \\text{AUC}_{\\text{iv}}$ 的比值，這才是定義生物利用度的標準計算方式。\n\n**總結：** 在主流 BNCT 文獻中，BPA 的口服生物利用度並非核心討論參數（因傾向使用 IV 給藥）。若您手中的文獻提及此數值，該數值具有高度的實驗特異性，不應視為通用常數。"
+    }
+  ]
+}
