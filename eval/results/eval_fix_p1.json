@@ -1,0 +1,90 @@
+{
+  "label": "fix_p1",
+  "mode": "gold",
+  "summary": {
+    "n_questions": 2,
+    "avg_grounding_score": 0.465,
+    "avg_paper_sel_recall": 1.0,
+    "avg_retrieval_recall": null,
+    "avg_total_ms": 10663825.5,
+    "avg_planning_ms": 4853.0,
+    "avg_retrieval_ms": 278505.5,
+    "avg_grounding_ms": 8880085.5
+  },
+  "rows": [
+    {
+      "id": "Q01",
+      "type": "single_paper",
+      "question": "In the study of JPH203's preincubation inhibitory effect on LAT1, how does preincubation change JPH203's inhibitory potency? Give the reported values.",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S1347861320300633-main",
+        "1-s2.0-S0021979710012403-main",
+        "1-s2.0-S1936523321002047-main",
+        "s41421-024-00697-6"
+      ],
+      "gold_papers": [
+        "1-s2.0-S1347861320300633-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.5,
+      "counts": {
+        "paper_count": 4,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 5684,
+        "retrieval": 238882,
+        "synthesis": 149123,
+        "synthesis-llm": 120168,
+        "verification": 131847,
+        "grounding": 10636443,
+        "translation": 732084,
+        "total": 12014234
+      },
+      "wall_seconds": 12014.1,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 5
+      },
+      "answer": "## 【論文直接依據】\n在利用 LAT1 陽性的人類結腸癌 HT-29 細胞進行的研究中，預孵育（preincubation）對 JPH203 的抑制效能產生以下影響：\n\n* **協同增強：** 當預孵育與共同孵育（co-incubation）結合時，可顯著增強 JPH203 的抑制效能，產生協同抑制效果 [1-s2.0-S1347861320300633-main]。\n* **$\\text{IC}_{50}$ 的變化：** \n    * 單獨共同孵育的 $\\text{IC}_{50}$ 為 $99.2 \\pm 11.0\\text{ nM}$ [1-s2.0-S1347861320300633-main]。\n    * 當加入預孵育時，$\\text{IC}_{50}$ 降低至 $34.2 \\pm 3.6\\text{ nM}$ [1-s2.0-S1347861320300633-main]。\n    * 此協同作用導致 $\\text{IC}_{50}$ 值降低了三倍 [1-s2.0-S1347861320300633-main]。\n* **$\\text{K}_i$ 的變化：** \n    * 單獨共同孵育的 $\\text{K}_i$ 為 $0.46\\text{ mM}$ [1-s2.0-S1347861320300633-main]。\n    * 預孵育結合共同孵育的 $\\text{K}_i$ 為 $0.37\\text{ mM}$ [1-s2.0-S1347861320300633-main]。\n    * 這代表 $\\text{K}_i$ 值降低了 20% [1-s2.0-S1347861320300633-main]。\n* **獨立預孵育效果：** 單獨預孵育對 LAT1 功能表現出濃度與時間依賴性的抑制，報告的 $\\text{IC}_{50}$ 值为 $193 \\pm 50\\text{ nM}$ [1-s2.0-S1347861320300633-main]。\n\n## 【跨文獻推論】\n跨論文推論（基於 [1-s2.0-S1347861320300633-main]）：雖然單獨預孵育的效能低於單獨共同孵育（比較 $\\text{IC}_{50}$ 值 $193 \\pm 50\\text{ nM}$ 與 $99.2 \\pm 11.0\\text{ nM}$），但兩者的結合所產生的效能 ($\\text{IC}_{50} = 34.2 \\pm 3.6\\text{ nM}$) 超過了各自效果的總和。這表明預孵育不僅僅是增加了其自身的抑制效果，而是主動使 LAT1 轉運蛋白增敏或修改了結合環境，以在隨後的共同孵育階段促進更強力的抑制作用。\n\n## 【知識延伸與推測】\n模型推測（文獻依據不足）：觀察到預孵育的抑制效果在藥物移除後迅速消失——攝取水平在 30 分鐘內恢復至 86%，並在 120 分鐘內幾乎恢復至基準線——這表明 JPH203 是一種可逆抑制劑。如果它是不可逆或共價抑制劑，其恢復將依賴於新 LAT1 蛋白的合成，而非簡單地在無藥物培養基中孵育。此外，預孵育與共同孵育之間觀察到的協同作用表明，在臨床環境中（患者在數小時內暴露於穩態藥物濃度），實際的 *in vivo* 療效可能顯著高於標準急性 $\\text{IC}_{50}$ 測量值的預測結果。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ⚠️ 【論文直接依據】：50.0%（4/8 句）\n  ✅ 【跨文獻推論】：100.0%（1/1 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/1 句）  ← 知識延伸推測，低分為預期範圍\n\n⚠️ **直引依據率**：50.0%　中（部分直引陳述需確認）\n\n⚠️  **以下 5 個陳述未找到明確論文依據，請謹慎參考：**\n\n- * This synergy leads to a three-fold decrease in the $\\text{IC}_{50}$ value [1-s2.0-S1347861320300633-main].（信心度：4.9%，最近似來源：1-s2.0-S1347861320300633--9653db30）\n- * The $\\text{K}_i$ for co-incubation alone is $0.46\\text{ mM}$ [1-s2.0-S1347861320300633-main].（信心度：1.5%，最近似來源：1-s2.0-S0021979710012403--e195173f）\n- * The $\\text{K}_i$ for preincubation combined with co-incubation is $0.37\\text{ mM}$ [1-s2.0-S1347861320300633-main].（信心度：1.8%，最近似來源：1-s2.0-S1347861320300633--4b5523b7）\n- * This represents a 20% reduction in the $\\text{K}_i$ value [1-s2.0-S1347861320300633-main].（信心度：0.8%，最近似來源：1-s2.0-S1347861320300633--9653db30）\n- [Knowledge Extension and Speculation] Model speculation (insufficient literature basis): The observation that the inhibitory effect of preincubation disappears rapidly upon drug removal—with uptake levels recovering to 86% within 30 minutes and nearly baseline within 120 minutes—suggests that JPH203 is a reversible inhibitor. If it were an irreversible or covalent inhibitor, the recovery would be dependent on the synthesis of new LAT1 proteins rather than simple incubation in drug-free medium. Furthermore, the synergy observed between preincubation and co-incubation suggests that in a clinical setting, where patients are exposed to a steady state of the drug over several hours, the actual *in vivo* efficacy may be significantly higher than what is predicted by standard acute $\\text{IC}_{50}$ measurements.（信心度：1.6%，最近似來源：1-s2.0-S0021979710012403--e195173f）\n\n<!-- grounding_score=0.500 -->\n---"
+    },
+    {
+      "id": "Q02",
+      "type": "single_paper",
+      "question": "What is the hybrid process used for the asymmetric synthesis of optically pure L-p-boronophenylalanine, and what are its key steps?",
+      "detected_paper": null,
+      "selected_papers": [
+        "bbb0683",
+        "CMDC-20-e202500059"
+      ],
+      "gold_papers": [
+        "bbb0683"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.429,
+      "counts": {
+        "paper_count": 2,
+        "subquery_count": 4
+      },
+      "latency": {
+        "planning": 4022,
+        "retrieval": 318129,
+        "synthesis": 109435,
+        "synthesis-llm": 112521,
+        "verification": 137861,
+        "grounding": 7123728,
+        "translation": 1507718,
+        "total": 9313417
+      },
+      "wall_seconds": 9313.3,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 6
+      },
+      "answer": "## 【論文直接依據】\n用於光學純 L-p-硼苯丙氨酸 (L-BPA) 不對稱合成的混合製程結合了「對稱烷基化」以及隨後的「酶水解」【bbb0683】。與使用手性膦進行對稱氫化或對外消旋前體進行酶法拆分的方法相比，該方法在操作便捷性、簡化反應步驟和後處理方面具有優勢，並避免了額外的分離/純化缺陷【bbb0683】。\n\n關鍵步驟如下：\n*   **步驟 1（保護）：** 4-溴甲基苯硼酸 (1) 在乾燥 THF 中於室溫下與 2,2-二甲基-1,3-丙二醇反應 10 分鐘，生成環狀硼酸酯 (2)，產率為 79% 【bbb0683】。\n*   **步驟 2（對稱烷基化）：** 在乾燥 THF 和氬氣環境、-78°C 下，使用 n-BuLi（正己烷中 1.68M）使鋰化的 (2R)-(-)-2,5-二氫-2-異丙基-3,6-二甲氧基吡嗪 (3) 與化合物 2 反應。該過程包括將 (3) 溶解在乾燥 THF 中，在 30 分鐘內加入 n-BuLi，等待 1 小時，然後在 30 分鐘內加入化合物 2 的溶液，隨後在 -78°C 下攪拌 15 小時。經 pH 7.0 磷酸鹽緩衝液處理後，獲得加成產物 4，其立體選擇性為 74% e.e. 【bbb0683】。\n*   **步驟 3（酸處理與脫保護）：** 此步驟分兩個階段生成 L-BPA 甲酯 (6)：\n    *   第一階段：中間體 4 在 5°C 下用 0.1 N HCl 處理，然後在室溫下攪拌 8 小時，產生等量的 D-缬氨酸甲酯 (D-Val-OMe) 和氨基酸甲酯 5 的混合物。使用 3% 氨水將 pH 調節至 8.5，並通過蒸餾除去 D-Val-OMe 以獲得粗產物 5 【bbb0683】。\n    *   第二階段：粗產物 5 在室溫下與 1 N HCl 和 THF 攪拌 2 小時，並通過 ODS 柱色譜純化，得到 L-BPA 甲酯 (6)，相對於化合物 4 的產率為 85% 【bbb0683】。\n*   **步驟 4（最終水解）：** 有兩種可能路徑來獲取最終的 L-BPA：\n    *   酶水解：將 L-BPA 甲酯 (6) 置於含有胰蛋白酶 (chymotrypsin) 的水中，使用 0.1 N LiOH 將 pH 調節至 5.0，並在 25°C 下攪拌 30 小時（維持 pH）。這使得 L-BPA 的產率為 79%，光學純度為 100% e.e. 【bbb0683】。\n    *   非酶水解：在室溫下用 0.5 N NaOH 攪拌 36 小時，隨後使用 1 N HCl 將 pH 調節至 6.8。這使得 L-BPA 的產率為 87%，但光學純度僅為 86% 【bbb0683】。\n\n## 【跨文獻推論】\n*   **跨論文推論（基於 【bbb0683】）：** 酶水解步驟起到了關鍵的「光學拋光」或動力學拆分階段的作用。雖然步驟 2 中的化學對稱烷基化提供了 74% e.e. 的初始立體選擇性，但只有酶路徑（使用胰蛋白酶）能夠將最終光學純度提升至 100% e.e.，而標準的化學水解 (NaOH) 則無法達到此純度水平（僅達到 86%）。\n*   **跨論文推論（基於 【bbb0683】）：** 該製程的「混合」性質特指將基於手性輔助劑的化學合成（使用吡嗪衍生物的 Schöllkopf 型烷基化）與生物催化劑（胰蛋白酶）相結合，以實現高光學純度。\n\n## 【知識延伸與推測】\n*   **模型推測（文獻依據不足）：** 使用 (2R)-(-)-2,5-二氫-2-異丙基-3,6-二甲氧基吡嗪表明應用了 Schöllkopf 手性輔助劑法。這是一種著名的學術技術，通過創建一個可以高非對映選擇性烷基化的手性甘氨酸等價物來合成非蛋白質原氨基酸。\n*   **模型推測（文獻依據不足）：** 步驟 1 中將硼酸保護為環狀酯可能是必要的，因為游離硼酸含有酸性質子 ($\\text{B-OH}$)，會與步驟 2 中使用的強有機金屬鹼 n-BuLi 反應並使其失活，從而阻止吡嗪輔助劑的鋰化。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ❌ 【論文直接依據】：42.9%（3/7 句）\n  ✅ 【跨文獻推論】：100.0%（2/2 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/2 句）  ← 知識延伸推測，低分為預期範圍\n\n❌ **直引依據率**：42.9%　低（建議縮小問題範圍）\n\n⚠️  **以下 6 個陳述未找到明確論文依據，請謹慎參考：**\n\n- [Direct Paper Evidence] The hybrid process used for the asymmetric synthesis of optically pure L-p-boronophenylalanine (L-BPA) combines \"symmetric alkylation\" with subsequent \"enzymatic hydrolysis\" [bbb0683]. This approach offers advantages in operational convenience, simplification of reaction steps and post-processing, and avoids additional separation/purification defects compared to methods using chiral phosphine for symmetric hydrogenation or enzymatic resolution of racemic precursors [bbb0683].（信心度：4.6%，最近似來源：CMDC-20-e202500059-beb43ed2）\n- *   Phase one: Intermediate 4 is treated with 0.1 N HCl at 5°C then stirred at room temperature for 8 hours, resulting in an equal mixture of D-valine methyl ester (D-Val-OMe) and amino acid methyl ester 5. The pH is adjusted to 8.5 using 3% ammonia, and D-Val-OMe is removed via distillation to obtain crude product 5 [bbb0683].（信心度：19.3%，最近似來源：bbb0683-5edb73bf）\n- *   Enzymatic hydrolysis: L-BPA methyl ester (6) is placed in water with chymotrypsin, pH adjusted to 5.0 using 0.1 N LiOH, and stirred at 25°C for 30 hours (maintaining pH). This yields L-BPA with a yield of 79% and an optical purity of 100% e.e. [bbb0683].（信心度：2.1%，最近似來源：bbb0683-5edb73bf）\n- *   Non-enzymatic hydrolysis: Stirring with 0.5 N NaOH at room temperature for 36 hours, followed by pH adjustment to 6.8 using 1 N HCl. This yields L-BPA with a yield of 87% but an optical purity of only 86% [bbb0683].（信心度：2.3%，最近似來源：bbb0683-22cc0366）\n- *   Model speculation (insufficient literature basis): The use of (2R)-(-)-2,5-dihydro-2-isopropyl-3,6-dimethoxypyrazine suggests the application of the Schöllkopf chiral auxiliary method. This is a well-known academic technique for synthesizing non-proteinogenic amino acids by creating a chiral glycine equivalent that can be alkylated with high diastereoselectivity.（信心度：3.3%，最近似來源：bbb0683-22cc0366）\n- *   Model speculation (insufficient literature basis): The protection of the boronic acid as a cyclic ester in Step 1 is likely necessary because free boronic acids contain acidic protons ($\\text{B-OH}$) that would react with and quench the strong organometallic base n-BuLi used in Step 2, thereby preventing the lithiation of the pyrazine auxiliary.（信心度：12.7%，最近似來源：bbb0683-22cc0366）\n\n<!-- grounding_score=0.429 -->\n---"
+    }
+  ]
+}

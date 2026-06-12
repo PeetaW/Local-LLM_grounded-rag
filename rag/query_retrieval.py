@@ -57,6 +57,27 @@ def _retrieve_nodes(engine, query_text: str):
     return None
 
 
+def _rerank_nodes(engine, nodes, query_text: str):
+    """
+    Phase A-3: 若 RERANK_ENABLED，用 engine 既有的 cross-encoder reranker
+    把檢索候選精選到 RERANKER_TOP_N（reranker 已內建 top_n）。
+    重用 engine 既有的 reranker，不另外載入模型。失敗則退回原始 nodes。
+    """
+    if not cfg.RERANK_ENABLED or not nodes:
+        return nodes
+    postprocessors = getattr(engine, "_node_postprocessors", None) or []
+    if not postprocessors:
+        return nodes
+    from llama_index.core import QueryBundle
+    try:
+        return postprocessors[0].postprocess_nodes(
+            nodes, query_bundle=QueryBundle(query_text)
+        )
+    except Exception as e:
+        print(f"  ⚠️  [rerank] 失敗，用原始檢索結果：{e}")
+        return nodes
+
+
 def _generate_from_nodes(engine, nodes, query_text: str) -> str:
     """
     Phase B: LLM answer generation (gemma4).
@@ -124,9 +145,13 @@ def run_subqueries_parallel(valid_tasks: list, prefilled: dict) -> list:
         task_idx, label, engine, sub_q = task
         try:
             query_text = prepare_query_text(sub_q)
-            nodes = _retrieve_nodes(engine, query_text)
-            n = "n/a" if nodes is None else len(nodes)
-            print(f"  🔎 [Phase A] {label} 檢索到 {n} 個 node")
+            raw_nodes = _retrieve_nodes(engine, query_text)
+            nodes = _rerank_nodes(engine, raw_nodes, query_text)
+            if cfg.RERANK_ENABLED and raw_nodes is not None:
+                print(f"  🔎 [Phase A] {label} 檢索 {len(raw_nodes)} → rerank {len(nodes) if nodes else 0} 個 node")
+            else:
+                n = "n/a" if nodes is None else len(nodes)
+                print(f"  🔎 [Phase A] {label} 檢索到 {n} 個 node")
             return task_idx, label, engine, query_text, nodes
         except Exception as e:
             print(f"  ⚠️  [Phase A] {label} 檢索失敗：{e}")

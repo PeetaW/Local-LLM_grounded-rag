@@ -12,10 +12,12 @@ def build_hybrid_retriever(index):
     建立 BM25 + 向量搜尋的混合檢索器。
     """
     nodes = list(index.docstore.docs.values())
-    # 夾住 top_k：小論文 chunk 數可能 < RERANK_CANDIDATE_K，
-    # bm25s 在 k > corpus size 時會直接報錯（時好時壞，視平行競爭而定），
-    # 是 P1「間歇性空白」的根因。夾到該篇實際 chunk 數即可徹底消除。
-    top_k = min(cfg.RERANK_CANDIDATE_K, len(nodes)) if nodes else cfg.RERANK_CANDIDATE_K
+    # rerank 開啟時多檢索一些候選（RERANK_CANDIDATE_K）讓 cross-encoder 精選；
+    # 關閉時直接檢索最終數量（RERANKER_TOP_N）。
+    # 夾住 top_k：小論文 chunk 數可能 < target，bm25s 在 k > corpus 時會報錯（P1 根因），
+    # 夾到該篇實際 chunk 數即可徹底消除。
+    target_k = cfg.RERANK_CANDIDATE_K if cfg.RERANK_ENABLED else cfg.RERANKER_TOP_N
+    top_k = min(target_k, len(nodes)) if nodes else target_k
 
     vector_retriever = VectorIndexRetriever(
         index=index,
