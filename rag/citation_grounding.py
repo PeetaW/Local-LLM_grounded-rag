@@ -31,9 +31,13 @@ def _get_nli_model():
         print("  📦 載入 mDeBERTa 多語言 NLI 模型（三分類模式）...")
         _nli_tokenizer = AutoTokenizer.from_pretrained(model_name)
         _nli_model = AutoModelForSequenceClassification.from_pretrained(model_name)
-        device = 0 if torch.cuda.is_available() else -1
-        if device == 0:
+        want = getattr(cfg, "NLI_DEVICE", "auto").lower()
+        use_cuda = (want == "cuda") or (want == "auto" and torch.cuda.is_available())
+        if use_cuda and torch.cuda.is_available():
             _nli_model = _nli_model.cuda()
+            print("  ✅ mDeBERTa device: cuda")
+        else:
+            print("  ✅ mDeBERTa device: cpu（釋放 VRAM 給 LLM）")
         _nli_model.eval()
 
         # 從模型 config 取得 label 對應關係
@@ -69,6 +73,47 @@ def _run_nli(premise: str, hypothesis: str) -> dict:
     for key in ("entailment", "neutral", "contradiction"):
         result.setdefault(key, 0.0)
     return result
+
+
+def _run_nli_batch(premises: list, hypotheses: list, batch_size: int = None) -> list:
+    """
+    對多組 (premise, hypothesis) pair 批次執行 NLI（一次矩陣運算多組）。
+    premises 與 hypotheses 必須等長；回傳等長的 score dict 清單。
+    結果與逐組呼叫 _run_nli 相同（padding token 被 attention mask 忽略），
+    只是省掉 per-call 的 Python / 資料傳輸開銷。
+    以 batch_size 分批，避免一次塞太多爆記憶體。
+    """
+    import torch
+
+    if not premises:
+        return []
+    if batch_size is None:
+        batch_size = getattr(cfg, "NLI_BATCH_SIZE", 16)
+
+    model, tokenizer, label_map = _get_nli_model()
+    device = next(model.parameters()).device
+
+    out = []
+    for i in range(0, len(premises), batch_size):
+        bp = premises[i:i + batch_size]
+        bh = hypotheses[i:i + batch_size]
+        inputs = tokenizer(
+            bp, bh,
+            return_tensors="pt", truncation="only_first",
+            max_length=512, padding=True,
+        )
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        with torch.no_grad():
+            logits = model(**inputs).logits
+        probs = torch.softmax(logits, dim=-1).cpu().tolist()  # [B, num_labels]
+        for row in probs:
+            r = {}
+            for label, idx in label_map.items():
+                r[label.lower()] = round(row[idx], 4)
+            for key in ("entailment", "neutral", "contradiction"):
+                r.setdefault(key, 0.0)
+            out.append(r)
+    return out
 
 
 def _latex_to_plain(text: str) -> str:
@@ -327,20 +372,19 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
         best_chunk_id = None
         best_entail_c = 0.0   # contradiction score of the best-entailment chunk
 
-        for chunk in chunks:
-            chunk_text = chunk["text"][:512]
-            try:
-                scores  = _run_nli(premise=chunk_text, hypothesis=hypothesis)
-                e_score = scores["entailment"]
-                c_score = scores["contradiction"]
-
-                if e_score > best_entail:
-                    best_entail   = e_score
-                    best_entail_c = c_score
-                    best_chunk_id = chunk.get("id", chunk.get("source", ""))
-
-            except Exception:
-                continue
+        # 批次：這一句 hypothesis 對所有 chunk 一次跑完（取代逐 chunk 呼叫）
+        chunk_texts = [c["text"][:512] for c in chunks]
+        try:
+            scores_list = _run_nli_batch(chunk_texts, [hypothesis] * len(chunk_texts))
+        except Exception:
+            scores_list = []
+        for chunk, scores in zip(chunks, scores_list):
+            e_score = scores["entailment"]
+            c_score = scores["contradiction"]
+            if e_score > best_entail:
+                best_entail   = e_score
+                best_entail_c = c_score
+                best_chunk_id = chunk.get("id", chunk.get("source", ""))
 
         # ── 升級一：多來源聯合驗證（NLI_JOINT_VERIFY_ENABLED）────────────
         # 個別 chunk 都不夠支撐，但 top-3 合併後可以 → INFERENCE_BRIDGE

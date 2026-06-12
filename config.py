@@ -121,6 +121,14 @@ EN_DRAFT_PIPELINE = True          # True = 英文 draft 全流程（預設關閉
 # 注意：開啟後每次 grounding check 增加一次 LLM 批次呼叫（約 5-20s）。
 NLI_TRANSLATE_TO_EN = True        # 翻譯 hypothesis 為英文再送 NLI
 
+# ── NLI (mDeBERTa) 比對效能設定 ───────────────────────
+# 一次送幾組 (premise, hypothesis) 進 mDeBERTa 做批次矩陣運算（取代逐組呼叫）。
+# 結果與逐組完全相同，只是省掉 per-call 的 Python/傳輸開銷。
+NLI_BATCH_SIZE = 16
+# mDeBERTa 跑在哪：'auto'（有 GPU 用 GPU）/ 'cuda' / 'cpu'。
+# 設 'cpu' 可釋放 VRAM 給 LLM（換取較慢的 NLI），對單卡 VRAM 吃緊的情況可能反而整體更快。
+NLI_DEVICE = "auto"
+
 # ── 記憶系統設定 ──────────────────────────────────────
 MEMORY_RECALL_N   = 3    # 每次查詢召回幾筆歷史記憶
 
