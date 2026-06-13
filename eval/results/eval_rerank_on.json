@@ -1,0 +1,165 @@
+{
+  "label": "rerank_on",
+  "mode": "gold",
+  "summary": {
+    "n_questions": 4,
+    "avg_grounding_score": 0.58,
+    "avg_paper_sel_recall": 1.0,
+    "avg_retrieval_recall": null,
+    "avg_total_ms": 11821073.0,
+    "avg_planning_ms": 4678.5,
+    "avg_retrieval_ms": 268643.0,
+    "avg_grounding_ms": 10071557.0
+  },
+  "rows": [
+    {
+      "id": "Q01",
+      "type": "single_paper",
+      "question": "In the study of JPH203's preincubation inhibitory effect on LAT1, how does preincubation change JPH203's inhibitory potency? Give the reported values.",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S1347861320300633-main",
+        "1-s2.0-S0021979710012403-main",
+        "1-s2.0-S1936523321002047-main",
+        "s41421-024-00697-6"
+      ],
+      "gold_papers": [
+        "1-s2.0-S1347861320300633-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.6,
+      "counts": {
+        "paper_count": 4,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 5636,
+        "retrieval": 229409,
+        "synthesis": 92694,
+        "synthesis-llm": 91493,
+        "verification": 96466,
+        "grounding": 9731269,
+        "translation": 858048,
+        "total": 11105018
+      },
+      "wall_seconds": 11104.9,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 4
+      },
+      "answer": "## 【論文直接依據】\n* 預孵育（Preincubation）在與共同孵育（co-incubation）結合時，能顯著增強 JPH203 的抑制效力，產生協同效應 【1-s2.0-S1347861320300633-main】。\n* 當加入預孵育時，$\\text{IC}_{50}$ 值從 $99.2 \\pm 11.0\\text{ nM}$（僅共同孵育）降低至 $34.2 \\pm 3.6\\text{ nM}$ 【1-s2.0-S1347861320300633-main】。\n* 在預孵育與共同孵育的結合分析中，$\\text{K}_i$ 值從 $0.46\\text{ mM}$（僅共同孵育）降低至 $0.37\\text{ mM}$ 【1-s2.0-S1347861320300633-main】。\n* 預孵育的抑制效果具有時間依賴性；具體而言，使用 $10\\text{ mM}$ JPH203 處理 30、60 和 120 分鐘，可將亮氨酸（leucine）的攝取活性分別降低至對照組的 42%、32% 和 28% 【1-s2.0-S1347861320300633-main】。\n* 使用 $0.3\\text{ mM}$ JPH203 預孵育 120 分鐘，可將活性水平降低至 DMSO 處理細胞的 30% 【1-s2.0-S1347861320300633-main】。\n\n## 【跨文獻推論】\n* 跨論文推論（基於 【1-s2.0-S1347861320300633-main】）：預孵育提高了 JPH203 的整體抑制效率，而未改變其基本作用機制。這源於儘管 $\\text{IC}_{50}$ 和 $\\text{K}_i$ 值降低（表明效力更高），但抑制作用仍為競爭性，這可由共同孵育和預孵育處理中一致的 $\\text{V}_{\\max}$ 值以及增加的 $\\text{K}_m$ 值來證明。\n\n## 【知識延伸與推測】\n* 模型推測（文獻依據不足）：預孵育效果是暫時性的，且在移除 JPH203 後一小時內消失，這一事實表明該藥物未與 LAT1 轉運蛋白形成共價鍵。相反，它可能涉及高親和力的可逆結合，或是一種慢啟動/慢偏移（slow-onset/slow-offset）的平衡，需要藥物的持續存在才能維持增強的抑制狀態。\n* 模型推測（文獻依據不足）：鑑於預孵育因在體內具有較長的暴露時間而可能更好地反映臨床療效，傳統的「共同孵育」藥理分析可能會系統性地低估 JPH203 在臨床環境中的實際治療效力。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ⚠️ 【論文直接依據】：60.0%（3/5 句）\n  ✅ 【跨文獻推論】：100.0%（1/1 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/2 句）  ← 知識延伸推測，低分為預期範圍\n\n⚠️ **直引依據率**：60.0%　中（部分直引陳述需確認）\n\n⚠️  **以下 4 個陳述未找到明確論文依據，請謹慎參考：**\n\n- * The $\\text{K}_i$ value decreases from $0.46\\text{ mM}$ (for co-incubation alone) to $0.37\\text{ mM}$ for the combined preincubation and co-incubation analysis [1-s2.0-S1347861320300633-main].（信心度：5.4%，最近似來源：1-s2.0-S0021979710012403--48d44845）\n- * The inhibitory effect of preincubation is time-dependent; specifically, using $10\\text{ mM}$ JPH203 for 30, 60, and 120 minutes reduces leucine uptake activity to 42%, 32%, and 28% of the control group, respectively [1-s2.0-S1347861320300633-main].（信心度：16.7%，最近似來源：1-s2.0-S1347861320300633--421db807）\n- * Model speculation (insufficient literature basis): The fact that the preincubation effect is transient and disappears within one hour after the removal of JPH203 suggests that the drug does not form a covalent bond with the LAT1 transporter. Instead, it likely involves a high-affinity reversible binding or a slow-onset/slow-offset equilibrium that requires the continuous presence of the drug to maintain the enhanced inhibitory state.（信心度：4.7%，最近似來源：1-s2.0-S0021979710012403--e195173f）\n- * Model speculation (insufficient literature basis): Given that preincubation may better reflect clinical efficacy due to longer exposure times in vivo, traditional \"co-incubation\" pharmacological assays may systematically underestimate the actual therapeutic potency of JPH203 in a clinical setting.（信心度：7.9%，最近似來源：1-s2.0-S1936523321002047--b160627c）\n\n<!-- grounding_score=0.600 -->\n---"
+    },
+    {
+      "id": "Q02",
+      "type": "single_paper",
+      "question": "What is the hybrid process used for the asymmetric synthesis of optically pure L-p-boronophenylalanine, and what are its key steps?",
+      "detected_paper": null,
+      "selected_papers": [
+        "bbb0683",
+        "CMDC-20-e202500059"
+      ],
+      "gold_papers": [
+        "bbb0683"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.429,
+      "counts": {
+        "paper_count": 2,
+        "subquery_count": 4
+      },
+      "latency": {
+        "planning": 3958,
+        "retrieval": 363713,
+        "synthesis": 176422,
+        "synthesis-llm": 117775,
+        "verification": 137575,
+        "grounding": 7882435,
+        "translation": 1047254,
+        "total": 9729135
+      },
+      "wall_seconds": 9728.9,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 9
+      },
+      "answer": "## 【論文直接依據】\n\n用於光學純 L-p-硼苯丙氨酸 (L-BPA) 不對稱合成的混合製程結合了「對映選擇性烷基化」以及隨後的「酶促水解」[bbb0683]。關鍵步驟如下：\n\n*   **步驟 1：保護基合成：** 4-溴甲基苯硼酸 (1) 在乾燥 THF 中與 2,2-二甲基-1,3-丙二醇反應，產出環狀硼酸酯 (2)，產率為 79% [bbb0683]。具體而言，將 5.99 g (27.9 mmol) 的物質 1 和 2.91 g (27.9 mmol) 的 2,2-二甲基-1,3-丙二醇溶解於 30 ml 乾燥 THF 中，並在室溫下攪拌 10 分鐘 [bbb0683]。\n*   **步驟 2：立體選擇性烷基化：** (2R)-(-)-2,5-二氫-2-異丙基-3,6-二甲氧基吡嗪 (bislactimether, 3) 使用 n-BuLi 進行鋰化，然後在 -78°C 的乾燥 THF 中與環狀硼酸酯 (2) 反應，生成加成產物 4 [bbb0683]。具體條件包括將 1.84 g (10.0 mmol) 的物質 3 溶解於 36 ml 乾燥 THF 中，在 30 分鐘內加入 n-BuLi (1.68 M in hexane, 5.95 ml, 10 mmol)，等待 1 小時，然後在 30 分鐘內加入由 2.83 g (10.0 mmol) 物質 2 溶解於 6 ml 乾燥 THF 的溶液，隨後在 -78°C 下攪拌 15 小時 [bbb0683]。產物 4 具有 2S 構型，立體選擇性為 74% e.e. (或 72% 非對映異構體過量) [bbb0683]。\n*   **步驟 3：L-BPA 甲酯 (6) 的合成：** 這是一個兩階段過程，從產物 4 到酯 6 的總產率為 85% [bbb0683]：\n    *   第一階段 (4 $\\rightarrow$ 5)：將 1.57 g (4.1 mmol) 的中間體 4 溶解於 8 ml THF 中，在 5°C 下用 8.1 ml 的 0.1 N HCl 處理，並在室溫下攪拌 8 小時，以產生 D-Val-OMe 和氨基酸甲酯 5 的等量混合物 [bbb0683]。\n    *   第二階段 (5 $\\rightarrow$ 6)：將粗產物 5 (1.07 g) 與 8 ml 的 1 N HCl 和 1.5 ml THF 混合，並在室溫下攪拌 2 小時，以獲得 L-BPA 甲酯 (6) [bbb0683]。\n*   **步驟 4：水解至最終產物：** 從甲酯 (6) 獲取 L-BPA 有兩種可能路徑 [bbb0683]：\n    *   酶促路徑：使用胰凝乳蛋白酶 (chymotrypsin) 在 pH 5.0 下反應，可得到 e.e. 為 100% 的 L-BPA，產率為 79% [bbb0683]。\n    *   非酶促路徑：將 160 mg (0.72 mmol) 的酯 6 與 0.37 ml 的 0.5 N NaOH 在室溫下攪拌 36 小時，然後使用 1 N HCl 將 pH 調至 6.8 並收集沉澱，可得到 e.e. 為 86% 的 L-BPA，產率為 87% [bbb0683]。\n\n與先前的方法相比，該混合製程的特點是反應步驟較少、操作更簡單、後處理更容易，且能夠在無需額外分離的情況下將立體純度從 74% e.e. (中間體 4) 提高到 100% e.e. [bbb0683]。\n\n## 【跨文獻推論】\n\n*   **跨論文推論 (基於 [bbb0683] Fact 2, 7, 12 和 15)：** 該製程的「混合」性質是指化學不對稱合成 (使用 bislactimether 的 Schöllkopf 型烷基化) 與生物催化劑 (胰凝乳蛋白酶) 的策略性結合。雖然化學步驟提供了初始的手性框架，但對於光學純度而言是不夠的 (僅 74% e.e.)；酶促水解則作為動力學分餾或立體選擇性步驟，將最終產物提升至 100% e.e.。\n*   **跨論文推論 (基於 [bbb0683] Fact 12 和 13)：** 當光學純度為優先考量時，對於此特定合成，酶促水解優於化學水解，因為它實現了完美的 100% e.e.，而使用 NaOH 處理僅達到 86% e.e.，儘管其產率略低 (79% vs 87%)。\n\n## 【知識延伸與推測】\n\n*   **模型推測 (文獻依據不足)：** 使用 (2R)-(-)-2,5-二氫-2-異丙基-3,6-二甲氧基吡嗪表明應用了 Schöllkopf 手性輔助劑法。在該化學反應中，異丙基提供了立體阻礙，引導烷基化優先從相反面發生，這解釋了為何在 Fact 7 中獲得特定的構型 (2S)。\n*   **模型推測 (文獻依據不足)：** 將硼酸保護為環狀酯 (步驟 1) 的要求可能是必要的，因為游離硼酸可能不穩定或會干擾有機鋰試劑 (如步驟 2 中使用的 n-BuLi)，否則這些試劑會與酸性的 B-OH 基團反應。\n*   **模型推測 (文獻依據不足)：** 通過胰凝乳蛋白酶實現的高光學純度可能是由於該酶對 L-氨基酸酯比對 D-異構體具有更高的特異性，有效地「過濾掉」了甲酯中間體中殘留的任何 D-雜質。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ❌ 【論文直接依據】：42.9%（3/7 句）\n  ❌ 【跨文獻推論】：0.0%（0/2 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/3 句）  ← 知識延伸推測，低分為預期範圍\n\n❌ **直引依據率**：42.9%　低（建議縮小問題範圍）\n\n⚠️  **以下 9 個陳述未找到明確論文依據，請謹慎參考：**\n\n- *   Step 1: Protecting Group Synthesis: 4-bromomethylphenylboronic acid (1) is reacted with 2,2-dimethyl-1,3-propanediol in dry THF to produce cyclic boronic ester (2) with a yield of 79% [bbb0683]. Specifically, 5.99 g (27.9 mmol) of substance 1 and 2.91 g (27.9 mmol) of 2,2-dimethyl-1,3-propanediol are dissolved in 30 ml dry THF and stirred for 10 minutes at ambient temperature [bbb0683].（信心度：22.0%，最近似來源：bbb0683-5edb73bf）\n- *   Stage 1 (4 $\\rightarrow$ 5): 1.57 g (4.1 mmol) of intermediate 4 is dissolved in 8 ml THF, treated with 8.1 ml of 0.1 N HCl at 5°C, and stirred for 8 hours at room temperature to produce an equimolar mixture of D-Val-OMe and amino acid methyl ester 5 [bbb0683].（信心度：28.6%，最近似來源：bbb0683-5edb73bf）\n- *   Non-enzymatic Path: Stirring 160 mg (0.72 mmol) of ester 6 with 0.37 ml of 0.5 N NaOH at room temperature for 36 hours, then adjusting the pH to 6.8 using 1 N HCl and collecting the precipitate, results in L-BPA with 86% e.e. and a yield of 87% [bbb0683].（信心度：8.9%，最近似來源：bbb0683-22cc0366）\n- Compared to previous methods, this hybrid process is characterized by fewer reaction steps, simpler operation, easier post-treatment, and the ability to increase stereopurity from 74% e.e. (intermediate 4) to 100% e.e. without additional separation [bbb0683].（信心度：1.6%，最近似來源：CMDC-20-e202500059-beb43ed2）\n- *   Cross-paper inference (based on [bbb0683] Facts 2, 7, 12, and 15): The \"hybrid\" nature of the process refers to the strategic combination of a chemical asymmetric synthesis (the Schöllkopf-type alkylation using bislactimether) and a biological catalyst (chymotrypsin). While the chemical step provides the initial chiral framework, it is insufficient for optical purity (only 74% e.e.); the enzymatic hydrolysis acts as a kinetic resolution or stereoselective step that upgrades the final product to 100% e.e.（信心度：12.6%，最近似來源：CMDC-20-e202500059-beb43ed2）\n- *   Cross-paper inference (based on [bbb0683] Facts 12 and 13): Enzymatic hydrolysis is superior to chemical hydrolysis for this specific synthesis when optical purity is the priority, as it achieves a perfect 100% e.e. compared to the 86% e.e. achieved via NaOH treatment, despite a slightly lower yield (79% vs 87%).（信心度：14.1%，最近似來源：CMDC-20-e202500059-beb43ed2）\n- *   Model speculation (insufficient literature basis): The use of (2R)-(-)-2,5-dihydro-2-isopropyl-3,6-dimethoxypyrazine suggests the application of the Schöllkopf chiral auxiliary method. In this chemistry, the isopropyl group provides steric hindrance that directs the alkylation to occur preferentially from the opposite face, explaining why a specific configuration (2S) is obtained in Fact 7.（信心度：1.4%，最近似來源：CMDC-20-e202500059-b69e8e24）\n- *   Model speculation (insufficient literature basis): The requirement for protecting the boronic acid as a cyclic ester (Step 1) is likely necessary because free boronic acids can be unstable or interfere with organolithium reagents (like n-BuLi used in Step 2), which would otherwise react with the acidic B-OH groups.（信心度：6.7%，最近似來源：bbb0683-22cc0366）\n- *   Model speculation (insufficient literature basis): The high optical purity achieved via chymotrypsin is likely due to the enzyme's high specificity for L-amino acid esters over D-isomers, effectively \"filtering out\" any remaining D-impurities present in the methyl ester intermediate.（信心度：6.6%，最近似來源：CMDC-20-e202500059-beb43ed2）\n\n<!-- grounding_score=0.429 -->\n---"
+    },
+    {
+      "id": "Q03",
+      "type": "figure_dependent",
+      "question": "According to the cryo-EM structure, how does JPH203 bind to and inhibit the LAT1-4F2hc complex?",
+      "detected_paper": null,
+      "selected_papers": [
+        "s41421-024-00697-6",
+        "1-s2.0-S1347861320300633-main",
+        "1-s2.0-S1936523321002047-main",
+        "s41467-024-45464-z (1)",
+        "LAT1 ChemComm 2026"
+      ],
+      "gold_papers": [
+        "s41421-024-00697-6"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.789,
+      "counts": {
+        "paper_count": 5,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 5436,
+        "retrieval": 281591,
+        "synthesis": 162437,
+        "synthesis-llm": 137980,
+        "verification": 121898,
+        "grounding": 17077671,
+        "translation": 1512814,
+        "total": 19299829
+      },
+      "wall_seconds": 19299.6,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 6
+      },
+      "answer": "根據提供的事實，以下是關於 JPH203 如何結合並抑制 LAT1-4F2hc 複合物的全面回答。\n\n## 【論文直接依據】\n**結合位點與分子結構**\n* JPH203 結合於 LAT1 的傳統底物結合口袋中 【s41421-024-00697-6】。\n* 該分子由兩個主要部分組成：具有苯丙氨酸（phenylalanine）骨架的親水性頭部基團，以及具有 5-amino-2-(3-aminophenyl) benzoxazole 骨架的疏水性尾部基團 【s41421-024-00697-6】。\n\n**分子間相互作用**\n* **親水性頭部：** $\\alpha$-氨基和 $\\alpha$-羧基與 TM1 和 TM6 未捲曲（或展開）區域的主鏈原子形成氫鍵網絡 【s41421-024-00697-6】。\n* **核心：** 二鹵酪胺酸（dihalo-tyrosine）核心上的氯原子與 Tyr259 形成鹵鍵 【s41421-024-00697-6】。\n* **疏水性尾部：** \n    * 尾部嵌入由 TM1 (Ile63, Ile64, Ile68)、TM3 (Ile140, Ile147, Ile148)、TM6 (Phe252, Gly255) 和 TM10 (Ile397, Phe400, Phe403) 組成的疏水性口袋中 【s41421-024-00697-6】。\n    * 尾部的氨基與 TM10 上 Phe400 的主鏈形成氫鍵 【s41421-024-00697-6】。\n    * 尾部的苯環與 Phe252 的側鏈發生 T 型 $\\pi$-$\\pi$ 相互作用 【s41421-024-00697-6】。\n\n**結構影響與抑制機制**\n* JPH203 將 LAT1-4F2hc 複合物鎖定在面向外部（outward-facing）的結構中（透過低溫電子顯微鏡 cryo-EM 解析，解析度為 $3.30\\ \\text{Å}$，其中 JPH203 區域精修至 $3.25\\ \\text{Å}$） 【s41421-024-00697-6】。\n* JPH203 的長尾部阻止了 Phe400 的移動 【s41421-024-00697-6】。\n* 結合誘導了 TM1 產生 $4.34^\\circ$ 的偏移，並導致 TM6 區域發生旋轉 【s41421-024-00697-6】。\n* 結合破壞了 TM10 的二級結構並導致顯著旋轉；這一特定效應與觀察到 JX075 或 Diiodo-Tyr 的效果不同 【s41421-024-00697-6】。\n* 與 JX075 的結合不同，當 JPH203 結合時，TM3 保持完全摺疊狀態 【s41421-024-00697-6】。\n\n**選擇性與親和力**\n* Phe400 和 Tyr259 是 JPH203 對 LAT1 具有高選擇性的關鍵殘基 【s41421-024-00697-6】。\n* 在 LAT2 中，對應的殘基為 Val391 和 Phe250；具體而言，Phe250 導致了鹵鍵相互作用的缺失 【s41421-024-00697-6】。\n* MST 數據顯示，與野生型 LAT1 ($1.48 \\pm 0.28\\ \\mu\\text{M}$) 相比，LAT1 的突變 (F400V 和 Y259F) 會增加 $K_d$（降低親和力），而 LAT2 的對應突變 (V391F 和 F250Y) 與野生型 LAT2 ($4.51 \\pm 1.35\\ \\mu\\text{M}$) 相比則會降低 $K_d$（增加親和力） 【s41421-024-00697-6】。\n\n## 【跨文獻推論】\n**選擇性機制 (LAT1 vs. LAT2)**\n跨論文推論（基於 【s41421-024-00697-6】）：JPH203 對 LAT1 相較於 LAT2 的高選擇性是由抑制劑與殘基 Tyr259 和 Phe400 之間的特定化學互補性所驅動的。證據如下：\n1. 由於存在 Phe250 而非 Tyr259，導致 LAT2 中關鍵鹵鍵的缺失。\n2. 親和力數據顯示，將「類 LAT1」殘基引入 LAT2 (V391F, F250Y) 會顯著增加其對 JPH203 的結合親和力，而從 LAT1 中移除這些殘基 (F400V, Y259F) 則會降低親和力。\n\n**透過構象鎖定進行抑制**\n跨論文推論（基於 【s41421-024-00697-6】）：JPH203 抑制轉運蛋白不僅僅是透過堵塞孔道，而是透過穩定一個特定的非功能狀態。藉由阻止 Phe400 的移動，並在保持 TM3 摺疊的同時誘導 TM1、TM6 和 TM10 發生顯著旋轉/偏移，JPH203 可能阻止了底物轉運所需的從面向外部（outward-facing）到面向內部（inward-facing）狀態的構象轉換。\n\n## 【知識延伸與推測】\n**模型推測（文獻依據不足）：** \n鑑於 JPH203 穩定「面向外部」的構象，它可能作為一種競爭性抑制劑，模擬底物的初始結合，但無法觸發隨後的遮蔽（occlusion）和易位（translocation）步驟。TM10 的顯著旋轉和 TM1 的偏移表明，JPH203 誘導了一種在能量上被捕獲的「扭曲」面向外部狀態，使得向面向內部狀態的轉換在動力學上是不利的。這表明未來對疏水性尾部的修改可能會進一步優化此鎖定狀態的穩定性，從而提高效力。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ⚠️ 【論文直接依據】：78.9%（15/19 句）\n  ✅ 【跨文獻推論】：100.0%（1/1 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/1 句）  ← 知識延伸推測，低分為預期範圍\n\n⚠️ **直引依據率**：78.9%　中（部分直引陳述需確認）\n\n⚠️  **以下 6 個陳述未找到明確論文依據，請謹慎參考：**\n\n- Based on the provided facts, here is the comprehensive answer regarding how JPH203 binds to and inhibits the LAT1-4F2hc complex.（信心度：5.3%，最近似來源：1-s2.0-S1936523321002047--b1c23309）\n- * The long tail of JPH203 prevents the movement of Phe400 [s41421-024-00697-6].（信心度：5.5%，最近似來源：1-s2.0-S1936523321002047--748dd987）\n- * Binding disrupts the secondary structure of TM10 and causes significant rotation; this specific effect differs from that observed with JX075 or Diiodo-Tyr [s41421-024-00697-6].（信心度：3.8%，最近似來源：s41467-024-45464-z (1)-fda8fa75）\n- * Unlike the binding of JX075, TM3 remains completely folded when JPH203 is bound [s41421-024-00697-6].（信心度：4.6%，最近似來源：1-s2.0-S1347861320300633--094d1631）\n- * In LAT2, the corresponding residues are Val391 and Phe250; specifically, Phe250 leads to the loss of the halogen bond interaction [s41421-024-00697-6].（信心度：2.4%，最近似來源：1-s2.0-S1936523321002047--b160627c）\n- [Knowledge Extension and Speculation] Model speculation (insufficient literature basis): Given that JPH203 stabilizes the \"outward-facing\" conformation, it likely acts as a competitive inhibitor that mimics the substrate's initial binding but fails to trigger the subsequent occlusion and translocation steps. The significant rotation of TM10 and shift of TM1 suggest that JPH203 induces a \"distorted\" outward-facing state that is energetically trapped, making the transition to an inward-facing state kinetically unfavorable. This suggests that future modifications to the hydrophobic tail could further optimize the stability of this locked state to increase potency.（信心度：1.1%，最近似來源：s41467-024-45464-z (1)-984a9d13）\n\n<!-- grounding_score=0.789 -->\n---"
+    },
+    {
+      "id": "Q04",
+      "type": "table_lookup",
+      "question": "What are the main degradation products and impurities of BPA identified by HPLC, and under which storage conditions do they form?",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S0731708511003451-main",
+        "synthesis-and-biological-properties-of-water-soluble-p-boronophenylalanine-derivatives-relationship-between-water"
+      ],
+      "gold_papers": [
+        "1-s2.0-S0731708511003451-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.5,
+      "counts": {
+        "paper_count": 2,
+        "subquery_count": 2
+      },
+      "latency": {
+        "planning": 3684,
+        "retrieval": 199859,
+        "synthesis": 109213,
+        "synthesis-llm": 120559,
+        "verification": 127575,
+        "grounding": 5594853,
+        "translation": 994563,
+        "total": 7150310
+      },
+      "wall_seconds": 7150.2,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 2
+      },
+      "answer": "## 【論文直接依據】\n**降解產物：**\n- **酪胺酸 (Tyrosine)：** 在鹼性和氧化條件下由 BPA 降解而形成 【1-s2.0-S0731708511003451-main】。在氧化條件下，降解速度非常快 【1-s2.0-S0731708511003451-main】。在鹼性水溶液中，此過程可能會因接觸空氣而加速，表明氧化作用發揮了影響 【1-s2.0-S0731708511003451-main】。其透過 HPLC 在 230 nm 下鑑定，保留時間為 4.5 分鐘 【1-s2.0-S0731708511003451-main】。\n- **苯丙胺酸 (Phenylalanine)：** 在含有 BPA 和甘露醇 (mannitol) 的冷凍乾燥藥品中形成 【1-s2.0-S0731708511003451-main】。這是一個緩慢且與溫度相關的過程；例如，在 40 °C 下儲存 6 個月後，產量約為 1%（相對於 BPA 質量） 【1-s2.0-S0731708511003451-main】。其透過 HPLC 在 256 nm 下鑑定，保留時間為 11.0 分鐘 【1-s2.0-S0731708511003451-main】。\n- **母體芳環 (Parent arene)：** 在鹼性水溶液條件下透過原脫硼反應 (protodeborylation) 形成 【1-s2.0-S0731708511003451-main】。\n\n**雜質（合成中間體）：**\n- **(2-(4-Bromophenyl)-[1,3]dioxane (BrPD)：** BPA 的合成中間體，透過 HPLC 在 256 nm 下鑑定，保留時間為 17.3 分鐘 【1-s2.0-S0731708511003451-main】。\n- **4-Formylbenzeneboronic acid (FBBA)：** BPA 的合成中間體，透過 HPLC 在 256 nm 下鑑定，保留時間為 23.7 分鐘 【1-s2.0-S0731708511003451-main】。\n- **2-tert-Butoxycarbonylamino-3-[4-(5,5-dimethyl-[1,3,2]dioxaborinan-2-yl)-phenyl]acrylic acid methyl ester (BDPA)：** BPA 的合成中間體，透過 HPLC 在 270 nm 下鑑定，且與 FBBA 共洗脫 【1-s2.0-S0731708511003451-main】。\n\n## 【跨文獻推論】\n跨論文推論（基於 【1-s2.0-S0731708511003451-main】）：BPA 的降解路徑高度依賴於藥物的物理狀態和化學環境。具體而言，鹼性水溶液環境會促進向酪胺酸 (Tyrosine) 的快速降解（特別是在存在氧氣/空氣的情況下），或透過原脫硼反應形成母體芳環 (Parent arenes)；而固態冷凍乾燥形式（含甘露醇）則導致較慢的、由熱驅動的向苯丙胺酸 (Phenylalanine) 的降解。\n\n## 【知識延伸與推測】\n模型推測（文獻依據不足）：根據提供的數據，為了最大限度地延長 BPA 的貨架期，極有可能應將藥物儲存在無氧環境中（以防止酪胺酸形成）並在冷藏溫度下保存（以抑制與溫度相關的苯丙胺酸形成）。此外，雖然「母體芳環 (Parent arene)」被提及為原脫硼反應的產物，但在硼苯丙胺酸 (boronophenylalanine) 的背景下，該母體芳環在化學上很可能是苯丙胺酸；然而，論文將冷凍乾燥降解為苯丙胺酸視為一個獨立的過程，這表明其具有不同的動力學或機制路徑。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ⚠️ 【論文直接依據】：50.0%（3/6 句）\n  ❌ 【跨文獻推論】：0.0%（0/1 句）  ← 跨論文推論，低分為預期範圍\n  ✅ 【知識延伸推測】：100.0%（1/1 句）  ← 知識延伸推測，低分為預期範圍\n\n⚠️ **直引依據率**：50.0%　中（部分直引陳述需確認）\n\n⚠️  **以下 2 個陳述未找到明確論文依據，請謹慎參考：**\n\n- - Tyrosine: Forms from the degradation of BPA under alkaline and oxidative conditions [1-s2.0-S0731708511003451-main]. The degradation speed is very fast under oxidative conditions [1-s2.0-S0731708511003451-main]. In aqueous alkaline solutions, this process may be accelerated by exposure to air, indicating the role of oxidation [1-s2.0-S0731708511003451-main]. It is identified by HPLC at 230 nm with a retention time of 4.5 minutes [1-s2.0-S0731708511003451-main].（信心度：4.5%，最近似來源：1-s2.0-S0731708511003451--6c319b11）\n- [Cross-Literature Inference] Cross-paper inference (based on [1-s2.0-S0731708511003451-main]): The degradation pathways of BPA are highly dependent on the physical state and chemical environment of the drug. Specifically, aqueous alkaline environments promote rapid degradation toward Tyrosine (especially if oxygen/air is present) or Parent arenes via protodeborylation, whereas the solid-state lyophilized form (with mannitol) leads to a much slower, thermally driven degradation into Phenylalanine.（信心度：3.9%，最近似來源：synthesis-and-biological--b4cee8a2）\n\n<!-- grounding_score=0.500 -->\n---"
+    }
+  ]
+}

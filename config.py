@@ -80,7 +80,7 @@ REVIEW_MODE = False
 # retriever.py 會把 top_k 夾到 min(target, 該篇chunk數)，避免小論文 bm25s 報錯。
 # ⚠️ 切換此旗標需重啟（engine 在啟動時建立，檢索數量在那時決定）。
 RERANKER_MODEL     = "BAAI/bge-reranker-v2-m3"
-RERANK_ENABLED     = True   # 預設關（現況）；改 True 跑 rerank_on 做 A/B
+RERANK_ENABLED     = False   # 預設關（現況）；改 True 跑 rerank_on 做 A/B
 RERANK_CANDIDATE_K = 24      # rerank 開啟時，進 reranker 前先檢索幾個
 RERANKER_TOP_N     = 8       # 最終餵給 gemma4 的 chunk 數
 
@@ -127,7 +127,7 @@ NLI_TRANSLATE_TO_EN = True        # 翻譯 hypothesis 為英文再送 NLI
 NLI_BATCH_SIZE = 16
 # mDeBERTa 跑在哪：'auto'（有 GPU 用 GPU）/ 'cuda' / 'cpu'。
 # 設 'cpu' 可釋放 VRAM 給 LLM（換取較慢的 NLI），對單卡 VRAM 吃緊的情況可能反而整體更快。
-NLI_DEVICE = "auto"
+NLI_DEVICE = "cuda"
 
 # ── 記憶系統設定 ──────────────────────────────────────
 MEMORY_RECALL_N   = 3    # 每次查詢召回幾筆歷史記憶
