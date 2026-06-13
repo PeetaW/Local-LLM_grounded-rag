@@ -29,6 +29,11 @@ def parse_stage_latencies(status_lines: list) -> dict:
         out[tag] = int(m.group(1)) if m else None
     m = re.search(r'total_elapsed_ms=(\d+)', text)
     out["total"] = int(m.group(1)) if m else None
+    # grounding 階段內的 NLI vs LLM 拆解（[grounding-timing] nli_ms=.. llm_ms=..）
+    mn = re.search(r'grounding-timing[^\n]*?nli_ms=(\d+)', text)
+    ml = re.search(r'grounding-timing[^\n]*?llm_ms=(\d+)', text)
+    out["grounding_nli"] = int(mn.group(1)) if mn else None
+    out["grounding_llm"] = int(ml.group(1)) if ml else None
     return out
 
 
@@ -104,4 +109,6 @@ def summarize(rows: list) -> dict:
         "avg_planning_ms":      _avg("latency", "planning"),
         "avg_retrieval_ms":     _avg("latency", "retrieval"),
         "avg_grounding_ms":     _avg("latency", "grounding"),
+        "avg_grounding_nli_ms": _avg("latency", "grounding_nli"),
+        "avg_grounding_llm_ms": _avg("latency", "grounding_llm"),
     }

@@ -9,8 +9,35 @@
 #    （向下相容：舊程式不讀新欄位則不受影響）
 
 import re
+import time
 import torch
 import config as cfg
+
+# ── grounding 階段計時拆解（NLI vs LLM）──────────────────
+# 讓 NLI device A/B 能區分「CPU NLI 變慢」與「gemma4 因 VRAM 紓解變快」。
+_grounding_nli_time = 0.0   # mDeBERTa forward pass 累計秒數
+_grounding_llm_time = 0.0   # grounding 內 gemma4 呼叫累計秒數
+
+
+def reset_grounding_timers():
+    global _grounding_nli_time, _grounding_llm_time
+    _grounding_nli_time = 0.0
+    _grounding_llm_time = 0.0
+
+
+def get_grounding_timers() -> dict:
+    return {"nli_s": round(_grounding_nli_time, 1), "llm_s": round(_grounding_llm_time, 1)}
+
+
+def _add_nli_time(dt: float):
+    global _grounding_nli_time
+    _grounding_nli_time += dt
+
+
+def _add_llm_time(dt: float):
+    global _grounding_llm_time
+    _grounding_llm_time += dt
+
 
 _nli_model = None
 _nli_tokenizer = None
@@ -62,9 +89,11 @@ def _run_nli(premise: str, hypothesis: str) -> dict:
     device = next(model.parameters()).device
     inputs = {k: v.to(device) for k, v in inputs.items()}
 
+    _t = time.perf_counter()
     with torch.no_grad():
         logits = model(**inputs).logits
     probs = torch.softmax(logits, dim=-1)[0].cpu().tolist()
+    _add_nli_time(time.perf_counter() - _t)
 
     result = {}
     for label, idx in label_map.items():
@@ -103,9 +132,11 @@ def _run_nli_batch(premises: list, hypotheses: list, batch_size: int = None) -> 
             max_length=512, padding=True,
         )
         inputs = {k: v.to(device) for k, v in inputs.items()}
+        _t = time.perf_counter()
         with torch.no_grad():
             logits = model(**inputs).logits
         probs = torch.softmax(logits, dim=-1).cpu().tolist()  # [B, num_labels]
+        _add_nli_time(time.perf_counter() - _t)
         for row in probs:
             r = {}
             for label, idx in label_map.items():
@@ -287,6 +318,7 @@ def _batch_translate_to_en(hypotheses: list[str]) -> list[str]:
     )
 
     try:
+        _t = time.perf_counter()
         resp = _req.post(
             f"{cfg.OLLAMA_BASE_URL}/api/generate",
             json={
@@ -297,6 +329,7 @@ def _batch_translate_to_en(hypotheses: list[str]) -> list[str]:
             },
             timeout=120,
         )
+        _add_llm_time(time.perf_counter() - _t)
         resp.raise_for_status()
         raw = resp.json().get("response", "").strip()
 
@@ -672,6 +705,7 @@ def decompose_and_verify(conclusion: str, facts: list[dict]) -> dict:
             f"結論：{conclusion}"
         )
     try:
+        _t = time.perf_counter()
         resp = _req.post(
             f"{cfg.OLLAMA_BASE_URL}/api/generate",
             json={
@@ -682,6 +716,7 @@ def decompose_and_verify(conclusion: str, facts: list[dict]) -> dict:
             },
             timeout=120,
         )
+        _add_llm_time(time.perf_counter() - _t)
         resp.raise_for_status()
         raw = resp.json().get("response", "[]").strip()
         raw = re.sub(r'```json|```', '', raw).strip()

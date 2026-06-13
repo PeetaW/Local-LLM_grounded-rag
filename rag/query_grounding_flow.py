@@ -199,6 +199,9 @@ def run_grounding_check(
         check_citation_grounding,
         format_grounding_report,
         compute_grounding_score,
+        reset_grounding_timers,
+        get_grounding_timers,
+        _add_llm_time,
     )
 
     def _status(msg):
@@ -206,6 +209,8 @@ def run_grounding_check(
             on_status(msg)
         else:
             print(msg)
+
+    reset_grounding_timers()
 
     if question and paper_engines_to_use:
         _status("  🔍 執行答案品質審查（對象：PDF raw chunks）...")
@@ -250,7 +255,10 @@ def run_grounding_check(
             f"  🔄 [Grounding Fallback] {len(unsupported)} 個陳述依據不足"
             f"（整體 {grounding_score:.1%}），送回 gemma4 重新引用..."
         )
+        import time as _t_mod
+        _t0 = _t_mod.perf_counter()
         corrected = _run_grounding_fallback(full_text, unsupported, knowledge_base)
+        _add_llm_time(_t_mod.perf_counter() - _t0)
         if corrected:
             full_text = corrected
             _status("  ✅ [Grounding Fallback] gemma4 修正完成，重新執行 grounding 審查...")
@@ -258,4 +266,8 @@ def run_grounding_check(
             citation_results = check_citation_grounding(sentences, chunks)
 
     nli_report = format_grounding_report(citation_results, section_scores=section_scores)
+
+    _gt = get_grounding_timers()
+    _status(f"[grounding-timing] nli_ms={int(_gt['nli_s'] * 1000)} llm_ms={int(_gt['llm_s'] * 1000)}")
+
     return full_text, nli_report
