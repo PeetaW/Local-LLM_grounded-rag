@@ -728,17 +728,18 @@ def decompose_and_verify(conclusion: str, facts: list[dict]) -> dict:
 
     # ── Step 2：對每個子命題跑 NLI ───────────────────────────
     sub_claims = []
+    fact_texts = [f["text"][:512] for f in facts]
     for claim in sub_claims_text:
         best_score = 0.0
         best_source = None
-        for fact in facts:
-            try:
-                scores = _run_nli(premise=fact["text"][:512], hypothesis=claim)
-                if scores["entailment"] > best_score:
-                    best_score = scores["entailment"]
-                    best_source = fact.get("id", fact.get("source", ""))
-            except Exception:
-                continue
+        try:
+            scores_list = _run_nli_batch(fact_texts, [claim] * len(fact_texts))
+        except Exception:
+            scores_list = []
+        for fact, scores in zip(facts, scores_list):
+            if scores["entailment"] > best_score:
+                best_score = scores["entailment"]
+                best_source = fact.get("id", fact.get("source", ""))
 
         if best_score >= 0.65:
             status = "SUPPORTED"
@@ -798,17 +799,18 @@ def joint_verify(claim: str, facts: list[dict]) -> dict:
         }
 
     # ── Step 1：個別跑 NLI，收集所有分數 ────────────────────
+    fact_texts = [fact["text"][:512] for fact in facts]
+    try:
+        scores_list = _run_nli_batch(fact_texts, [claim] * len(fact_texts))
+    except Exception:
+        scores_list = []
     scored_facts = []
-    for fact in facts:
-        try:
-            scores = _run_nli(premise=fact["text"][:512], hypothesis=claim)
-            scored_facts.append({
-                "source": fact.get("id", fact.get("source", "")),
-                "text": fact["text"][:512],
-                "score": scores["entailment"],
-            })
-        except Exception:
-            continue
+    for fact, scores in zip(facts, scores_list):
+        scored_facts.append({
+            "source": fact.get("id", fact.get("source", "")),
+            "text": fact["text"][:512],
+            "score": scores["entailment"],
+        })
 
     if not scored_facts:
         return {
