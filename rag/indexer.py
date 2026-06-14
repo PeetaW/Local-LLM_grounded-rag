@@ -187,14 +187,30 @@ def check_index_config():
         print("✓ 首次執行，已儲存chunk設定\n")
 
 
+_shared_reranker = None
+
+
+def _get_shared_reranker():
+    """
+    單一共用 reranker（lazy singleton）。
+    避免每篇論文各建一個——在 CUDA torch 下，N 份模型會全部塞進 GPU 把 VRAM 爆掉。
+    """
+    global _shared_reranker
+    if _shared_reranker is None:
+        _shared_reranker = build_reranker()
+    return _shared_reranker
+
+
 def build_hybrid_query_engine(index):
     """
-    組裝完整的查詢引擎：Hybrid Retriever + Reranker。
+    組裝查詢引擎：Hybrid Retriever（+ 視 RERANK_ENABLED 決定是否掛 reranker）。
+    RERANK_ENABLED=False 時不建 reranker（rerank 在兩階段路徑本來就沒用到），
+    避免 N 篇論文 × N 份模型塞爆 VRAM/RAM。
     """
     hybrid_retriever = build_hybrid_retriever(index)
-    reranker = build_reranker()
+    postprocessors = [_get_shared_reranker()] if cfg.RERANK_ENABLED else []
     return RetrieverQueryEngine.from_args(
         retriever=hybrid_retriever,
         response_mode="compact",
-        node_postprocessors=[reranker],
+        node_postprocessors=postprocessors,
     )
