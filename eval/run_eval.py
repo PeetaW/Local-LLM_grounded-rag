@@ -228,8 +228,12 @@ def _print_row(row: dict):
     print(f"  選出論文      : {row['selected_papers']}")
     print(f"  檢索覆蓋率    : {ret if ret is not None else 'N/A（無 gold_spans）'}")
     print(f"  grounding     : {row['grounding_score']}")
-    print(f"  延遲(ms)      : plan={lat.get('planning')} retr={lat.get('retrieval')} "
-          f"grnd={lat.get('grounding')} total={lat.get('total')}")
+    def _s(k):
+        v = lat.get(k)
+        return f"{v/1000:.0f}s" if isinstance(v, (int, float)) else "n/a"
+    print(f"  延遲      : plan={_s('planning')} retr={_s('retrieval')} synth={_s('synthesis')} "
+          f"gen={_s('synthesis-llm')} verify={_s('verification')} grnd={_s('grounding')} "
+          f"trans={_s('translation')} | total={_s('total')}")
     print(f"  問題標記      : {row['issues']}")
 
 

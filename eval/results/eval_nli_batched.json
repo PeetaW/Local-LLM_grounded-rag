@@ -1,0 +1,137 @@
+{
+  "label": "nli_batched",
+  "mode": "gold",
+  "summary": {
+    "n_questions": 3,
+    "avg_grounding_score": 0.45,
+    "avg_paper_sel_recall": 1.0,
+    "avg_retrieval_recall": null,
+    "avg_total_ms": 15462444.333,
+    "avg_planning_ms": 5024.0,
+    "avg_retrieval_ms": 285061.0,
+    "avg_grounding_ms": 13634536.333,
+    "avg_grounding_nli_ms": 12506433.333,
+    "avg_grounding_llm_ms": 1112933.333
+  },
+  "rows": [
+    {
+      "id": "Q01",
+      "type": "single_paper",
+      "question": "In the study of JPH203's preincubation inhibitory effect on LAT1, how does preincubation change JPH203's inhibitory potency? Give the reported values.",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S1347861320300633-main",
+        "1-s2.0-S0021979710012403-main",
+        "1-s2.0-S1936523321002047-main",
+        "s41421-024-00697-6"
+      ],
+      "gold_papers": [
+        "1-s2.0-S1347861320300633-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.714,
+      "counts": {
+        "paper_count": 4,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 5592,
+        "retrieval": 252736,
+        "synthesis": 112125,
+        "synthesis-llm": 99449,
+        "verification": 198969,
+        "grounding": 11729664,
+        "translation": 849113,
+        "total": 13247650,
+        "grounding_nli": 10632500,
+        "grounding_llm": 1079300
+      },
+      "wall_seconds": 13247.5,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 5
+      },
+      "answer": "## 【論文直接依據】\n* 預孵育（Preincubation）在與共同孵育（co-incubation）結合時，能顯著增強 JPH203 的抑制效力 【1-s2.0-S1347861320300633-main】。\n* 報告的 $\\text{IC}_{50}$ 值如下：\n    * 僅共同孵育：$99.2 \\pm 11.0\\text{ nM}$ 【1-s2.0-S1347861320300633-main】。\n    * 預孵育 + 共同孵育：$34.2 \\pm 3.6\\text{ nM}$ 【1-s2.0-S1347861320300633-main】。\n* 報告的 $\\text{K}_i$ 值如下：\n    * 僅共同孵育：$0.46\\text{ mM}$ 【1-s2.0-S1347861320300633-main】。\n    * 預孵育 + 共同孵育：$0.37\\text{ mM}$ 【1-s2.0-S1347861320300633-main】。\n* 預孵育與共同孵育的協同效應導致 $\\text{IC}_{50}$ 值降低三倍，且 $\\text{K}_i$ 值降低 20% 【1-s2.0-S1347861320300633-main】。\n* 僅預孵育表現出對 LAT1 功能的濃度與時間依賴性抑制，其 $\\text{IC}_{50}$ 值為 $193 \\pm 50\\text{ nM}$ 【1-s2.0-S1347861320300633-main】。\n\n## 【跨文獻推論】\n* 跨論文推論（基於 【1-s2.0-S1347861320300633-main】）：雖然僅預孵育的效力低於共同孵育（比較預孵育的 $\\text{IC}_{50}$ 為 $193 \\pm 50\\text{ nM}$ 與共同孵育的 $99.2 \\pm 11.0\\text{ nM}$），但其主要的藥理價值在於它所提供的「啟動」（priming）效應。這可以由以下事實證明：在共同孵育方案中加入預孵育步驟，可將 $\\text{IC}_{50}$ 進一步降低至 $34.2 \\pm 3.6\\text{ nM}$，使得藥物的效力顯著高於單獨使用任一方法。\n\n## 【知識延伸與推測】\n* 模型推測（文獻依據不足）：觀察到預孵育的抑制效果在藥物移除後迅速消失（在 240 分鐘內恢復至 $\\sim 95\\%$），這表明 JPH203 可能透過非共價、可逆的相互作用與 LAT1 結合，而非形成永久性的共價鍵。\n* 模型推測（文獻依據不足）：鑑於預孵育與共同孵育之間的協同作用被認為能更好地模擬細胞暴露於藥物數小時的臨床環境，這表明對於 JPH203 的療效而言，其藥代動力學特徵（特別是暴露時間/半衰期）可能比單純的血漿峰濃度 ($\\text{C}_{\\max}$) 更為關鍵。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ⚠️ 【論文直接依據】：71.4%（5/7 句）\n  ❌ 【跨文獻推論】：0.0%（0/1 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/2 句）  ← 知識延伸推測，低分為預期範圍\n\n⚠️ **直引依據率**：71.4%　中（部分直引陳述需確認）\n\n⚠️  **以下 5 個陳述未找到明確論文依據，請謹慎參考：**\n\n- * Co-incubation alone: $0.46\\text{ mM}$ [1-s2.0-S1347861320300633-main].（信心度：21.2%，最近似來源：1-s2.0-S1347861320300633--fe8604ce）\n- * The synergistic effect of preincubation and co-incubation resulted in a three-fold decrease in the $\\text{IC}_{50}$ value and a 20% reduction in the $\\text{K}_i$ value [1-s2.0-S1347861320300633-main].（信心度：1.8%，最近似來源：1-s2.0-S0021979710012403--e195173f）\n- * Cross-paper inference (based on [1-s2.0-S1347861320300633-main]): While preincubation alone is less potent than co-incubation (comparing $\\text{IC}_{50}$ of $193 \\pm 50\\text{ nM}$ for preincubation vs. $99.2 \\pm 11.0\\text{ nM}$ for co-incubation), its primary pharmacological value is the \"priming\" effect it provides. This is evidenced by the fact that adding a preincubation step to a co-incubation protocol reduces the $\\text{IC}_{50}$ further to $34.2 \\pm 3.6\\text{ nM}$, making the drug significantly more potent than either method used in isolation.（信心度：4.9%，最近似來源：1-s2.0-S1936523321002047--b160627c）\n- * Model speculation (insufficient literature basis): The observation that the inhibitory effect of preincubation disappears rapidly upon removal of the drug (recovery to $\\sim 95\\%$ within 240 minutes) suggests that JPH203 likely binds to LAT1 through non-covalent, reversible interactions rather than forming a permanent covalent bond.（信心度：9.7%，最近似來源：1-s2.0-S0021979710012403--e195173f）\n- * Model speculation (insufficient literature basis): Given that the synergy between preincubation and co-incubation is thought to better mimic clinical environments where cells are exposed to drugs for hours, this suggests that the pharmacokinetic profile (specifically the duration of exposure/half-life) may be more critical for the efficacy of JPH203 than the peak plasma concentration ($\\text{C}_{\\max}$) alone.（信心度：7.9%，最近似來源：1-s2.0-S1936523321002047--b160627c）\n\n<!-- grounding_score=0.714 -->\n---"
+    },
+    {
+      "id": "Q02",
+      "type": "single_paper",
+      "question": "What is the hybrid process used for the asymmetric synthesis of optically pure L-p-boronophenylalanine, and what are its key steps?",
+      "detected_paper": null,
+      "selected_papers": [
+        "bbb0683",
+        "CMDC-20-e202500059"
+      ],
+      "gold_papers": [
+        "bbb0683"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.0,
+      "counts": {
+        "paper_count": 2,
+        "subquery_count": 4
+      },
+      "latency": {
+        "planning": 4004,
+        "retrieval": 342017,
+        "synthesis": 139389,
+        "synthesis-llm": 123987,
+        "verification": 165588,
+        "grounding": 6024058,
+        "translation": 828963,
+        "total": 7628008,
+        "grounding_nli": 5015300,
+        "grounding_llm": 996000
+      },
+      "wall_seconds": 7627.9,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 6
+      },
+      "answer": "## 【論文直接依據】\n用於光學純 L-p-硼苯丙氨酸 (L-BPA) 不對稱合成的混合製程，結合了「對映選擇性烷基化」與隨後的「酵素水解」【bbb0683】。與先前報導的方法相比，此製程的特點是反應步驟較少，操作與後處理更簡單【bbb0683】。\n\n該混合製程的關鍵步驟如下：\n1.  **保護反應**：將 4-溴甲基苯硼酸 (1) 與 2,2-二甲基-1,3-丙二醇在乾燥 THF 中於室溫下攪拌 10 分鐘，以產生產率為 79% 的環狀硼酸酯 (2)【bbb0683】。\n2.  **對映選擇性烷基化**：在 -78°C 的乾燥 THF 與氬氣環境中，使用 n-BuLi（1.68M 於己烷中）將 (2R)-(-)-2,5-二氫-2-異丙基-3,6-二甲氧基吡嗪 (3) 鋰化，隨後加入溴化物 2。攪拌 15 小時後，生成具有 2S 配置的加成產物 4，實現了 74% e.e. 的立體選擇性【bbb0683】。\n3.  **酸處理與分離**：在 5°C 下加入 0.1 N 鹽酸 (HCl)，並於室溫下攪拌 8 小時，將產物 4 轉化為 D-缬氨酸甲酯 (D-Val-OMe) 與氨基酸酯 5 的等莫量混合物。透過蒸餾除去 D-Val-OMe 以獲得粗產物 5，並使用 3% 氨水將 pH 值調節至 8.5【bbb0683】。\n4.  **去保護反應**：將粗產物 5 與 1 N HCl 及 THF 在室溫下攪拌 2 小時，並透過 ODS 管柱層析法（使用水作為洗脫劑）純化，以合成 L-BPA 甲酯 (6)，相對於產物 4 的產率為 85%【bbb0683】。\n5.  **酵素水解**：使用糜蛋白酶 (Chymotrypsin) 作為水中的催化劑，並使用 0.1 N 氫氧化鋰 (LiOH) 將 pH 值調節至 5.0。在 25°C 下攪拌 30 小時後，獲得產率為 79% 且光學純度為 100% e.e. 的 L-BPA【bbb0683】。\n\n此外，若使用非酵素性鹼水解路徑（室溫下使用 0.5 N NaOH 處理 36 小時，隨後用 1 N HCl 將 pH 值調節至 6.8），產率較高 (87%)，但光學純度下降至 86% e.e.【bbb0683】。\n\n## 【跨文獻推論】\n*   **跨論文推論（基於【bbb0683】Facts 4, 6, and 9）：** 酵素水解步驟起到了立體化學關鍵純化機制的作用。雖然化學對映選擇性烷基化提供了初始的手性骨架，但其 e.e. 值僅達到 74%；糜蛋白酶能選擇性地精煉此混合物，有效地將最終光學純度從 74% 提升至 100% e.e.。\n*   **跨論文推論（基於【bbb0683】Facts 2 and 10）：** 此製程的「混合」性質——特別是生物催化劑（酵素）與化學合成的整合——對於實現絕對光學純度至關重要，因為傳統的化學鹼水解不足以達到 100% e.e.。\n\n## 【知識延伸與推測】\n*   **模型推測（文獻依據不足）：** 使用 (2R)-(-)-2,5-二氫-2-異丙基-3,6-二甲氧基吡嗪表明應用了 Schöllkopf 手性輔助基方法。這是一種合成非蛋白質原 $\\alpha$-氨基酸的知名學術技術。這種「混合」方法可能是為了解決化學輔助基在處理如 p-硼苯基等特定龐大取代基時，可能無法提供完美對映選擇性的固有局限性。\n*   **模型推測（文獻依據不足）：** 關於腫瘤細胞吸收 L-BPA 的量約為 D-BPA 四倍的事實，這可能是由於大型中性氨基酸轉運蛋白（如 LAT1）的立體選擇性所致；這些轉運蛋白在癌細胞中經常過度表達，且通常偏好 L-配置的氨基酸而非 D-配置的氨基酸。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ❌ 【論文直接依據】：0.0%（0/2 句）\n  ❌ 【跨文獻推論】：0.0%（0/2 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/2 句）  ← 知識延伸推測，低分為預期範圍\n\n❌ **直引依據率**：0.0%　低（建議縮小問題範圍）\n\n⚠️  **以下 6 個陳述未找到明確論文依據，請謹慎參考：**\n\n- [Direct Paper Evidence] The hybrid process used for the asymmetric synthesis of optically pure L-p-boronophenylalanine (L-BPA) combines \"enantioselective alkylation\" with subsequent \"enzymatic hydrolysis\" [bbb0683]. This process is characterized by fewer reaction steps and simpler operation and workup compared to previously reported methods [bbb0683].（信心度：2.0%，最近似來源：CMDC-20-e202500059-beb43ed2）\n- Additionally, if a non-enzymatic alkaline hydrolysis path is used (0.5 N NaOH at room temperature for 36 hours, followed by pH adjustment to 6.8 with 1 N HCl), the yield is higher (87%), but the optical purity drops to 86% e.e. [bbb0683].（信心度：1.6%，最近似來源：CMDC-20-e202500059-beb43ed2）\n- *   Cross-paper inference (based on [bbb0683] Facts 4, 6, and 9): The enzymatic hydrolysis step serves as a critical purification mechanism for stereochemistry. While the chemical enantioselective alkylation provides the initial chiral framework, it only reaches 74% e.e.; the chymotrypsin enzyme acts selectively to refine this mixture, effectively boosting the final optical purity from 74% to 100% e.e.（信心度：14.5%，最近似來源：CMDC-20-e202500059-beb43ed2）\n- *   Cross-paper inference (based on [bbb0683] Facts 2 and 10): The \"hybrid\" nature of the process—specifically the integration of a biological catalyst (enzyme) with chemical synthesis—is essential for achieving absolute optical purity, as traditional chemical alkaline hydrolysis is insufficient to reach 100% e.e.（信心度：25.7%，最近似來源：CMDC-20-e202500059-beb43ed2）\n- *   Model speculation (insufficient literature basis): The use of (2R)-(-)-2,5-dihydro-2-isopropyl-3,6-dimethoxypyrazine suggests the application of the Schöllkopf chiral auxiliary method. This is a well-known academic technique for synthesizing non-proteinogenic $\\alpha$-amino acids. The \"hybrid\" approach likely addresses the inherent limitation where chemical auxiliaries may not provide perfect enantioselectivity for specific bulky substituents like the p-boronophenyl group.（信心度：1.7%，最近似來源：CMDC-20-e202500059-b57ce917）\n- *   Model speculation (insufficient literature basis): Regarding the fact that tumor cells absorb L-BPA approximately four times more than D-BPA, this is likely due to the stereoselectivity of Large Neutral Amino Acid Transporters (such as LAT1), which are frequently overexpressed in cancer cells and typically prefer L-configured amino acids over D-configured ones.（信心度：24.6%，最近似來源：bbb0683-22cc0366）\n\n<!-- grounding_score=0.000 -->\n---"
+    },
+    {
+      "id": "Q03",
+      "type": "figure_dependent",
+      "question": "According to the cryo-EM structure, how does JPH203 bind to and inhibit the LAT1-4F2hc complex?",
+      "detected_paper": null,
+      "selected_papers": [
+        "s41421-024-00697-6",
+        "1-s2.0-S1347861320300633-main",
+        "1-s2.0-S1936523321002047-main",
+        "s41467-024-45464-z (1)",
+        "LAT1 ChemComm 2026"
+      ],
+      "gold_papers": [
+        "s41421-024-00697-6"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": null,
+      "grounding_score": 0.636,
+      "counts": {
+        "paper_count": 5,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 5476,
+        "retrieval": 260430,
+        "synthesis": 151902,
+        "synthesis-llm": 114700,
+        "verification": 100643,
+        "grounding": 23149887,
+        "translation": 1728634,
+        "total": 25511675,
+        "grounding_nli": 21871500,
+        "grounding_llm": 1263500
+      },
+      "wall_seconds": 25511.3,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 7
+      },
+      "answer": "根據提供的事實，以下是關於 JPH203 如何結合並抑制 LAT1-4F2hc 複合物的全面解答。\n\n## 【論文直接依據】\n*   **結合位點與結構：** JPH203 在向外開放（outward-facing）的結構中，結合於 LAT1 的傳統底物結合口袋內 【s41421-024-00697-6】。低溫電子顯微鏡（cryo-EM）的分辨率為 3.30 Å，透過聚焦精修（focused refinement），JPH203 的密度圖分辨率提升至 3.25 Å 【s41421-024-00697-6】。\n*   **分子組成：** 該分子由親水性頭部（苯丙氨酸骨架）和疏水性尾部（5-amino-2-(3-aminophenyl) benzoxazole 骨架）組成 【s41421-024-00697-6】。\n*   **頭部交互作用：** \n    *   頭部的 $\\alpha$-氨基和 $\\alpha$-羧基與 TM1 和 TM6 未捲曲/未折疊區域的主鏈原子形成氫鍵網絡 【s41421-024-00697-6】。\n    *   頭部雙鹵代酪氨酸核心上的氯原子與 Tyr259 形成鹵鍵（halogen bond） 【s41421-024-00697-6】。\n*   **尾部交互作用：** \n    *   疏水性尾部嵌入由 TM1 (Ile63, Ile64, Ile68)、TM3 (Ile140, Ile147, Ile148)、TM6 (Phe252, Gly255) 和 TM10 (Ile397, Phe400, Phe403) 組成的口袋中 【s41421-024-00697-6】。\n    *   尾部的氨基與 TM10 上 Phe400 的主鏈形成氫鍵 【s41421-024-00697-6】。\n    *   尾部的苯環與 Phe252 的側鏈發生 T 型 $\\pi$-$\\pi$ 交互作用 【s41421-024-00697-6】。\n*   **結構影響與抑制：** \n    *   JPH203 防止了 Phe400 的移動 【s41421-024-00697-6】。\n    *   其結合導致 TM10 的二級結構發生顯著旋轉和破壞 【s41421-024-00697-6】。\n    *   與 JX075 和 Diiodo-tyr 相比，JPH203 誘導 TM1 產生 4.34° 的偏移以及 TM6 區域的旋轉，而 TM3 則保持完全折疊狀態 【s41421-024-00697-6】。\n*   **選擇性決定因素：** Phe400 和 Tyr259 是實現高選擇性的關鍵殘基 【s41421-024-00697-6】。在 LAT2 中，這些殘基分別對應於 Val391 和 Phe250，導致鹵鍵交互作用消失且穩定性降低 【s41421-024-00697-6】。\n\n## 【跨文獻推論】\n*   **抑制機制（構象鎖定）：** 跨論文推論（基於 【s41421-024-00697-6】）：JPH203 抑制 LAT1 不僅是透過物理性地阻擋底物結合口袋，還透過將轉運蛋白「鎖定」在向外開放的構象中。這一推論源於它特異性地結合於向外開放的結構，且明確防止了 Phe400 的移動，而該殘基對於轉運所需的構象轉換可能至關重要。\n*   **LAT1 與 LAT2 選擇性的分子基礎：** 跨論文推論（基於 【s41421-024-00697-6】）：JPH203 對 LAT1 優於 LAT2 的偏好是由藥物頭部/尾部與殘基 Tyr259 和 Phe400 之間的特定化學互補性所驅動的。證據如下：\n    1.  當 Tyr259 (LAT1) 被 Phe250 (LAT2) 取代時，鹵鍵消失。\n    2.  當 LAT1 突變以模擬 LAT2 殘基 (F400V 和 Y259F) 時，結合親和力 ($K_d$) 降低；而當 LAT2 突變以模擬 LAT1 殘基 (V391F 和 F250Y) 時，親和力相應增加。\n\n## 【知識延伸與推測】\n*   **模型推測（文獻依據不足）：** 證據中提到的「TM10 二級結構的破壞」表明 JPH203 可能充當分子楔子（molecular wedge）。在許多主促進因子超家族（Major Facilitator Superfamily, MFS）轉運蛋白中，跨膜螺旋的移動是協調進行的，以將底物移過細胞膜。透過誘導旋轉並破壞 TM10 的折疊，JPH203 可能創造了一個高能壘，防止轉運蛋白轉換至向內開放（inward-facing）狀態，從而有效地將蛋白質凍結在非功能性的方向上。\n*   **模型推測（文獻依據不足）：** 鑑於其對與 Tyr259 的鹵鍵以及與 Phe252 的 $\\pi$-$\\pi$ 交互作用的依賴，未來對 JPH203 衍生物的優化可以透過增強尾部芳香環的電子密度，或優化鹵原子的極化率以強化與 Tyr259 的結合，從而潛在提高藥效。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ⚠️ 【論文直接依據】：63.6%（7/11 句）\n  ❌ 【跨文獻推論】：0.0%（0/1 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/2 句）  ← 知識延伸推測，低分為預期範圍\n\n⚠️ **直引依據率**：63.6%　中（部分直引陳述需確認）\n\n⚠️  **以下 7 個陳述未找到明確論文依據，請謹慎參考：**\n\n- *   JPH203 prevents the movement of Phe400 [s41421-024-00697-6].（信心度：18.6%，最近似來源：1-s2.0-S1936523321002047--b160627c）\n- *   Its binding causes a significant rotation and disruption of the secondary structure of TM10 [s41421-024-00697-6].（信心度：6.5%，最近似來源：LAT1 ChemComm 2026-0acbb24c）\n- *   Compared to JX075 and Diiodo-tyr, JPH203 induces a 4.34° shift in TM1 and rotation in the TM6 region, while TM3 remains completely folded [s41421-024-00697-6].（信心度：4.3%，最近似來源：1-s2.0-S1347861320300633--094d1631）\n- *   Selectivity Determinants: Phe400 and Tyr259 are key residues for high selectivity [s41421-024-00697-6]. In LAT2, these correspond to Val391 and Phe250, respectively, which results in the loss of halogen interactions and reduced stability [s41421-024-00697-6].（信心度：22.4%，最近似來源：1-s2.0-S1936523321002047--b160627c）\n- *   Mechanism of Inhibition (Conformational Locking): Cross-paper inference (based on [s41421-024-00697-6]): JPH203 inhibits LAT1 not only by physically blocking the substrate-binding pocket but also by \"locking\" the transporter in the outward-facing conformation. This is derived from the fact that it binds specifically to the outward-facing structure and explicitly prevents the movement of Phe400, a residue likely essential for the conformational transition required for transport.（信心度：35.7%，最近似來源：LAT1 ChemComm 2026-e40e9500）\n- *   Model speculation (insufficient literature basis): The \"disruption of TM10 secondary structure\" mentioned in the evidence suggests that JPH203 may act as a molecular wedge. In many Major Facilitator Superfamily (MFS) transporters, the movement of transmembrane helices is coordinated to move substrates across the membrane. By inducing a rotation and disrupting the fold of TM10, JPH203 likely creates a high energy barrier that prevents the transporter from transitioning to an inward-facing state, effectively freezing the protein in a non-functional orientation.（信心度：2.8%，最近似來源：LAT1 ChemComm 2026-a353edf8）\n- *   Model speculation (insufficient literature basis): Given the reliance on halogen bonding with Tyr259 and $\\pi$-$\\pi$ interactions with Phe252, future optimization of JPH203 derivatives could potentially increase potency by enhancing the electron density of the aromatic rings in the tail or optimizing the halogen atom's polarizability to strengthen the bond with Tyr259.（信心度：32.1%，最近似來源：LAT1 ChemComm 2026-ca01261e）\n\n<!-- grounding_score=0.636 -->\n---"
+    }
+  ]
+}
