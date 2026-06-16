@@ -237,7 +237,7 @@ def _print_row(row: dict):
     print(f"  問題標記      : {row['issues']}")
 
 
-def run(label: str, limit: int = None):
+def run(label: str, limit: int = None, retrieval_only: bool = False):
     # ── 把完整 console 輸出（索引載入、逐句 NLI、萬一的 traceback）同步寫進 log 檔 ──
     os.makedirs(RESULTS_DIR, exist_ok=True)
     log_path = os.path.join(RESULTS_DIR, f"eval_{label}.log")
@@ -279,16 +279,19 @@ def run(label: str, limit: int = None):
             ret_texts = _probe_retrieval(qtext, gold_papers, paper_engines)
             ret_recall = metrics.retrieval_span_recall(ret_texts, gold_spans)
 
-        # 3) 跑完整 pipeline，擷取 status 訊息
+        # 3) 跑完整 pipeline（--retrieval-only 時跳過，只看選擇/檢索）
         status_lines = []
-        t0 = time.time()
-        try:
-            answer = execute_structured_query(
-                qtext, paper_engines, "", on_status=status_lines.append,
-            )
-        except Exception as e:
-            answer = f"[PIPELINE ERROR] {e}"
-        wall_s = round(time.time() - t0, 1)
+        if retrieval_only:
+            answer, wall_s = "", 0.0
+        else:
+            t0 = time.time()
+            try:
+                answer = execute_structured_query(
+                    qtext, paper_engines, "", on_status=status_lines.append,
+                )
+            except Exception as e:
+                answer = f"[PIPELINE ERROR] {e}"
+            wall_s = round(time.time() - t0, 1)
 
         row = {
             "id": qid,
@@ -348,12 +351,13 @@ if __name__ == "__main__":
     ap.add_argument("--run", action="store_true", help="跑題組")
     ap.add_argument("--label", default="baseline", help="這次結果的標籤（檔名用）")
     ap.add_argument("--limit", type=int, default=None, help="只跑前 N 題（快速測試/重現用）")
+    ap.add_argument("--retrieval-only", action="store_true", help="只測選擇/檢索覆蓋率，跳過完整 pipeline（幾分鐘）")
     ap.add_argument("--compare", nargs=2, metavar=("A", "B"), help="比較兩個 label 的彙總")
     args = ap.parse_args()
 
     if args.compare:
         compare(*args.compare)
     elif args.run:
-        run(args.label, args.limit)
+        run(args.label, args.limit, args.retrieval_only)
     else:
         ap.print_help()
