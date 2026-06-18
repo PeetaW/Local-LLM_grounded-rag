@@ -270,4 +270,11 @@ def run_grounding_check(
     _gt = get_grounding_timers()
     _status(f"[grounding-timing] nli_ms={int(_gt['nli_s'] * 1000)} llm_ms={int(_gt['llm_s'] * 1000)}")
 
+    # ponytail: NLI 跑完把 torch reserved-but-unused 的 VRAM 還給驅動，
+    # 否則 Ollama 載 gemma4(翻譯/grounding) 時 VRAM 不足會 offload 到 RAM 變慢。
+    # 只 empty_cache、不把模型搬回 CPU——模型留著(~0.5GB)，下一題 NLI 仍直接在 GPU 跑。
+    import torch
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     return full_text, nli_report
