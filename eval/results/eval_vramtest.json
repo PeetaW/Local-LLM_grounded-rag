@@ -1,0 +1,58 @@
+{
+  "label": "vramtest",
+  "mode": "gold",
+  "summary": {
+    "n_questions": 1,
+    "avg_grounding_score": 0.6,
+    "avg_paper_sel_recall": 1.0,
+    "avg_retrieval_recall": 1.0,
+    "avg_total_ms": 2767750.0,
+    "avg_planning_ms": 7900.0,
+    "avg_retrieval_ms": 224177.0,
+    "avg_grounding_ms": 1151803.0,
+    "avg_grounding_nli_ms": 16700.0,
+    "avg_grounding_llm_ms": 1106900.0
+  },
+  "rows": [
+    {
+      "id": "Q01",
+      "type": "single_paper",
+      "question": "In the study of JPH203's preincubation inhibitory effect on LAT1, how does preincubation change JPH203's inhibitory potency? Give the reported values.",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S1347861320300633-main",
+        "1-s2.0-S0021979710012403-main",
+        "1-s2.0-S1936523321002047-main",
+        "s41421-024-00697-6"
+      ],
+      "gold_papers": [
+        "1-s2.0-S1347861320300633-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": 1.0,
+      "grounding_score": 0.6,
+      "counts": {
+        "paper_count": 4,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 7900,
+        "retrieval": 224177,
+        "synthesis": 106396,
+        "synthesis-llm": 106093,
+        "verification": 117765,
+        "grounding": 1151803,
+        "translation": 1053612,
+        "total": 2767750,
+        "grounding_nli": 16700,
+        "grounding_llm": 1106900
+      },
+      "wall_seconds": 2767.7,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 6
+      },
+      "answer": "## 【論文直接依據】\n在研究 JPH203 對於 HT-29 細胞中 LAT1 的影響時，預孵育（preincubation）以以下方式改變抑制效能：\n\n*   **協同增強：** 當預孵育與共同孵育（co-incubation）結合時，能顯著增強 JPH203 的抑制效能，具有協同作用 【1-s2.0-S1347861320300633-main】。\n*   **$\\text{IC}_{50}$ 降低：** 當加入預孵育時，$\\text{IC}_{50}$ 值從 $99.2 \\pm 11.0\\text{ nM}$（僅共同孵育）降低至 $34.2 \\pm 3.6\\text{ nM}$ 【1-s2.0-S1347861320300633-main】。這代表 $\\text{IC}_{50}$ 值降低了三倍 【1-s2.0-S1347861320300633-main】。\n*   **$K_i$ 降低：** $K_i$ 值從 $0.46\\text{ mM}$（共同孵育）降低至 $0.37\\text{ mM}$（預孵育加共同孵育），降低了 20% 【1-s2.0-S1347861320300633-main】。\n*   **單獨預孵育效能：** 當單獨進行時，預孵育的 $\\text{IC}_{50}$ 值為 $193 \\pm 50\\text{ nM}$ 【1-s2.0-S1347861320300633-main】。\n*   **濃度與時間依賴性：** 預孵育效果具有濃度依賴性（例如，在 120 min 時，$30\\text{ mM}$ 下的攝取量下降至對照組的 25%）以及時間依賴性（在 $10\\text{ mM}$ 時，攝取量從 30 min 的 43% 下降至 120 min 的 27%） 【1-s2.0-S1347861320300633-main】。\n\n## 【跨文獻推論】\n根據 【1-s2.0-S1347861320300633-main】 提供的數據，可推論出以下結論：\n\n*   **效能層級：** 單獨預孵育的效能低於單獨共同孵育（$\\text{IC}_{50}$ 分別為 $193 \\pm 50\\text{ nM}$ 與 $99.2 \\pm 11.0\\text{ nM}$），但先進行預孵育後再共同孵育的組合是最強效的配置（$\\text{IC}_{50}$ 為 $34.2 \\pm 3.6\\text{ nM}$）。這表明預孵育「啟動」了 LAT1 轉運蛋白或細胞環境，使得隨後的抑制效果顯著提升。\n*   **效果的可逆性：** 由於在 120 分鐘預孵育後，將細胞置於無藥物培養基中 120-240 分鐘，leucine 的攝取量可恢復至 95-97% 【1-s2.0-S1347861320300633-main】，因此透過預孵育獲得的效能增強是暫時且可逆的，而非永久性的（例如，並非由於不可逆的共價結合所致）。\n\n## 【知識延伸與推測】\n模型推測（文獻依據不足）：\n\n*   **協同作用機制：** 觀察到的預孵育與共同孵育之間的協同效應，可能歸因於 JPH203 與 LAT1 的結合速率（$k_{on}$）較慢，或是藥物跨細胞膜達到平衡所需的時間。如果藥物需要較長時間才能佔據結合位點，那麼與抑制劑在底物引入前已佔據轉運蛋白的情況相比，標準的共同孵育分析（底物與抑制劑同時加入）可能會低估其效能。\n*   **臨床轉化：** 如論文中所述，體內（in vivo）的癌細胞會暴露於藥物數小時之久。這表明傳統的「快照式」體外（in vitro）分析（共同孵育）可能會低估 LAT1 抑制劑在臨床環境中的實際藥效動力學效果，而在這種環境下，「預孵育加共同孵育」的動態過程更能代表穩態藥物暴露的情況。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ⚠️ 【論文直接依據】：60.0%（3/5 句）\n  ❌ 【跨文獻推論】：0.0%（0/2 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/2 句）  ← 知識延伸推測，低分為預期範圍\n\n⚠️ **直引依據率**：60.0%　中（部分直引陳述需確認）\n\n⚠️  **以下 6 個陳述未找到明確論文依據，請謹慎參考：**\n\n- *   Reduction in $K_i$: The $K_i$ value decreases from $0.46\\text{ mM}$ (co-incubation) to $0.37\\text{ mM}$ (pre-plus co-incubation), which is a 20% reduction [1-s2.0-S1347861320300633-main].（信心度：1.3%，最近似來源：1-s2.0-S1347861320300633--9653db30）\n- *   Standalone Preincubation Potency: When performed alone, the preincubation $\\text{IC}_{50}$ value is $193 \\pm 50\\text{ nM}$ [1-s2.0-S1347861320300633-main].（信心度：27.4%，最近似來源：1-s2.0-S1347861320300633--9653db30）\n- *   Potency Hierarchy: Preincubation alone is less potent than co-incubation alone ($\\text{IC}_{50}$ of $193 \\pm 50\\text{ nM}$ vs $99.2 \\pm 11.0\\text{ nM}$), but the combination of preincubation followed by co-incubation is the most potent configuration ($\\text{IC}_{50}$ of $34.2 \\pm 3.6\\text{ nM}$). This suggests that preincubation \"primes\" the LAT1 transporter or the cellular environment, making subsequent inhibition significantly more effective.（信心度：8.3%，最近似來源：1-s2.0-S1936523321002047--b160627c）\n- *   Reversibility of Effect: Because leucine uptake recovers to 95-97% after 120-240 minutes in drug-free medium following a 120-minute preincubation [1-s2.0-S1347861320300633-main], the increased potency gained through preincubation is transient and reversible rather than permanent (e.g., not due to irreversible covalent binding).（信心度：24.0%，最近似來源：1-s2.0-S1936523321002047--b160627c）\n- *   Mechanism of Synergism: The observed synergistic effect between preincubation and co-incubation may be attributed to the slow association rate ($k_{on}$) of JPH203 with LAT1 or the time required for the drug to reach equilibrium across the cell membrane. If the drug requires significant time to occupy the binding site, a standard co-incubation assay (where substrate and inhibitor are added simultaneously) may underestimate potency compared to a scenario where the inhibitor has already occupied the transporter before the substrate is introduced.（信心度：34.1%，最近似來源：1-s2.0-S1347861320300633--094d1631）\n- *   Clinical Translation: As noted in the paper, cancer cells in vivo are exposed to drugs over hours. This suggests that traditional \"snapshot\" in vitro assays (co-incubation) likely underestimate the actual pharmacodynamic effect of LAT1 inhibitors in a clinical setting, where the \"pre-plus-co\" dynamic is more representative of steady-state drug exposure.（信心度：40.8%，最近似來源：1-s2.0-S1936523321002047--b160627c）\n\n<!-- grounding_score=0.600 -->\n---"
+    }
+  ]
+}

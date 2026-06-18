@@ -1,0 +1,58 @@
+{
+  "label": "vramtest2",
+  "mode": "gold",
+  "summary": {
+    "n_questions": 1,
+    "avg_grounding_score": 0.5,
+    "avg_paper_sel_recall": 1.0,
+    "avg_retrieval_recall": 1.0,
+    "avg_total_ms": 2300598.0,
+    "avg_planning_ms": 7879.0,
+    "avg_retrieval_ms": 231037.0,
+    "avg_grounding_ms": 820129.0,
+    "avg_grounding_nli_ms": 13200.0,
+    "avg_grounding_llm_ms": 780600.0
+  },
+  "rows": [
+    {
+      "id": "Q01",
+      "type": "single_paper",
+      "question": "In the study of JPH203's preincubation inhibitory effect on LAT1, how does preincubation change JPH203's inhibitory potency? Give the reported values.",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S1347861320300633-main",
+        "1-s2.0-S0021979710012403-main",
+        "1-s2.0-S1936523321002047-main",
+        "s41421-024-00697-6"
+      ],
+      "gold_papers": [
+        "1-s2.0-S1347861320300633-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": 1.0,
+      "grounding_score": 0.5,
+      "counts": {
+        "paper_count": 4,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 7879,
+        "retrieval": 231037,
+        "synthesis": 121152,
+        "synthesis-llm": 90745,
+        "verification": 124879,
+        "grounding": 820129,
+        "translation": 904774,
+        "total": 2300598,
+        "grounding_nli": 13200,
+        "grounding_llm": 780600
+      },
+      "wall_seconds": 2300.6,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 5
+      },
+      "answer": "## 【論文直接依據】\n* 預孵育（Preincubation）在與共同孵育（co-incubation）結合時，能顯著增強 JPH203 的抑制效力 【1-s2.0-S1347861320300633-main】。\n* 在僅進行共同孵育分析時，$\\text{IC}_{50}$ 值為 $99.2 \\pm 11.0\\text{ nM}$ 【1-s2.0-S1347861320300633-main】。\n* 當加入預孵育（預加共同孵育，pre-plus-co-incubation）時，$\\text{IC}_{50}$ 值降低至 $34.2 \\pm 3.6\\text{ nM}$，這代表由於協同效應而產生了三倍的降低 【1-s2.0-S1347861320300633-main】。\n* 在共同孵育分析中，$K_i$ 值為 $0.46\\text{ mM}$ 【1-s2.0-S1347861320300633-main】。\n* 在預加共同孵育分析中，$K_i$ 值降低至 $0.37\\text{ mM}$，這是由於協同效應導致的 20% 降低 【1-s2.0-S1347861320300633-main】。\n* 僅進行預孵育（預孵育對 HT-29 細胞中 LAT1 功能的抑制效果）的 $\\text{IC}_{50}$ 值為 $193 \\pm 50\\text{ nM}$ 【1-s2.0-S1347861320300633-main】。\n\n## 【跨文獻推論】\n* 跨論文推論（基於 【1-s2.0-S1347861320300633-main】）：雖然僅進行預孵育的效力低於僅進行共同孵育（比較預孵育的 $\\text{IC}_{50}$ 為 $193 \\pm 50\\text{ nM}$ 與共同孵育的 $99.2 \\pm 11.0\\text{ nM}$），但預孵育的過程「啟動」了系統或轉運蛋白，使得隨後進行共同孵育時，產生的抑制效力顯著高於單獨使用任一方法（將 $\\text{IC}_{50}$ 降低至 $34.2 \\pm 3.6\\text{ nM}$）。\n\n## 【知識延伸與推測】\n* 模型推測（文獻依據不足）：觀察到預孵育能增強效力，但藥物移除後該效果可迅速逆轉，這表明 JPH203 與 LAT1 之間未形成共價鍵。相反地，「預加共同」孵育期間效力的提升，可以用慢結合平衡（slow-binding equilibrium）或轉運蛋白的構象變化來解釋，這種變化隨時間增加對抑制劑的親和力，並在預孵育階段後短暫持續，隨後恢復至基準線。\n* 模型推測（文獻依據不足）：由於 JPH203 表現出競爭性抑制特徵（增加 $K_m$ 而 $V_{max}$ 保持穩定），預孵育所提供的增強效果可能涉及優化活性位點的佔據率，或比立即共同給藥更有效地降低底物（leucine）的可接近性。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ⚠️ 【論文直接依據】：50.0%（3/6 句）\n  ✅ 【跨文獻推論】：100.0%（1/1 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/2 句）  ← 知識延伸推測，低分為預期範圍\n\n⚠️ **直引依據率**：50.0%　中（部分直引陳述需確認）\n\n⚠️  **以下 5 個陳述未找到明確論文依據，請謹慎參考：**\n\n- * When preincubation is added (pre-plus-co-incubation), the $\\text{IC}_{50}$ value decreases to $34.2 \\pm 3.6\\text{ nM}$, representing a three-fold decrease due to the synergistic effect [1-s2.0-S1347861320300633-main].（信心度：7.3%，最近似來源：1-s2.0-S1347861320300633--e3ba0be9）\n- * In co-incubation analysis, the $K_i$ value is $0.46\\text{ mM}$ [1-s2.0-S1347861320300633-main].（信心度：5.1%，最近似來源：s41421-024-00697-6-2406074b）\n- * In pre-plus-co-incubation analysis, the $K_i$ value decreases to $0.37\\text{ mM}$, which is a 20% reduction resulting from the synergistic effect [1-s2.0-S1347861320300633-main].（信心度：1.3%，最近似來源：1-s2.0-S0021979710012403--e195173f）\n- * Model speculation (insufficient literature basis): The observation that preincubation enhances potency but the effect is rapidly reversible upon drug removal suggests that JPH203 does not form a covalent bond with LAT1. Instead, the increased potency during \"pre-plus-co\" incubation might be explained by a slow-binding equilibrium or a conformational change in the transporter that increases the affinity for the inhibitor over time, which then persists briefly after the preincubation phase before returning to baseline.（信心度：2.1%，最近似來源：1-s2.0-S0021979710012403--e195173f）\n- * Model speculation (insufficient literature basis): Since JPH203 exhibits competitive inhibition characteristics (increasing $K_m$ while $V_{max}$ remains stable), the enhancement provided by preincubation likely involves optimizing the occupancy of the active site or reducing the accessibility of the substrate (leucine) more effectively than immediate co-administration.（信心度：9.3%，最近似來源：1-s2.0-S1936523321002047--b160627c）\n\n<!-- grounding_score=0.500 -->\n---"
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "label": "vramfix",
+  "mode": "gold",
+  "summary": {
+    "n_questions": 1,
+    "avg_grounding_score": 0.8,
+    "avg_paper_sel_recall": 1.0,
+    "avg_retrieval_recall": 1.0,
+    "avg_total_ms": 2016177.0,
+    "avg_planning_ms": 8274.0,
+    "avg_retrieval_ms": 660738.0,
+    "avg_grounding_ms": 127037.0,
+    "avg_grounding_nli_ms": 5100.0,
+    "avg_grounding_llm_ms": 96900.0
+  },
+  "rows": [
+    {
+      "id": "Q01",
+      "type": "single_paper",
+      "question": "In the study of JPH203's preincubation inhibitory effect on LAT1, how does preincubation change JPH203's inhibitory potency? Give the reported values.",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S1347861320300633-main",
+        "1-s2.0-S0021979710012403-main",
+        "1-s2.0-S1936523321002047-main",
+        "s41421-024-00697-6"
+      ],
+      "gold_papers": [
+        "1-s2.0-S1347861320300633-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": 1.0,
+      "grounding_score": 0.8,
+      "counts": {
+        "paper_count": 4,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 8274,
+        "retrieval": 660738,
+        "synthesis": 167833,
+        "synthesis-llm": 118920,
+        "verification": 128337,
+        "grounding": 127037,
+        "translation": 805034,
+        "total": 2016177,
+        "grounding_nli": 5100,
+        "grounding_llm": 96900
+      },
+      "wall_seconds": 2016.2,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 2
+      },
+      "answer": "## 【論文直接依據】\n* 預孵育（Preincubation）在與共同孵育（co-incubation）結合時，能顯著增強 JPH203 的抑制效力 [1-s2.0-S1347861320300633-main]。\n* 報告的抑制效力數值如下：\n    * **僅共同孵育：** $\\text{IC}_{50} = 99.2 \\pm 11.0\\text{ nM}$ 且 $\\text{K}_i = 0.46\\text{ mM}$ [1-s2.0-S1347861320300633-main]。\n    * **預孵育結合共同孵育：** $\\text{IC}_{50} = 34.2 \\pm 3.6\\text{ nM}$ 且 $\\text{K}_i = 0.37\\text{ mM}$ [1-s2.0-S1347861320300633-main]。\n    * **僅預孵育：** $\\text{IC}_{50} = 193 \\pm 50\\text{ nM}$ [1-s2.0-S1347861320300633-main]。\n* 預孵育與共同孵育之間的協同作用導致 $\\text{IC}_{50}$ 值降低三倍，且 $\\text{K}_i$ 值降低 20% [1-s2.0-S1347861320300633-main]。\n\n## 【跨文獻推論】\n* 跨論文推論（基於 [1-s2.0-S1347861320300633-main]）：雖然僅預孵育的效力低於僅共同孵育（比較 $\\text{IC}_{50}$ 值 $193 \\pm 50\\text{ nM}$ 與 $99.2 \\pm 11.0\\text{ nM}$），但兩者的結合產生了協同效應，使 JPH203 的效力顯著高於單獨使用任何一種方法（將 $\\text{IC}_{50}$ 進一步降低至 $34.2 \\pm 3.6\\text{ nM}$）。這表明預孵育以某種方式對目標或系統進行了啟動（primes），從而使隨後的共同孵育期間的抑制效果最大化。\n\n## 【知識延伸與推測】\n* 模型推測（文獻依據不足）：觀察到預孵育可增強效力，且此效果在藥物移除後相對迅速地消失（在 120 分鐘內恢復至 97% 的活性），這可能暗示了一種「慢結合」（slow-binding）的動力學機制。在這種情況下，抑制劑需要時間才能與受體 (LAT1) 達到高親和力的平衡狀態。這可以解釋為什麼預先暴露會增加效力，但不會導致永久性（不可逆）的抑制。因此，在臨床環境中，為了利用這種協同抑制效果，維持 JPH203 的穩態濃度可能比達到單次的高峰濃度更為關鍵。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ✅ 【論文直接依據】：80.0%（4/5 句）\n  ✅ 【跨文獻推論】：100.0%（1/1 句）  ← 跨論文推論，低分為預期範圍\n  ❌ 【知識延伸推測】：0.0%（0/1 句）  ← 知識延伸推測，低分為預期範圍\n\n✅ **直引依據率**：80.0%　高（直接引用高度忠實於論文）\n\n⚠️  **以下 2 個陳述未找到明確論文依據，請謹慎參考：**\n\n- * The synergy between preincubation and co-incubation resulted in a three-fold decrease in the $\\text{IC}_{50}$ value and a 20% reduction in the $\\text{K}_i$ value [1-s2.0-S1347861320300633-main].（信心度：1.6%，最近似來源：1-s2.0-S0021979710012403--e195173f）\n- * Model speculation (insufficient literature basis): The observation that preincubation enhances potency, combined with the fact that this effect disappears relatively quickly after drug removal (returning to 97% activity within 120 minutes), may suggest a \"slow-binding\" kinetic mechanism. In such cases, the inhibitor takes time to reach an equilibrium state of high affinity with the receptor (LAT1). This would explain why pre-exposure increases potency but does not result in permanent (irreversible) inhibition. Consequently, in a clinical setting, maintaining a steady-state concentration of JPH203 may be more critical than achieving a single high peak concentration to leverage this synergistic inhibitory effect.（信心度：19.4%，最近似來源：1-s2.0-S1347861320300633--094d1631）\n\n<!-- grounding_score=0.800 -->\n---"
+    }
+  ]
+}
