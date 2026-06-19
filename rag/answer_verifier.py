@@ -125,9 +125,12 @@ class AnswerVerifier:
 
         options = {
             "temperature": 0.6,
-            "num_predict": -1,
+            # ponytail: 有限上限當保險絲——只在病態 think loop 時剎車，
+            # 正常的長思考鏈（難題）跑不到這個數，不影響動態思考長度。
+            "num_predict": 12288,
             "num_ctx": cfg.STAGE5_NUM_CTX,
-            "presence_penalty": 1.2,
+            # presence_penalty 高會懲罰收尾結構、阻止模型收斂 → loop 幫兇。判定任務設 0。
+            "presence_penalty": 0,
         }
         if disable_thinking:
             options["thinking"] = False

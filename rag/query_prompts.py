@@ -71,6 +71,9 @@ Please write a comprehensive answer in English. The answer must be organized int
 Content drawn directly from the papers above.
 Each statement must be labeled with its source as [Paper Name].
 Only state facts explicitly recorded in the papers; do not add any inference.
+Write each statement as a SINGLE atomic fact — one fact per bullet. Do NOT pack
+multiple facts (e.g. catalyst, equivalents, temperature, time, yield) into one
+sentence; split each into its own separately-labeled bullet.
 
 ## [Cross-Literature Inference]
 Conclusions that combine information from multiple papers and are reasonably derivable even if not directly stated.
@@ -107,6 +110,8 @@ def _reasoning_zh(knowledge_base: str, question: str, memory_section: str) -> st
 直接來自上述論文原文的內容。
 每個陳述必須以【論文名稱】標注來源。
 只陳述論文明確記載的事實，不加入任何推論。
+每個陳述只寫「單一原子事實」——一個 bullet 一個事實。不要把多個事實
+（如催化劑、當量、溫度、時間、產率）塞進同一句，請各自拆成獨立、各自標注來源的 bullet。
 
 ## 【跨文獻推論】
 結合多篇論文的資訊，推導出論文沒有直接說明但合理可得的結論。

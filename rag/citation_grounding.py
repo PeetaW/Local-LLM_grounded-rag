@@ -44,34 +44,62 @@ _nli_tokenizer = None
 _NLI_LABEL_MAP = None   # {0: "contradiction", 1: "neutral", 2: "entailment"} 或依模型決定
 
 
+def _nli_wants_cuda() -> bool:
+    import torch
+    want = getattr(cfg, "NLI_DEVICE", "auto").lower()
+    return torch.cuda.is_available() and (want == "cuda" or want == "auto")
+
+
 def _get_nli_model():
     """
     載入 mDeBERTa NLI 三分類模型（singleton）。
     使用 AutoModelForSequenceClassification 以同時取得三個 label 的 logits。
+    每次取用都確保模型在目標 device：grounding 結束會被 release_nli_gpu() 搬下 GPU，
+    下一題在此自動搬回 GPU（搬移 ~0.5GB，毫秒級，可忽略）。
     """
     global _nli_model, _nli_tokenizer, _NLI_LABEL_MAP
+    import torch
     if _nli_model is None:
         from transformers import AutoTokenizer, AutoModelForSequenceClassification
-        import torch
 
         model_name = "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
         print("  📦 載入 mDeBERTa 多語言 NLI 模型（三分類模式）...")
         _nli_tokenizer = AutoTokenizer.from_pretrained(model_name)
         _nli_model = AutoModelForSequenceClassification.from_pretrained(model_name)
-        want = getattr(cfg, "NLI_DEVICE", "auto").lower()
-        use_cuda = (want == "cuda") or (want == "auto" and torch.cuda.is_available())
-        if use_cuda and torch.cuda.is_available():
-            _nli_model = _nli_model.cuda()
-            print("  ✅ mDeBERTa device: cuda")
-        else:
-            print("  ✅ mDeBERTa device: cpu（釋放 VRAM 給 LLM）")
         _nli_model.eval()
-
-        # 從模型 config 取得 label 對應關係
         id2label = _nli_model.config.id2label  # e.g. {0: "CONTRADICTION", 1: "NEUTRAL", 2: "ENTAILMENT"}
         _NLI_LABEL_MAP = {v.upper(): k for k, v in id2label.items()}
         print(f"  ✅ mDeBERTa 載入完成（labels: {id2label}）")
+
+    target = "cuda" if _nli_wants_cuda() else "cpu"
+    if str(next(_nli_model.parameters()).device).split(":")[0] != target:
+        _nli_model = _nli_model.to(target)
+        print(f"  ✅ mDeBERTa device: {target}")
     return _nli_model, _nli_tokenizer, _NLI_LABEL_MAP
+
+
+def release_nli_gpu():
+    """
+    grounding 跑完把 mDeBERTa 搬下 GPU + 清快取，VRAM 完整讓給 gemma4 翻譯。
+    下一題 _get_nli_model() 會自動把它搬回 GPU。NLI_DEVICE=cpu 時本來就在 CPU，無作用。
+    """
+    global _nli_model
+    import torch
+    if _nli_model is not None and next(_nli_model.parameters()).is_cuda:
+        _nli_model = _nli_model.cpu()
+        torch.cuda.empty_cache()
+
+
+def _window_text(text: str, size: int = 1400, overlap: int = 300) -> list[str]:
+    """
+    把長 chunk 切成重疊窗。mDeBERTa premise 上限 ~512 token(~1900 字元)，
+    chunk 常達 3000+ 字元；直接截斷會漏掉落在後段的事實。
+    1400 字元 ≈ 370 token，留足空間給 hypothesis；overlap 避免事實被切在窗邊界。
+    """
+    if len(text) <= size:
+        return [text]
+    step = size - overlap
+    return [text[i:i + size] for i in range(0, len(text), step) if text[i:i + size]]
 
 
 def _run_nli(premise: str, hypothesis: str) -> dict:
@@ -405,19 +433,25 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
         best_chunk_id = None
         best_entail_c = 0.0   # contradiction score of the best-entailment chunk
 
-        # 批次：這一句 hypothesis 對所有 chunk 一次跑完（取代逐 chunk 呼叫）
-        chunk_texts = [c["text"][:512] for c in chunks]
+        # 滑動窗：chunk 常比 mDeBERTa 的 512-token 窗大，直接截斷會漏掉落在後段的事實
+        # （實測事實常在第 1000~3400 字元，被舊的 [:512] 砍掉 → 誤判 unsupported）。
+        # 把每個 chunk 切成重疊窗，全部一次批次 NLI，取最高 entailment。
+        win_texts, win_chunk_ids = [], []
+        for c in chunks:
+            cid = c.get("id", c.get("source", ""))
+            for w in _window_text(c["text"]):
+                win_texts.append(w)
+                win_chunk_ids.append(cid)
         try:
-            scores_list = _run_nli_batch(chunk_texts, [hypothesis] * len(chunk_texts))
+            scores_list = _run_nli_batch(win_texts, [hypothesis] * len(win_texts))
         except Exception:
             scores_list = []
-        for chunk, scores in zip(chunks, scores_list):
+        for cid, scores in zip(win_chunk_ids, scores_list):
             e_score = scores["entailment"]
-            c_score = scores["contradiction"]
             if e_score > best_entail:
                 best_entail   = e_score
-                best_entail_c = c_score
-                best_chunk_id = chunk.get("id", chunk.get("source", ""))
+                best_entail_c = scores["contradiction"]
+                best_chunk_id = cid
 
         # ── 升級一：多來源聯合驗證（NLI_JOINT_VERIFY_ENABLED）────────────
         # 個別 chunk 都不夠支撐，但 top-3 合併後可以 → INFERENCE_BRIDGE
