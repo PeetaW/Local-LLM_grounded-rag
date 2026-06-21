@@ -1,0 +1,136 @@
+{
+  "label": "verifyctx_q",
+  "mode": "gold",
+  "summary": {
+    "n_questions": 3,
+    "avg_grounding_score": 0.698,
+    "avg_paper_sel_recall": 1.0,
+    "avg_retrieval_recall": 0.917,
+    "avg_total_ms": 808167.667,
+    "avg_planning_ms": 7558.333,
+    "avg_retrieval_ms": 280563.333,
+    "avg_grounding_ms": 34146.667,
+    "avg_grounding_nli_ms": 16866.667,
+    "avg_grounding_llm_ms": 0.0
+  },
+  "rows": [
+    {
+      "id": "Q05",
+      "type": "single_paper",
+      "question": "What is the solvent-free green protocol for N-Boc protection of amines using picric acid as a catalyst, and what reaction conditions are used?",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S2773223124000268-main"
+      ],
+      "gold_papers": [
+        "1-s2.0-S2773223124000268-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": 1.0,
+      "grounding_score": 0.611,
+      "counts": {
+        "paper_count": 1,
+        "subquery_count": 2
+      },
+      "latency": {
+        "planning": 5733,
+        "retrieval": 168031,
+        "synthesis": 89391,
+        "synthesis-llm": 175785,
+        "verification": 74481,
+        "grounding": 28866,
+        "translation": 187328,
+        "total": 729620,
+        "grounding_nli": 7000,
+        "grounding_llm": 0
+      },
+      "wall_seconds": 729.6,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 11
+      },
+      "answer": "## 【論文直接依據】\n* 苦味酸被用作 Brønsted 酸催化劑或有機催化劑 【1-s2.0-S2773223124000268-main】。\n* 所使用的苦味酸量為 2 mol% 或 0.2 當量 【1-s2.0-S2773223124000268-main】。\n* 二叔丁基二碳酸酯 ((Boc)₂O / Boc 酐) 被用作保護劑 【1-s2.0-S2773223124000268-main】。\n* 反應在無溶劑（純物質）條件下進行 【1-s2.0-S2773223124000268-main】。\n* 反應在室溫 (rt) 下進行 【1-s2.0-S2773223124000268-main】。\n* 優化後的反應時間為 60 分鐘 【1-s2.0-S2773223124000268-main】。\n* 此方法的最高產率可達 98% 【1-s2.0-S2773223124000268-main】。\n* 在室溫下使用 0.2 當量催化劑反應 60 分鐘時，產率可達 95% 【1-s2.0-S2773223124000268-main】。\n* 此方法適用於芳香胺 【1-s2.0-S2773223124000268-main】。\n* 此方法適用於雜環芳香胺 【1-s2.0-S2773223124000268-main】。\n* 此方法適用於開鏈脂肪胺 【1-s2.0-S2773223124000268-main】。\n* 此方法適用於環狀脂肪胺 【1-s2.0-S2773223124000268-main】。\n* 在反應機制中，苦味酸活化 Boc 酐的羰基氧 【1-s2.0-S2773223124000268-main】。\n* 胺的氮原子提供一對孤對電子，攻擊 Boc 酐的羰基碳 【1-s2.0-S2773223124000268-main】。\n* 反應機制涉及質子取代 【1-s2.0-S2773223124000268-main】。\n* 二氧化碳 ($\\text{CO}_2$) 作為副產物被消除 【1-s2.0-S2773223124000268-main】。\n* 叔丁醇 (t-BuOH) 作為副產物被消除 【1-s2.0-S2773223124000268-main】。\n* 最終生成的產物為 N-Boc 保護化合物 【1-s2.0-S2773223124000268-main】。\n\n## 【知識延伸與推測】\n* 模型推測（文獻依據不足）：此方案的「綠色」分類可能源於消除了揮發性有機溶劑 (VOCs)，以及使用能使反應在室溫下進行的催化劑，從而降低了能耗和危險廢物。\n* 模型推測（文獻依據不足）：由於苯酚環上存在三個電子吸引基團（硝基），苦味酸是一種強有機酸；這種高酸性可能比較弱的有機酸更有效地促進 Boc 酐羰基的活化。\n* 模型推測（文獻依據不足）：儘管高效，但此方案的實際應用可能會受到苦味酸安全性特性的限制，已知其在乾燥結晶形式下具有爆炸性，需要小心處理或穩定化。\n* 模型推測（文獻依據不足）：此方法為傳統的 N-Boc 保護提供了一種替代方案，後者通常需要鹼（如三乙胺或 DMAP）以及有機溶劑（如二氯甲烷 (DCM) 或四氫呋喃 (THF)）。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ⚠️ 【論文直接依據】：61.1%（11/18 句）\n  ❌ 【知識延伸推測】：0.0%（0/4 句）  ← 知識延伸推測，低分為預期範圍\n\n⚠️ **直引依據率**：61.1%　中（部分直引陳述需確認）\n\n⚠️  **以下 11 個陳述未找到明確論文依據，請謹慎參考：**\n\n- * The amount of picric acid used is 2 mol% or 0.2 equivalents [1-s2.0-S2773223124000268-main].（信心度：22.7%，最近似來源：1-s2.0-S2773223124000268--f40c39dc）\n- * The maximum yield of this method can reach 98% [1-s2.0-S2773223124000268-main].（信心度：6.2%，最近似來源：1-s2.0-S2773223124000268--f40c39dc）\n- * The method is applicable to heterocyclic aromatic amines [1-s2.0-S2773223124000268-main].（信心度：45.2%，最近似來源：1-s2.0-S2773223124000268--ecca6ecc）\n- * The method is applicable to open-chain aliphatic amines [1-s2.0-S2773223124000268-main].（信心度：30.4%，最近似來源：1-s2.0-S2773223124000268--ecca6ecc）\n- * The method is applicable to cyclic aliphatic amines [1-s2.0-S2773223124000268-main].（信心度：25.3%，最近似來源：1-s2.0-S2773223124000268--ecca6ecc）\n- * Carbon dioxide ($\\text{CO}_2$) is eliminated as a byproduct [1-s2.0-S2773223124000268-main].（信心度：47.8%，最近似來源：1-s2.0-S2773223124000268--048eccfa）\n- * tert-Butanol (t-BuOH) is eliminated as a byproduct [1-s2.0-S2773223124000268-main].（信心度：42.9%，最近似來源：1-s2.0-S2773223124000268--048eccfa）\n- * Model speculation (insufficient literature basis): The \"green\" classification of this protocol likely stems from the elimination of volatile organic solvents (VOCs) and the use of a catalyst that allows the reaction to proceed at room temperature, thereby reducing energy consumption and hazardous waste.（信心度：12.3%，最近似來源：1-s2.0-S2773223124000268--ecca6ecc）\n- * Model speculation (insufficient literature basis): Picric acid is a strong organic acid due to the presence of three electron-withdrawing nitro groups on the phenol ring; this high acidity likely facilitates the activation of the Boc anhydride carbonyl group more efficiently than weaker organic acids.（信心度：10.4%，最近似來源：1-s2.0-S2773223124000268--ecca6ecc）\n- * Model speculation (insufficient literature basis): While efficient, the practical application of this protocol may be limited by the safety profile of picric acid, which is known to be explosive in its dry crystalline form and requires careful handling or stabilization.（信心度：2.6%，最近似來源：1-s2.0-S2773223124000268--8636a0d4）\n- * Model speculation (insufficient literature basis): This method provides an alternative to traditional N-Boc protection, which typically requires a base (such as triethylamine or DMAP) and organic solvents like dichloromethane (DCM) or tetrahydrofuran (THF).（信心度：19.1%，最近似來源：1-s2.0-S2773223124000268--ecca6ecc）\n\n<!-- grounding_score=0.611 -->\n---"
+    },
+    {
+      "id": "Q06",
+      "type": "multi_chunk",
+      "question": "How does poly(vinyl alcohol) enhance the therapeutic effect of 4-L-boronophenylalanine in neutron capture therapy of thoracic tumors? Explain the proposed mechanism with supporting data.",
+      "detected_paper": null,
+      "selected_papers": [
+        "1-s2.0-S0378517325007926-main",
+        "synthesis-and-biological-properties-of-water-soluble-p-boronophenylalanine-derivatives-relationship-between-water",
+        "CMDC-20-e202500059"
+      ],
+      "gold_papers": [
+        "1-s2.0-S0378517325007926-main"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": 0.75,
+      "grounding_score": 0.714,
+      "counts": {
+        "paper_count": 4,
+        "subquery_count": 5
+      },
+      "latency": {
+        "planning": 9361,
+        "retrieval": 450216,
+        "synthesis": 106402,
+        "synthesis-llm": 87804,
+        "verification": 108758,
+        "grounding": 36582,
+        "translation": 144288,
+        "total": 943414,
+        "grounding_nli": 21800,
+        "grounding_llm": 0
+      },
+      "wall_seconds": 943.4,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 5
+      },
+      "answer": "## 【論文直接依據】\n\n* 聚乙烯醇 (Poly(vinyl alcohol), PVA) 通過硼酸酯 (boronate esters) 與多個 BPA 分子相互作用，形成稱為 PVA-BPA 的複合物 [1-s2.0-S0378517325007926-main]。\n* PVA-BPA 保留了靶向 LAT1（大中性氨基酸轉運蛋白 1）所需的關鍵類苯丙氨酸 (phenylalanine-like) 結構 [1-s2.0-S0378517325007926-main]。\n* PVA-BPA 在與 LAT1 相互作用後，通過「LAT1 介導的內吞作用」(LAT1-mediated endocytosis) 被癌細胞攝取 [1-s2.0-S0378517325007926-main]。\n* 一旦進入癌細胞，PVA-BPA 會定位於內體/溶酶體 (endo-/lysosomes) 中 [1-s2.0-S0378517325007926-main]。\n* PVA-BPA 的特定攝取路徑和定位增加了細胞攝取的 BPA 數量 [1-s2.0-S0378517325007926-main]。\n* 此機制延緩了 BPA 從細胞質中的外排 (efflux) [1-s2.0-S0378517325007926-main]。\n* 外排的延緩延長了 BPA 在腫瘤內的滯留時間 [1-s2.0-S0378517325007926-main]。\n* PVA-BPA 在 1 hour 內能高效地在腫瘤中累積 [1-s2.0-S0378517325007926-main]。\n* PVA-BPA 在腫瘤中表現出長期滯留 [1-s2.0-S0378517325007926-main]。\n* PVA-BPA 在正常器官中的累積有限 [1-s2.0-S0378517325007926-main]。\n* 使用山梨醇 (sorbitol) 作為增溶劑/溶劑，開發了一種稱為「PVA-sorbitol-BPA」的優化配方 [1-s2.0-S0378517325007926-main]。\n* 與原型 PVA-BPA 複合物相比，PVA-sorbitol-BPA 將潛在副作用降低至可忽略不計的水平 [1-s2.0-S0378517325007926-main]。\n* 在惡性胸膜間皮瘤 (MPM) 的小鼠模型中，使用 PVA-sorbitol-BPA 進行的 BNCT 與傳統 BPA 相比，顯著提高了生存率 [1-s2.0-S0378517325007926-main]。\n* PVA-sorbitol-BPA 的高累積和長滯留有利於治療位於軀幹深處的腫瘤 [1-s2.0-S0378517325007926-main]。\n\n## 【跨文獻推論】\n\n* 跨文獻推論（基於 [Fact 1, 2, 3, and 4]）：PVA 通過改變細胞進入機制來增強 BPA 的治療效果。傳統 BPA 通常依賴轉運蛋白介導的運輸，而 PVA 將其轉化為「LAT1 介導的內吞作用」過程，將藥物困在內體/溶酶體中，從而防止快速外排並增加細胞內濃度。\n* 跨文獻推論（基於 [Fact 5, 7, and 8]）：使用 PVA（特別是山梨醇優化形式）通過同時增加腫瘤特異性藥物累積（療效）和減少正常器官中的累積（安全性），提高了 BNCT 的治療指數，與傳統 BPA 相比，取得了更優越的生存結果。\n* 跨文獻推論（基於 [Fact 9, 10, and 12]）：由於 MPM 是一種難以治療且通常位於軀幹深處的胸腔癌症，PVA-sorbitol-BPA 實現高累積和長期滯留的能力提供了關鍵的藥代動力學優勢，使 BNCT 成為替代失效的傳統化療或免疫療法的更可行方案。\n\n## 【知識延伸與推測】\n\n* 模型推測（文獻依據不足）：使用硼酸酯來連接 PVA 和 BPA 可能是策略性的，因為硼酸酯通常對 pH 值變化敏感。該複合物可能在血液中保持穩定，但在內體/溶酶體的酸性環境中 (Fact 3) 分解，釋放出活性 BPA 用於中子捕獲，儘管提供的文本中未詳細說明這一特定的化學觸發機制。\n* 模型推測（文獻依據不足）：與原型 PVA-BPA 相比，PVA-sorbitol-BPA 所提到的「可忽略不計的副作用」可能是由於山梨醇提高了複合物的穩定性或溶解度，防止了可能導致健康組織毒性的提前降解或非特異性聚集。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ⚠️ 【論文直接依據】：71.4%（10/14 句）\n  ✅ 【跨文獻推論】：100.0%（3/3 句）  ← 跨論文推論，低分為預期範圍\n  ⚠️ 【知識延伸推測】：50.0%（1/2 句）  ← 知識延伸推測，低分為預期範圍\n\n⚠️ **直引依據率**：71.4%　中（部分直引陳述需確認）\n\n⚠️  **以下 5 個陳述未找到明確論文依據，請謹慎參考：**\n\n- * This mechanism delays the efflux of BPA from the cytoplasm [1-s2.0-S0378517325007926-main].（信心度：40.8%，最近似來源：cas0106-0279-17de2bed）\n- * PVA-BPA accumulates efficiently in tumors within 1 hour [1-s2.0-S0378517325007926-main].（信心度：35.8%，最近似來源：cas0106-0279-d7164215）\n- * PVA-sorbitol-BPA reduces potential side effects to negligible levels compared to the prototype PVA-BPA complex [1-s2.0-S0378517325007926-main].（信心度：41.5%，最近似來源：cas0106-0279-d7164215）\n- * The high accumulation and long retention of PVA-sorbitol-BPA are beneficial for treating tumors located deep within the trunk [1-s2.0-S0378517325007926-main].（信心度：47.5%，最近似來源：cas0106-0279-d7164215）\n- * Model speculation (insufficient literature basis): The \"negligible side effects\" mentioned for PVA-sorbitol-BPA compared to prototype PVA-BPA may be due to sorbitol improving the stability or solubility of the complex, preventing premature degradation or non-specific aggregation that could otherwise cause toxicity in healthy tissues.（信心度：37.4%，最近似來源：cas0106-0279-d7164215）\n\n<!-- grounding_score=0.714 -->\n---"
+    },
+    {
+      "id": "Q08",
+      "type": "cross_paper",
+      "question": "Compare the different synthetic routes to 4-borono-L-phenylalanine reported across the papers, focusing on isotopic enrichment, scalability, and cost-effectiveness.",
+      "detected_paper": null,
+      "selected_papers": [
+        "CMDC-20-e202500059",
+        "synthesis-and-biological-properties-of-water-soluble-p-boronophenylalanine-derivatives-relationship-between-water",
+        "bbb0683",
+        "cas0106-0279",
+        "1-s2.0-S0378517325007926-main"
+      ],
+      "gold_papers": [
+        "CMDC-20-e202500059",
+        "bbb0683"
+      ],
+      "paper_selection_recall": 1.0,
+      "retrieval_span_recall": 1.0,
+      "grounding_score": 0.769,
+      "counts": {
+        "paper_count": 5,
+        "subquery_count": 3
+      },
+      "latency": {
+        "planning": 7581,
+        "retrieval": 223443,
+        "synthesis": 150902,
+        "synthesis-llm": 102147,
+        "verification": 76604,
+        "grounding": 36992,
+        "translation": 153798,
+        "total": 751469,
+        "grounding_nli": 21800,
+        "grounding_llm": 0
+      },
+      "wall_seconds": 751.5,
+      "issues": {
+        "conflicts": 0,
+        "unsupported": 5
+      },
+      "answer": "## 【論文直接依據】\n\n* 【CMDC-20-e202500059】是一篇整合了專利文獻與同行評審合成方法，用於 4-borono-L-phenylalanine (L-BPA) 的綜述 [CMDC-20-e202500059]。\n* 【CMDC-20-e202500059】的目的在於系統性地對 L-BPA 的合成路徑進行分類、批判性分析與比較 [CMDC-20-e202500059]。\n* 【CMDC-20-e202500059】旨在協助設計具可擴展性 (scalable) 的製程 [CMDC-20-e202500059]。\n* 【CMDC-20-e202500059】旨在協助設計低成本的製程 [CMDC-20-e202500059]。\n* 【CMDC-20-e202500059】旨在協助設計符合 GMP 標準的製程 [CMDC-20-e202500059]。\n* 論文【bbb0683】開發了一種使用「混合製程」(hybrid process) 合成光學純 L-BPA 的方法 [bbb0683]。\n* 【bbb0683】中的混合製程結合了對映選擇性烷基化 (enantioselective alkylation) 與酶水解 (enzymatic hydrolysis) [bbb0683]。\n* 【bbb0683】提出的合成路徑與先前報導的方法相比，反應步驟較少 [bbb0683]。\n* 【bbb0683】提出的合成路徑比先前報導的方法具有更簡單的操作特性 [bbb0683]。\n* 【bbb0683】提出的合成路徑比先前報導的方法具有更簡單的後處理過程 [bbb0683]。\n* 論文【bbb0683】未討論同位素富集 (isotopic enrichment) 的問題 [bbb0683]。\n* 論文【bbb0683】未討論可擴展性 (scalability) 的問題 [bbb0683]。\n* 論文【bbb0683】未討論成本效益 (cost-effectiveness) 的問題 [bbb0683]。\n\n## 【跨文獻推論】\n\n* 跨論文推論（基於【CMDC-20-e202500059】與【bbb0683】）：學術合成開發與工業應用需求之間存在差距。雖然【bbb0683】專注於提高路徑的化學效率（步驟較少、操作更簡單），但它未提供關於同位素富集、可擴展性或成本效益的數據——而這些正是【CMDC-20-e202500059】指出對於設計符合 GMP 標準且具商業可行性的 L-BPA 生產至關重要的指標。\n\n## 【知識延伸與推測】\n\n* 模型推測（文獻依據不足）：關於同位素富集，由於 BNCT 特別需要 $^{10}\\text{B}$（如【CMDC-20-e202500059】所述），任何可擴展的合成路徑可能需要在早期階段引入 $^{10}\\text{B}$ 富集的前驅體。【bbb0683】中提到的「混合製程」可能與同位素富集兼容，但其成本效益將很大程度上取決於富硼試劑的價格和可用性，以及反應步驟減少所帶來的效率提升。\n* 模型推測（文獻依據不足）：關於可擴展性，【bbb0683】路徑中使用酶水解通常表明與使用等量拆分劑的傳統手性拆分相比，具有更好的放大潛力，因為酶通常在較溫和的條件下運行並提供更高的光學純度。然而，在缺乏關於酶成本和穩定性的具體數據之前，這仍屬於推測。\n\n---\n📋 **答案品質報告**\n\n📊 **分段論文依據率：**\n\n  ⚠️ 【論文直接依據】：76.9%（10/13 句）\n  ❌ 【跨文獻推論】：0.0%（0/1 句）  ← 跨論文推論，低分為預期範圍\n  ⚠️ 【知識延伸推測】：50.0%（1/2 句）  ← 知識延伸推測，低分為預期範圍\n\n⚠️ **直引依據率**：76.9%　中（部分直引陳述需確認）\n\n⚠️  **以下 5 個陳述未找到明確論文依據，請謹慎參考：**\n\n- * Paper bbb0683 does not address the issue of isotopic enrichment [bbb0683].（信心度：47.2%，最近似來源：cas0106-0279-d7164215）\n- * Paper bbb0683 does not address the issue of scalability [bbb0683].（信心度：49.0%，最近似來源：cas0106-0279-d7164215）\n- * Paper bbb0683 does not address the issue of cost-effectiveness [bbb0683].（信心度：36.2%，最近似來源：cas0106-0279-d7164215）\n- * Cross-paper inference (based on [CMDC-20-e202500059] and [bbb0683]): There is a gap between academic synthesis development and industrial application requirements. While bbb0683 focuses on improving the chemical efficiency of the route (fewer steps, simpler operation), it does not provide data on isotopic enrichment, scalability, or cost-effectiveness—the very metrics that CMDC-20-e202500059 identifies as critical for designing GMP-compliant and commercially viable L-BPA production.（信心度：20.4%，最近似來源：cas0106-0279-d7164215）\n- * Model speculation (insufficient literature basis): Regarding scalability, the use of enzymatic hydrolysis in the bbb0683 route typically suggests better potential for scale-up compared to traditional chiral resolution using stoichiometric amounts of resolving agents, as enzymes often operate under milder conditions and provide higher optical purity. However, without specific data on enzyme cost and stability, this remains speculative.（信心度：44.1%，最近似來源：cas0106-0279-d7164215）\n\n<!-- grounding_score=0.769 -->\n---"
+    }
+  ]
+}

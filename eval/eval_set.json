@@ -26,7 +26,7 @@
       "gold_papers": [
         "1-s2.0-S1347861320300633-main"
       ],
-      "reference_answer": "",
+      "reference_answer": "Preincubation with JPH203 inhibits LAT1 in a concentration- and time-dependent manner and synergistically enhances its co-incubation inhibitory effect. Preincubation alone gave an IC50 of 193 ± 50 nM; co-incubation alone gave 99.2 ± 11.0 nM; combining preincubation with co-incubation lowered the IC50 to 34.2 ± 3.6 nM. Thus preincubation makes JPH203 markedly more potent, and its effect is partly lasting/reversible over time in drug-free medium.",
       "gold_spans": [
         "We then examined the lasting property of JPH203 preincubation inhibitory effects (Fig. 4). The cells were exposed to JPH203 (10 mM) or 0.5% DMSO (control) for 120 min (which was set on the basis of the observation that the inhibition potency almost reached a plateau in this condition [Fig. 3]) and then incubated in JPH203-free medium for 0, 30, 60, 120, and 240 min. The uptake value at 0 min"
       ]
@@ -38,7 +38,7 @@
       "gold_papers": [
         "bbb0683"
       ],
-      "reference_answer": "",
+      "reference_answer": "Optically pure L-p-boronophenylalanine (L-BPA) was made by a hybrid chemo-enzymatic process. Key steps: (1) enantioselective alkylation — lithiated (2R)-(-)-2,5-dihydro-2-isopropyl-3,6-dimethoxypyrazine (a chiral Schoellkopf-type auxiliary) is alkylated with 4-bromomethylbenzeneboronate in THF at -78 C to set the stereocentre (initial adduct ~74% e.e.); (2) acidic hydrolysis (HCl) of the pyrazine auxiliary to give the amino-acid methyl ester; (3) enzymatic hydrolysis with chymotrypsin to resolve/deprotect, affording enantiomerically pure L-BPA (up to 100% e.e.).",
       "gold_spans": [
         "Optically pure L-p-boronophenylalanine (BP A) was synthesized by a hybrid process involving enantioselective alkylation and subsequent enzymatic hydrolysis."
       ]
@@ -50,7 +50,7 @@
       "gold_papers": [
         "s41421-024-00697-6"
       ],
-      "reference_answer": "",
+      "reference_answer": "The cryo-EM structure shows JPH203 bound within the traditional substrate-binding pocket of LAT1 in the LAT1-4F2hc complex, occupying the site a physiological amino-acid substrate would. It is stabilized by a hydrogen-bond network with main-chain atoms in the unwound regions of TM1 and TM6; the chlorine on its bi-halogenated tyrosine core forms a halogen bond with Tyr259; it engages in a T-shaped (pi) interaction; and its hydrophobic tail inserts into a hydrophobic pocket (Ile63/64/68, Ile140/147/148, Phe252, etc.). By occupying the substrate pocket it acts as a competitive inhibitor that blocks substrate transport.",
       "gold_spans": [
         "JPH203 binds within the traditional substrate-binding pocket",
         "forms a halogen bond with Tyr259",
@@ -64,7 +64,7 @@
       "gold_papers": [
         "1-s2.0-S0731708511003451-main"
       ],
-      "reference_answer": "",
+      "reference_answer": "By HPLC, the main related substances/impurities of BPA are tyrosine and phenylalanine. The principal degradation pathway is oxidative degradation of BPA to tyrosine (loss of the boronic acid group under oxidative/H2O2 conditions), established via forced-degradation and long-term stability studies, for which the paper proposes the oxidative mechanistic pathway BPA -> tyrosine. BPA itself is relatively stable; impurity/degradant formation is driven mainly by oxidative conditions, which is why characterising these impurities matters for BPA synthesis, purification and storage.",
       "gold_spans": [
         "A typical chromatographic trace of BPA, showing low levels of tyrosine and phenylalanine impurities."
       ]
@@ -76,7 +76,7 @@
       "gold_papers": [
         "1-s2.0-S2773223124000268-main"
       ],
-      "reference_answer": "",
+      "reference_answer": "Picric acid acts as a Bronsted-acid organocatalyst for N-Boc protection of amines with di-tert-butyl dicarbonate ((Boc)2O). The green protocol is solvent-free (neat): 0.2 equivalents of picric acid, room temperature, 60 min reaction time, giving an excellent ~95% yield (Table 1, Entry 13; up to ~98%). It is broadly applicable (aromatic, heteroaromatic, open-chain aliphatic and cyclic aliphatic amines). Without catalyst the reaction needs ~48 h for only ~55% yield, and lower temperatures (<=10 C) sharply reduce yield.",
       "gold_spans": [
         "To our delight, under solvent-free conditions, employing 0.2 equivalents of catalyst at room temperature for a 60-min reaction time, resulted in an excellent yield of 95 % (Table 1, Entry 13)."
       ]
@@ -88,7 +88,7 @@
       "gold_papers": [
         "1-s2.0-S0378517325007926-main"
       ],
-      "reference_answer": "",
+      "reference_answer": "A poly(vinyl alcohol)-BPA complex (PVA-BPA) enhances BNCT of thoracic tumors. Mechanism: PVA non-covalently complexes BPA while preserving its phenylalanine-like structure, so the PVA-BPA complex still interacts with and is taken up by cancer cells via the LAT1 transporter; PVA increases cellular uptake and delays efflux of BPA from the cytosol, raising and prolonging intracellular boron retention. An optimized PVA-sorbitol-BPA formulation further reduced side effects to negligible levels, achieved efficient tumor accumulation and long-term retention after systemic administration, and significantly improved median survival times after neutron irradiation versus controls/free BPA.",
       "gold_spans": [
         "The complex termed PVA-BPA interacts with LAT1 and is taken up into cancer cells through",
         "preserving the essential phenylalanine-like structure for targeting LAT1",
@@ -103,7 +103,7 @@
       "gold_papers": [
         "41467_2024_Article_45464"
       ],
-      "reference_answer": "",
+      "reference_answer": "The reported water-stable boroxine forms from 2-hydroxyphenylboronic acid (HO-PBA), which spontaneously dehydrates at room temperature into a boroxine (a cyclic trimer, e.g. a trimer-H2O complex) bearing dynamic covalent B-O bonds and aggregation-induced emission enhancement. The dynamic covalent bonds let the B-O bonds undergo fast exchange in aqueous solution, which underlies (1) selective, strong fluoride-ion (F-) binding in water, significantly stronger than phenylboronic acid, and (2) a boroxine-cross-linked hydrogel with high acid-base/pH stability and a reversible gel-sol transition. This breaks the long-held view that boroxines cannot be used in water due to hydrolytic instability.",
       "gold_spans": [
         "their utilization in aqueous media is a formidable task due to hydrolytic instability",
         "2-hydroxyphenylboronic acid undergoes spontaneous dehydration to form a dimer with dynamic covalent bonds and aggregation-induced enhanced emission activity",
@@ -119,7 +119,7 @@
         "CMDC-20-e202500059",
         "bbb0683"
       ],
-      "reference_answer": "",
+      "reference_answer": "Across the papers, L-BPA is reached by several distinct routes, reflecting the difficulty of producing high-purity, isotopically enriched (10B) material. bbb0683 reports a hybrid chemo-enzymatic route (enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis) that delivers optically pure L-BPA at high e.e. CMDC-20-e202500059 reviews/compares multiple synthetic approaches and explicitly weighs scalability, cost-effectiveness and safety, especially the high cost of isotopically enriched boron precursors. The central trade-off is between routes that maximise enantiopurity/isotopic enrichment and those that are scalable and cost-effective given the expensive 10B-enriched starting materials.",
       "gold_spans": [
         "the synthesis of L-BPA has been approached through multiple routes, reflecting the challenges in producing high-purity, isotopically enriched material",
         "regarding scalability, cost-effectiveness, and safety, especially considering the high cost of isotopically enriched",
@@ -136,7 +136,7 @@
         "LAT1 ChemComm 2026",
         "s41421-024-00697-6"
       ],
-      "reference_answer": "",
+      "reference_answer": "The literature describes several mechanistically distinct LAT1-targeting cancer strategies: (1) small-molecule competitive inhibition - JPH203 blocks LAT1-mediated amino-acid transport; at minimally toxic concentrations it radiosensitizes cancer cells, and it downregulates mTOR activity and enhances cellular senescence; (2) structure-guided inhibition - the cryo-EM structure shows JPH203 binding the substrate pocket (halogen bond to Tyr259), giving a rational basis for inhibitor design; (3) a self-assembling peptide-based strategy that inhibits cancer-cell proliferation via LAT1. They differ in that JPH203 is a competitive transport inhibitor acting through downstream mTOR/senescence and radiosensitization, whereas the peptide approach relies on self-assembly at/through LAT1.",
       "gold_spans": [
         "JPH203, at minimally toxic concentrations, significantly sensitized cancer cells to radiation",
         "JPH203 significantly downregulated mTOR activity and enhanced cellular senescence",
@@ -152,7 +152,7 @@
         "41467_2024_Article_45464",
         "Chemistry A European J - 2023 - Ono - Structural Interconversion Based on Intramolecular Boroxine Formation"
       ],
-      "reference_answer": "",
+      "reference_answer": "The papers broadly agree rather than contradict. Both acknowledge that boroxines are generally hydrolytically unstable in aqueous media (the Nature Communications paper calls aqueous use 'a formidable task due to hydrolytic instability'). However, each shows that specific, geometrically/electronically stabilized boroxines can resist hydrolysis: the Ono paper reports an 'entropically stabilized tricyclic boroxine [with] high stability with respect to hydrolysis', and the Nature Communications paper develops a water-stable boroxine and hydrogel. So the consensus is that ordinary boroxines hydrolyse readily while particular stabilized structures are hydrolytically stable - complementary findings, not a genuine contradiction.",
       "gold_spans": [
         "their utilization in aqueous media is a formidable task due to hydrolytic instability",
         "The entropically stabilized tricyclic boroxine also shows high stability with respect to hydrolysis."
@@ -163,7 +163,7 @@
       "type": "out_of_scope",
       "question": "What are the phase III clinical trial overall survival results for BNCT in glioblastoma patients?",
       "gold_papers": [],
-      "reference_answer": "預期：系統應誠實說明本地文獻庫無此資訊，不應編造臨床數據。",
+      "reference_answer": "Out of scope. The local literature corpus contains no phase III clinical-trial overall-survival results for BNCT in glioblastoma patients. The correct response is to state honestly that this information is not in the available papers and to NOT fabricate clinical trial numbers.",
       "gold_spans": []
     },
     {
@@ -171,7 +171,7 @@
       "type": "false_premise",
       "question": "Since BPA is administered orally in BNCT, what oral bioavailability values are reported in these papers?",
       "gold_papers": [],
-      "reference_answer": "預期：系統應指出『口服給藥』的前提與文獻不符（BPA 多為靜脈輸注），而非順著錯誤前提給出口服生體可用率。",
+      "reference_answer": "The premise is false. In these papers BPA for BNCT is not administered orally; it is given by intravenous infusion. The correct response is to flag the false premise (oral administration) and decline to provide 'oral bioavailability' values rather than hallucinating them.",
       "gold_spans": []
     }
   ]

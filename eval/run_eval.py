@@ -160,6 +160,7 @@ def _write_markdown_report(out: dict, path: str):
     L.append("")
     L.append("| 指標 | 值 |")
     L.append("|------|-----|")
+    L.append(f"| 平均正確性（LLM-judge） | {_fmt(s.get('avg_correctness'))} |")
     L.append(f"| 平均 grounding 分數 | {_fmt(s.get('avg_grounding_score'))} |")
     L.append(f"| 平均論文選擇命中率 | {_fmt(s.get('avg_paper_sel_recall'), pct=True)} |")
     L.append(f"| 平均檢索覆蓋率 | {_fmt(s.get('avg_retrieval_recall'), pct=True)} |")
@@ -227,6 +228,8 @@ def _print_row(row: dict):
           f"   detected={row['detected_paper']}")
     print(f"  選出論文      : {row['selected_papers']}")
     print(f"  檢索覆蓋率    : {ret if ret is not None else 'N/A（無 gold_spans）'}")
+    cr = row.get("correctness")
+    print(f"  正確性(judge) : {cr if cr is not None else 'N/A'}")
     print(f"  grounding     : {row['grounding_score']}")
     def _s(k):
         v = lat.get(k)
@@ -237,7 +240,7 @@ def _print_row(row: dict):
     print(f"  問題標記      : {row['issues']}")
 
 
-def run(label: str, limit: int = None, retrieval_only: bool = False):
+def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = None):
     # ── 把完整 console 輸出（索引載入、逐句 NLI、萬一的 traceback）同步寫進 log 檔 ──
     os.makedirs(RESULTS_DIR, exist_ok=True)
     log_path = os.path.join(RESULTS_DIR, f"eval_{label}.log")
@@ -249,6 +252,10 @@ def run(label: str, limit: int = None, retrieval_only: bool = False):
     from rag.query_pipeline import execute_structured_query
 
     questions = _load_questions()
+    if ids:
+        want = {x.strip().upper() for x in ids.split(",") if x.strip()}
+        questions = [q for q in questions if q.get("id", "").upper() in want]
+        print(f"⚠️  --ids {sorted(want)}：只跑指定 {len(questions)} 題（挑代表題快速迭代）")
     if limit:
         questions = questions[:limit]
         print(f"⚠️  --limit {limit}：只跑前 {len(questions)} 題（快速測試/重現用）")
@@ -293,6 +300,16 @@ def run(label: str, limit: int = None, retrieval_only: bool = False):
                 answer = f"[PIPELINE ERROR] {e}"
             wall_s = round(time.time() - t0, 1)
 
+        # 4) 正確性 LLM-judge（有 reference_answer 且非 retrieval-only 時）
+        correctness, correctness_detail = None, None
+        reference = q.get("reference_answer", "")
+        if reference and not retrieval_only and answer:
+            from judge import judge_correctness  # 同目錄
+            j = judge_correctness(qtext, answer, reference)
+            correctness = j["score"]
+            correctness_detail = {"raw": j["raw"], "reason": j["reason"]}
+            print(f"  ⚖️  [Judge] correctness={correctness}（{j['raw']}/5）：{j['reason'][:80]}")
+
         row = {
             "id": qid,
             "type": q.get("type"),
@@ -303,6 +320,8 @@ def run(label: str, limit: int = None, retrieval_only: bool = False):
             "paper_selection_recall": sel_recall,
             "retrieval_span_recall": ret_recall,
             "grounding_score": metrics.parse_grounding_score(answer),
+            "correctness": correctness,
+            "correctness_detail": correctness_detail,
             "counts": metrics.parse_counts(status_lines),
             "latency": metrics.parse_stage_latencies(status_lines),
             "wall_seconds": wall_s,
@@ -352,12 +371,13 @@ if __name__ == "__main__":
     ap.add_argument("--label", default="baseline", help="這次結果的標籤（檔名用）")
     ap.add_argument("--limit", type=int, default=None, help="只跑前 N 題（快速測試/重現用）")
     ap.add_argument("--retrieval-only", action="store_true", help="只測選擇/檢索覆蓋率，跳過完整 pipeline（幾分鐘）")
+    ap.add_argument("--ids", default=None, help="只跑指定題號，逗號分隔，如 Q05,Q06,Q08（挑代表題快速迭代）")
     ap.add_argument("--compare", nargs=2, metavar=("A", "B"), help="比較兩個 label 的彙總")
     args = ap.parse_args()
 
     if args.compare:
         compare(*args.compare)
     elif args.run:
-        run(args.label, args.limit, args.retrieval_only)
+        run(args.label, args.limit, args.retrieval_only, args.ids)
     else:
         ap.print_help()

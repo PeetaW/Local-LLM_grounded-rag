@@ -102,6 +102,7 @@ def summarize(rows: list) -> dict:
 
     return {
         "n_questions":          len(rows),
+        "avg_correctness":      _avg("correctness"),
         "avg_grounding_score":  _avg("grounding_score"),
         "avg_paper_sel_recall": _avg("paper_selection_recall"),
         "avg_retrieval_recall": _avg("retrieval_span_recall"),

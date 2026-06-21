@@ -91,7 +91,11 @@ SYNTHESIS_MODEL   = "gemma4:31b"    # 同時用於 Stage 3 和 Stage 4
 # ── Stage 5：邏輯自洽驗證 ─────────────────────────────
 VERIFY_ENABLED      = True
 VERIFY_MODEL        = "qwen3.5:35b-a3b"
-MAX_VERIFY_RETRIES  = 2             # fallback 最多重試幾次
+MAX_VERIFY_RETRIES  = 2             # Stage 5 verify→correct 迴圈最多重試幾次（與 grounding fallback 無關）
+
+# ── Eval 正確性裁判（只在 eval/judge.py 用，不在產品 pipeline）──
+# 預設用 qwen3（未參與答案生成 → 降低 self-preference 偏誤）。答案由 gemma4 生成。
+JUDGE_MODEL         = VERIFY_MODEL
 
 # ── Stage 2：並行子查詢 ────────────────────────────────
 SUBQUERY_MAX_WORKERS = 4   # 並行子查詢的 thread pool 大小
@@ -100,7 +104,7 @@ SUBQUERY_MAX_WORKERS = 4   # 並行子查詢的 thread pool 大小
 # Stage 1（qwen2.5:14b）與 Stage 4（gemma4:31b）透過 LlamaIndex 呼叫，
 # 不支援 per-call num_ctx override，沿用 LLM_CONTEXT_WINDOW / planning_llm context_window。
 STAGE3_NUM_CTX = 16384    # 知識蒸餾（knowledge_synthesizer.py）
-STAGE5_NUM_CTX = 65536    # 邏輯驗證（answer_verifier.py）
+STAGE5_NUM_CTX = 16384    # 邏輯驗證（answer_verifier.py）；65536 會讓 qwen3:35b offload ~7GB 到 RAM → verify 超慢。16384 → 97% 進 GPU
 
 # ── Plan-and-Execute 架構開關 ─────────────────────────
 PLAN_EXECUTE_ENABLED = False       # 預設關閉，穩定後開啟

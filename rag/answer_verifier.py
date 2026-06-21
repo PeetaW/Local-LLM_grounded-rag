@@ -101,12 +101,13 @@ Output in English.
 """
 
 class AnswerVerifier:
-    # num_ctx = 65536；1 token ≈ 2 中文字 / 4 英文字母，取 2.5 字元/token 粗估
-    # 保留 15% 給 system prompt + 輸出，所以 prompt 安全上限：
-    _CTX_TOKENS   = 65536
+    # 1 token ≈ 2 中文字 / 4 英文字母，取 2.5 字元/token 粗估；保留 15% 給 system prompt + 輸出。
+    # _CTX_TOKENS 必須跟著實際送進 Ollama 的 num_ctx(STAGE5_NUM_CTX) 走，否則 batching 會以為
+    # 預算很大、不切分，而 Ollama 只配了較小的 ctx → prompt 被截斷。
+    _CTX_TOKENS   = cfg.STAGE5_NUM_CTX
     _CHARS_PER_TOKEN = 2.5
     _SAFETY_RATIO    = 0.85
-    _MAX_PROMPT_CHARS = int(_CTX_TOKENS * _SAFETY_RATIO * _CHARS_PER_TOKEN)  # ≈ 139,264
+    _MAX_PROMPT_CHARS = int(_CTX_TOKENS * _SAFETY_RATIO * _CHARS_PER_TOKEN)
 
     def __init__(
         self,
