@@ -251,7 +251,7 @@ def run_grounding_check(
     grounding_score = compute_grounding_score(citation_results)
     unsupported = [r for r in direct_results if not r["supported"]]
 
-    if unsupported and direct_score < 0.8:
+    if getattr(cfg, "GROUNDING_FALLBACK_ENABLED", True) and unsupported and direct_score < 0.8:
         _status(
             f"  🔄 [Grounding Fallback] {len(unsupported)} 個陳述依據不足"
             f"（整體 {grounding_score:.1%}），送回 gemma4 重新引用..."

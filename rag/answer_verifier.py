@@ -6,16 +6,19 @@ import config as cfg
 logger = logging.getLogger(__name__)
 
 VERIFY_SYSTEM_PROMPT = """
-你是一個學術推論驗證器。
-以「已知事實清單」為唯一立論基礎，判斷「跨文獻推論」與「知識延伸與推測」段落的邏輯是否合理。
+你是一個學術推論驗證器。檢查「跨文獻推論」與「知識延伸與推測」兩段。
 
 注意：引用正確性已由其他系統處理，你不需要重新比對引用。
-你的焦點是：
+
+對「跨文獻推論」段（從論文事實推導出的結論）：
 1. 推論前提是否確實存在於已知事實清單中
 2. 從前提到結論的推導是否有邏輯跳躍
-3. 「知識延伸」段落的推測是否超出合理推論範圍，或與事實清單矛盾
 
-使用繁體中文輸出。
+對「知識延伸與推測」段（刻意超出論文、運用外部學術知識的推演——這是設計如此，本來就會用清單外的知識）：
+3. 不要求其前提存在於事實清單中。僅在以下情況才判不合理：
+   (a) 內容未明確標注為推測，或 (b) 直接與已知事實清單矛盾，或 (c) 學術上明顯不合理／憑空捏造。
+
+除非發現上述真正的違規，否則輸出 VERIFY_PASS。使用繁體中文輸出。
 """
 
 CORRECTION_SYSTEM_PROMPT = """
@@ -53,16 +56,21 @@ CORRECTION_SYSTEM_PROMPT = """
 # ── English versions for EN_DRAFT_PIPELINE mode ───────────────────
 VERIFY_SYSTEM_PROMPT_EN = """
 You are an academic reasoning verifier.
-Examine the "[Cross-Literature Inference]" and "[Knowledge Extension and Speculation]" sections,
-using the "Known Facts List" as the sole evidentiary basis.
+Examine the "[Cross-Literature Inference]" and "[Knowledge Extension and Speculation]" sections.
 
 Note: Citation accuracy has been handled by another system; you do not need to re-verify citations.
-Your focus is:
+
+For the "[Cross-Literature Inference]" section (conclusions derived FROM the papers' facts):
 1. Whether the premises of each inference actually exist in the Known Facts List
 2. Whether the reasoning from premises to conclusions contains logical leaps
-3. Whether the speculations in the "Knowledge Extension" section exceed reasonable inference bounds or contradict the Known Facts List
 
-Output in English.
+For the "[Knowledge Extension and Speculation]" section (deliberate extrapolation BEYOND the papers
+using external academic knowledge — this is by design; it is EXPECTED to use knowledge not in the list):
+3. Do NOT require its premises to exist in the Known Facts List. Only flag it if:
+   (a) the content is NOT clearly labeled as speculation, or (b) it directly CONTRADICTS the
+   Known Facts List, or (c) it is academically unsound or fabricated.
+
+Output VERIFY_PASS unless a genuine violation above is found. Output in English.
 """
 
 CORRECTION_SYSTEM_PROMPT_EN = """

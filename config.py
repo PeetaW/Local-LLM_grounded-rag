@@ -107,8 +107,11 @@ PLAN_EXECUTE_ENABLED = False       # 預設關閉，穩定後開啟
 
 # ── NLI 擴展開關 ──────────────────────────────────────
 NLI_CONTRADICTION_ENABLED = True   # 矛盾偵測（預設開啟）
-NLI_DECOMPOSE_ENABLED = True       # 子命題拆解驗證
-NLI_JOINT_VERIFY_ENABLED = True    # 多來源聯合驗證
+NLI_DECOMPOSE_ENABLED = False      # 子命題拆解驗證（A/B：關掉——貴又不穩，整 run 只救 8 句）
+NLI_JOINT_VERIFY_ENABLED = True    # 多來源聯合驗證（NLI-only，便宜，保留）
+# grounding 是否在 direct_score<0.8 時用 gemma4 重寫沒依據的句子。
+# 關掉＝grounding 回歸「純報告」：沒依據的句子據實標記給使用者，不二次 LLM 加工。
+GROUNDING_FALLBACK_ENABLED = False
 # English-first pipeline：全流程用英文（Stage 4 輸出英文 → Stage 5 英文驗證 → NLI EN-vs-EN → 最後翻譯成繁體中文）
 # 優點：NLI 從跨語言變單語言（大幅提升 entailment 準確度），Verifier 推論邏輯更穩定
 # 注意：開啟後 NLI_TRANSLATE_TO_EN 會自動跳過（draft 已是英文，不需要再翻）
