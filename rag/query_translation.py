@@ -41,7 +41,9 @@ def translate_to_traditional_chinese(text: str, on_status=None) -> str:
                 "system": "You are a professional academic translator specializing in Traditional Chinese (繁體中文).",
                 "prompt": prompt,
                 "stream": False,
-                "options": {"temperature": 0.1, "num_predict": -1, "num_ctx": 65536},
+                # ponytail: 翻譯輸入只有單篇答案，不需 64k KV cache。降到 16384
+                # 省 VRAM、加速 token，又留足邊際避免長答案(輸入+中文輸出)被截斷掉字。
+                "options": {"temperature": 0.1, "num_predict": -1, "num_ctx": 16384},
             },
             timeout=cfg.LLM_TIMEOUT,
         )

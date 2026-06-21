@@ -35,7 +35,11 @@ def is_empty_result(text: str) -> bool:
     text_lower = text.lower().strip()
     if len(text_lower) < 30:
         return True
-    return any(pat in text_lower for pat in _NO_RESULT_PATTERNS)
+    # 只讓 no-result 片語對「短」答案生效：長答案有實質內容時，
+    # 不該只因內含一句「這篇沒提到 X，但討論了 Y」（跨論文題常見）就被誤判為空。
+    if len(text_lower) < 200 and any(pat in text_lower for pat in _NO_RESULT_PATTERNS):
+        return True
+    return False
 
 
 def extract_paper_name(ans: str, fallback: str) -> str:

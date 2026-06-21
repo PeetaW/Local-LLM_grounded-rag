@@ -738,6 +738,15 @@ def decompose_and_verify(conclusion: str, facts: list[dict]) -> dict:
             f"只輸出 JSON 陣列，格式：[\"子命題1\", \"子命題2\", ...]\n\n"
             f"結論：{conclusion}"
         )
+    # ponytail: 叫 gemma4 前先把 NLI 累積的 torch reserved 快取(~2-3GB)還給驅動，
+    # 否則 gemma4:31b(~18-20GB) + 這塊快取會頂破 24GB → gemma4 部分 offload 到 RAM 變慢。
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
     try:
         _t = time.perf_counter()
         resp = _req.post(
