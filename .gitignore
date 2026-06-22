@@ -32,6 +32,9 @@ projects/*/vl_test_output/*
 # ── Paper metadata (derived from paper content) ───────
 projects/*/papers_metadata.json
 
+# ── Eval result data (contains verbatim/derived paper content) ─
+eval/results/*.json
+
 # ── ChromaDB memory (personal session data) ───────────
 memory_db/
 !memory_db/.gitkeep

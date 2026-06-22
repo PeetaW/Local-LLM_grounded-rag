@@ -63,7 +63,7 @@ http_client = httpx.Client(timeout=httpx.Timeout(14400.0, connect=30.0))
 Settings.llm = OpenAILike(
     model="deepseek-r1:32b",
     api_base="http://localhost:8080/api/v1",        # ← Open WebUI，保留不動
-    api_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImFmYTlkZDc2LTNkYTctNGZiNy1iODFjLWYwNmM2MDgzMDc2YyIsImV4cCI6MTc3NDYyMDEyOSwianRpIjoiZmYzNzU3ZGYtYzQ1ZS00YWExLTg3MGUtODdiNDAxMTgzYjE0In0.NTQPKncbuvtN4--fBLVMuNmxRlOYtfeSHGU7GdGg22",  # ← 保留不動
+    api_key=os.environ.get("OPENWEBUI_JWT", ""),  # ← 保留不動
     is_chat_model=True,
     timeout=14400.0,
     http_client=http_client,
