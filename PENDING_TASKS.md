@@ -51,8 +51,16 @@ baseline 後 retrieval 是最大階段，待拆（檢索本身 vs Ollama model s
 **誠實限制**：grounding 量忠實度非正確性 → loop 可能收斂到「有依據但答錯」。所以靠 benchmark（含正確性 judge）驗證「grounding 驅動的 loop 真能提升正確性」才出貨；運行時則靠出處透明 + 誠實棄答，承諾「誠實標信心」而非「保證正確」。
 **另一限制**：loop 只修「問錯」，修不了「內容沒抽到」（表格/圖片/抽取壞 → 要靠 v4/表格抽取，非 loop）。
 
+### ⚠️ Phase 0 結果（2026-06-23，baseline_v3）→ loop 重定位
+7 個低分題**選擇命中全 1.0、檢索覆蓋幾乎全 1.0** → **沒有一題是「問錯/檢索失敗」**。
+「問錯」≈0、「內容沒抽到」≈0（figure/table 題覆蓋也 1.0）、grounding 低估(Q05/Q12)、**其餘全是生成錯誤**（從正確素材捏造/誤讀/漏講）。
+**結論：原本想的「重檢索 loop」對此題組≈零價值。** 改定位成：
+1. **生成自我修正 loop**——針對 grounding 標記的句子、對著該 chunk 精準重寫（＝關掉的 fallback 的精準版）。
+2. **前置：先修 grounding 假性低估**。Q05 案例：答案全對(judge 1.0)但 grounding 0.26，因 **atomic-completeness prompt 過度切碎**（列舉句拆成逐項碎片 ×8、表格逐格拆原子句 → NLI 接不回）。修法：refine atomic prompt 讓列舉/清單保持一句，atomic 只切真正不同的事實。
+但書：12 題是精選語料+清楚問法；真實使用者的模糊/跨庫/超綱問題會讓重檢索 loop 更有用 → 非放棄，是當前優先序低於生成槓桿。
+
 實驗分階段：
-- **Phase 0**：把目前失敗題（grounding 低：Q07 0.48/Q05 0.53/Q10 0.62/Q06 0.72）分類成「問錯(loop 可救)」vs「內容不在(loop 白繞)」。純資料分析，不寫 loop。
+- **Phase 0**：✅ 完成（見上）。結論：loop 從「重檢索」改「生成自我修正」，且 grounding 可靠度為前置。
 - **Phase 1**：最小 loop 藏 flag 後（`AGENTIC_LOOP_ENABLED`、`MAX_RETRIEVAL_RETRIES=2`，預設關，比照 `PLAN_EXECUTE_ENABLED`）。grounding<0.5 且有額度 → 1 次 LLM 重構子問題 → 重跑 retrieval+synthesis+grounding → 取最高分那次。**硬封頂 2 次**（血淚教訓：無界 loop 會爆）。
 - **Phase 2**：A/B loop ON vs OFF，看靶題 grounding/正確性升幅 + 延遲代價（每 retry +300–400s）。grounding 已高的題要 early-exit。
 - **Phase 3**（Phase 1 有效才做）：門檻觸發升級成可答性判斷（缺什麼→朝缺口重構）；`task_state` 記試過的查詢避免重複。
@@ -60,11 +68,14 @@ baseline 後 retrieval 是最大階段，待拆（檢索本身 vs Ollama model s
 
 ---
 
-## 建議推進序
-1. 完整 12 題新基準線（baseline_v3）當對照 ← 進行中
-2. 可答性 gate（A）— 安全/誠實，最該優先；也是 agentic loop 的反思訊號
-3. agentic loop Phase 0（D，失敗題分類）— 純分析，先確認 loop 對本題組有多少上限空間
-4. agentic loop Phase 1–2（D）— flag 後最小 loop + A/B
+## 建議推進序（2026-06-23 更新：Phase 0 已完成，重排）
+1. ✅ baseline_v3 基準線、✅ agentic loop Phase 0（結論：改生成自我修正、grounding 為前置）
+2. **修 grounding 假性低估**（refine atomic prompt：列舉保持一句）— loop 與正確量測的共同前置；Q05 是入口
+3. 可答性 gate（A）— 安全/誠實；也是 loop 的反思訊號
+4. agentic loop 重定位後的 Phase 1–2（D）— **生成自我修正**（精準重寫被標記句），非重檢索
+5. pipeline_v4 分階段索引（1）→ 順帶解鎖匯入健檢（B）
+6. memory_redesign（2）
+7. retrieval 拆解（C）、api-refactor（3）視情況
 5. pipeline_v4 分階段索引（1）→ 順帶解鎖匯入健檢（B）
 6. memory_redesign（2）
 7. retrieval 拆解（C）、api-refactor（3）視情況
