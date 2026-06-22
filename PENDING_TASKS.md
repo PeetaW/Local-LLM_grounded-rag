@@ -44,11 +44,27 @@ import 時還連帶觸發 main.py 全域初始化。目標：拆成薄 transport
 ### C. 延遲：retrieval 327s 拆解
 baseline 後 retrieval 是最大階段，待拆（檢索本身 vs Ollama model swap）。
 
+### D. Agentic RAG loop — 自我迭代檢索（Tier 2 核心）
+**概念**：系統自評「這次答得好不好」，不夠好就換問法/換論文重檢索，直到夠好或撞迭代上限。
+**為何可行**：難的部分（驅動訊號）已有——grounding 分數、`rag_found_anything`、可答性 gate(A) 都是**免標籤、任何論文自動算**的訊號；狀態追蹤有 `plan_executor.py`/`task_state.py` 地基。
+**關鍵區分（產品化命題）**：gold/量尺＝**開發者**校準機器的工具（固定 benchmark 跑一次）；運行時 loop 靠**免標籤自評**（grounding/可答性），使用者 import 新論文**永不碰 gold**。
+**誠實限制**：grounding 量忠實度非正確性 → loop 可能收斂到「有依據但答錯」。所以靠 benchmark（含正確性 judge）驗證「grounding 驅動的 loop 真能提升正確性」才出貨；運行時則靠出處透明 + 誠實棄答，承諾「誠實標信心」而非「保證正確」。
+**另一限制**：loop 只修「問錯」，修不了「內容沒抽到」（表格/圖片/抽取壞 → 要靠 v4/表格抽取，非 loop）。
+
+實驗分階段：
+- **Phase 0**：把目前失敗題（grounding 低：Q07 0.48/Q05 0.53/Q10 0.62/Q06 0.72）分類成「問錯(loop 可救)」vs「內容不在(loop 白繞)」。純資料分析，不寫 loop。
+- **Phase 1**：最小 loop 藏 flag 後（`AGENTIC_LOOP_ENABLED`、`MAX_RETRIEVAL_RETRIES=2`，預設關，比照 `PLAN_EXECUTE_ENABLED`）。grounding<0.5 且有額度 → 1 次 LLM 重構子問題 → 重跑 retrieval+synthesis+grounding → 取最高分那次。**硬封頂 2 次**（血淚教訓：無界 loop 會爆）。
+- **Phase 2**：A/B loop ON vs OFF，看靶題 grounding/正確性升幅 + 延遲代價（每 retry +300–400s）。grounding 已高的題要 early-exit。
+- **Phase 3**（Phase 1 有效才做）：門檻觸發升級成可答性判斷（缺什麼→朝缺口重構）；`task_state` 記試過的查詢避免重複。
+**框架**：Phase 1 用帶上限的 while 迴圈即可，**先別上 LangGraph**；等分支變多再考慮。
+
 ---
 
 ## 建議推進序
 1. 完整 12 題新基準線（baseline_v3）當對照 ← 進行中
-2. 可答性 gate（A）— 安全/誠實，最該優先
-3. pipeline_v4 分階段索引（1）→ 順帶解鎖匯入健檢（B）
-4. memory_redesign（2）
-5. retrieval 拆解（C）、api-refactor（3）視情況
+2. 可答性 gate（A）— 安全/誠實，最該優先；也是 agentic loop 的反思訊號
+3. agentic loop Phase 0（D，失敗題分類）— 純分析，先確認 loop 對本題組有多少上限空間
+4. agentic loop Phase 1–2（D）— flag 後最小 loop + A/B
+5. pipeline_v4 分階段索引（1）→ 順帶解鎖匯入健檢（B）
+6. memory_redesign（2）
+7. retrieval 拆解（C）、api-refactor（3）視情況
