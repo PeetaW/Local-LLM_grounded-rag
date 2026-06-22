@@ -64,7 +64,7 @@
       "gold_papers": [
         "1-s2.0-S0731708511003451-main"
       ],
-      "reference_answer": "By HPLC, the main related substances/impurities of BPA are tyrosine and phenylalanine. The principal degradation pathway is oxidative degradation of BPA to tyrosine (loss of the boronic acid group under oxidative/H2O2 conditions), established via forced-degradation and long-term stability studies, for which the paper proposes the oxidative mechanistic pathway BPA -> tyrosine. BPA itself is relatively stable; impurity/degradant formation is driven mainly by oxidative conditions, which is why characterising these impurities matters for BPA synthesis, purification and storage.",
+      "reference_answer": "The paper reports two classes by HPLC. (1) Synthetic intermediates/impurities, which are boron-containing: BrPD (2-(4-bromophenyl)-1,3-dioxane), FBBA (4-formylbenzeneboronic acid) and BDPA (a Boc-protected dimethyl-dioxaborinane phenyl acrylic acid methyl ester); all three synthetic impurities were detectable down to ~0.1% of the BPA level. (2) Degradation-related impurities: tyrosine and phenylalanine (reported as BPA impurities by previous workers), with the principal degradation pathway being oxidative degradation of BPA to tyrosine (loss of the boronic acid group). These were characterised via forced-degradation and long-term stability studies; BPA itself is relatively stable and impurity/degradant formation is driven mainly by oxidative conditions and solution handling, which matters for BPA synthesis, purification and storage.",
       "gold_spans": [
         "A typical chromatographic trace of BPA, showing low levels of tyrosine and phenylalanine impurities."
       ]

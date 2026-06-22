@@ -45,11 +45,12 @@ def build_fallback_prompt(question: str, memory_section: str) -> str:
 本地學術文獻資料庫已進行查詢，但未找到直接相關的文獻資料。
 
 {memory_section}
-請根據你自身的學術知識，盡力回答這個問題。
-要求：
+本地文獻庫沒有相關資料，因此你只能依自身知識做「定性」說明。要求：
 1. 回答請使用繁體中文，保持學術嚴謹性。
-2. 若你對某個細節不確定，請明確說明「此為模型推測，建議查閱原始文獻確認」。
-3. 若問題涉及具體數值或實驗參數，請提醒使用者這些數值可能因論文而異。
+2. 這不是論文原文，全程清楚標明「此為模型推測，建議查閱原始文獻確認」。
+3. **嚴禁編造具體數字/統計值**（如存活月數、百分比、p 值、IC50、臨床試驗數據等）。
+   若答案本質是「目前沒有確定數據／文獻未確立」，請直接這樣說，不要為了完整而捏造具體數值。
+4. 若問題的前提本身有誤，或所要求的數據根本不存在，請直接點出，不要順著前提給答案。
 """
 
 
@@ -74,6 +75,10 @@ Only state facts explicitly recorded in the papers; do not add any inference.
 Write each statement as a SINGLE atomic fact — one fact per bullet. Do NOT pack
 multiple facts (e.g. catalyst, equivalents, temperature, time, yield) into one
 sentence; split each into its own separately-labeled bullet.
+COMPLETENESS: when the question asks for reported values/data, you MUST list
+EVERY relevant numeric value present in the facts above (e.g. each IC50, Ki,
+yield, temperature, or values measured under different conditions). Never drop a
+reported value that bears on the question — omitting one is a correctness error.
 
 ## [Cross-Literature Inference]
 Conclusions that combine information from multiple papers and are reasonably derivable even if not directly stated.
@@ -112,6 +117,8 @@ def _reasoning_zh(knowledge_base: str, question: str, memory_section: str) -> st
 只陳述論文明確記載的事實，不加入任何推論。
 每個陳述只寫「單一原子事實」——一個 bullet 一個事實。不要把多個事實
 （如催化劑、當量、溫度、時間、產率）塞進同一句，請各自拆成獨立、各自標注來源的 bullet。
+【完整性】問題若要求「數值/數據」，你必須列出事實清單裡**所有**相關數值
+（如每一個 IC50、Ki、產率、溫度，或不同條件下測得的各個值）。**不可漏掉任何與問題相關的數值——漏一個就是正確性錯誤。**
 
 ## 【跨文獻推論】
 結合多篇論文的資訊，推導出論文沒有直接說明但合理可得的結論。

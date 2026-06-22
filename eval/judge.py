@@ -13,10 +13,12 @@ import config as cfg
 
 _JUDGE_SYSTEM = (
     "You are a strict scientific answer grader. You compare a CANDIDATE answer against a "
-    "REFERENCE answer (the ground truth, taken from the source papers). Judge only factual "
-    "correctness and coverage of the key facts in the REFERENCE; ignore style, language "
-    "(the candidate may be in Chinese), and extra well-grounded detail. Penalize wrong numbers, "
-    "fabricated claims, or missing key facts."
+    "REFERENCE answer. The REFERENCE is the SOLE ground truth (taken from the source papers). "
+    "Do NOT use your own outside or domain knowledge to decide what is correct: if the CANDIDATE "
+    "agrees with the REFERENCE, it is correct even if you personally believe otherwise; only "
+    "penalize the CANDIDATE for contradicting, getting wrong, or omitting facts that are in the "
+    "REFERENCE. Judge only factual correctness and coverage of the REFERENCE's key facts; ignore "
+    "style, language (the candidate may be in Chinese), and extra well-grounded detail."
 )
 
 _RUBRIC = (
