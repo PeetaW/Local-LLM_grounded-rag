@@ -11,25 +11,36 @@ import requests
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))  # 讓 standalone 也能 import config
 import config as cfg
 
+# 強化版（2026-06-23 A/B 採用）：correctness judge 只管「對 reference 的涵蓋+不矛盾」。
+# 額外細節/標注的推論-推測層 OUT OF SCOPE（不獎不罰）——捏造偵測交給 grounding，非 judge 職責。
+# 移除「正確答案因額外細節/推測層被罰」的假象（Q04/06/08/11），同時 Q07/10/12 真漏講/假前提仍被扣。
 _JUDGE_SYSTEM = (
-    "You are a strict scientific answer grader. You compare a CANDIDATE answer against a "
-    "REFERENCE answer. The REFERENCE is the SOLE ground truth (taken from the source papers). "
-    "Do NOT use your own outside or domain knowledge to decide what is correct: if the CANDIDATE "
-    "agrees with the REFERENCE, it is correct even if you personally believe otherwise; only "
-    "penalize the CANDIDATE for contradicting, getting wrong, or omitting facts that are in the "
-    "REFERENCE. Judge only factual correctness and coverage of the REFERENCE's key facts; ignore "
-    "style, language (the candidate may be in Chinese), and extra well-grounded detail."
+    "You are a scientific answer grader. You compare a CANDIDATE answer against a REFERENCE answer. "
+    "The REFERENCE is the SOLE ground truth (from the source papers). Do NOT use your own outside "
+    "knowledge to decide correctness: if the CANDIDATE agrees with the REFERENCE it is correct even "
+    "if you believe otherwise.\n"
+    "Score ONLY whether the candidate (a) covers the REFERENCE's key facts and (b) does not "
+    "CONTRADICT them. Penalize ONLY: contradicting a reference fact, getting a reference fact wrong, "
+    "or OMITTING a key reference fact.\n"
+    "The candidate will usually contain MORE detail than the reference, and may include sections "
+    "explicitly labeled as cross-paper inference or speculation (e.g. '跨文獻推論', 'insufficient "
+    "literature basis', 'model speculation'). Extra detail beyond the reference, and such clearly-"
+    "labeled inference/speculation sections, are OUT OF SCOPE for this score — do NOT reward and do "
+    "NOT penalize them. Whether extra detail is faithful to the papers is measured separately and is "
+    "not your job.\n"
+    "Ignore style and language (the candidate may be in Chinese)."
 )
 
 _RUBRIC = (
-    "Score 1-5:\n"
-    "5 = all key facts correct and present, no fabrication\n"
-    "4 = mostly correct, a minor fact missing or imprecise\n"
-    "3 = partially correct, some key facts missing or one notable error\n"
-    "2 = largely incorrect or missing most key facts\n"
-    "1 = wrong, irrelevant, or fabricated\n"
+    "Score 1-5 (coverage of and agreement with the REFERENCE's key facts ONLY):\n"
+    "5 = all the reference's key facts present and correct, none contradicted\n"
+    "4 = key facts mostly covered, one minor reference fact missing or slightly imprecise\n"
+    "3 = some key reference facts missing, or one notable contradiction/error\n"
+    "2 = most key reference facts missing or wrong\n"
+    "1 = fails to address the reference's key facts, or contradicts them throughout\n"
     "For out-of-scope / false-premise questions, the REFERENCE says the system should refuse or "
-    "flag the false premise; score 5 if the candidate does so, 1 if it fabricates an answer."
+    "flag the false premise; score 5 if the candidate does so, 1 if it asserts a fabricated answer "
+    "to the false premise."
 )
 
 

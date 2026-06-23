@@ -104,7 +104,16 @@ citation 修正全題組站得住（無 bullet 掛 4–5 篇）＝結構性勝�
 **但讀答案＝生成端真的修好了**：q08fix 答案已按成本/可擴展性/同位素富集分段 + 跨文獻推論真的在對比路線（Turbo Grignard 87% vs Pd <48%、混合 100%ee vs 氫化 76–88%）。v4 缺的對比結構補上了。
 **殘留 0.5＝judge/reference 假象**（第三次確認此鐵則）：judge system prompt 明寫「忽略額外有依據細節」(judge.py:21) 卻仍扣，理由「大量 reference 沒有的細節＋一段推測」。722 字 reference 太精簡、答案太豐富 → judge 緊張預設扣。**不補 Q08 reference**（它沒錯、只是高層次，補＝拿答案改考卷＝作弊）。
 **決定**：保留 prompt 修正（結構真變好、零退步）。誠實修法＝**judge-prompt 強化**（別扣額外正確細節/明確標注的推測層），但那改全 12 題量尺 → **獨立 A/B**（下一步）。
-**待辦＝judge-prompt 強化**：讓 judge 只看「是否涵蓋且不矛盾 reference 關鍵事實」，明確不扣 ①額外正確細節 ②清楚標注的推測/推論層。需自己的 A/B 驗證不會虛灌全分。
+#### judge-prompt 強化 A/B（2026-06-23）— ✅ 已採用
+做法：re-judge 既有 baseline_v4 答案（同候選、只換 judge prompt → 完美隔離，~24 次呼叫、不跑 pipeline）。
+強化版 judge：correctness 只管「對 reference 涵蓋＋不矛盾」；**額外細節 + 明確標注的推論/推測層 OUT OF SCOPE（不獎不罰）**——捏造偵測交給 grounding，非 judge 職責。拒答/假前提規則原封保留。
+結果 avg **0.667→0.812**，全是定點上升、無全面灌水:
+- 假象修正:Q04/Q06/Q08 →1.0（正確答案不再因額外細節/推測層被罰，Q08 已人工讀過確實好）、Q09 →0.75（部分涵蓋）、Q11 →1.0（正確拒答舊 judge 低估）。
+- **鑑別力保留（關鍵證據）**:Q07 0.5（真漏「自發脫水成 boroxine」）、Q10 0.75、Q12 0.5（沒點破「BPA 口服」假前提）→ 真漏講/假前提仍被扣。
+- 判讀:這是**更準的尺非更鬆的尺**（假象移除後的真值）。
+**已套用 judge.py**（_JUDGE_SYSTEM/_RUBRIC 換強化版）。
+**已知邊界**:捏造偵測現完全靠 grounding——若某句捏造既不在 reference、grounding 又沒抓到，correctness judge 不再兜底（可接受:reference 無法裁決超綱內容）。
+→ **未來重跑 baseline 用新 judge 當基準**；舊分數（≤baseline_v4）是舊 judge，不可直接跨版本比 correctness。
 
 ---
 
