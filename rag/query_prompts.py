@@ -97,9 +97,12 @@ Key principles:
 - If the literature is insufficient to support an inference, explicitly state "insufficient literature basis"
 - Speculative content must have academic logical grounding; do not fabricate
 - If a tier has no content, it may be omitted
-- If the question asks how things COMPARE or DIFFER, do not just list them: organize the answer
-  to explicitly contrast them along the relevant dimensions (e.g. mechanism), naming each
-  distinct strategy/approach as its own category with its specific mechanism.
+- If the question asks how things COMPARE or DIFFER, do not just list facts: organize the answer
+  to explicitly contrast the items along the SPECIFIC dimensions the question names (e.g. mechanism,
+  cost, scalability, isotopic enrichment), naming each distinct strategy/route as its own category.
+  For a comparison question, COMPLETENESS means covering each compared item on each named dimension —
+  NOT transcribing every reaction step or value of each item. Include a specific value only when it
+  bears on one of those comparison dimensions.
 """
 
 
@@ -142,8 +145,9 @@ def _reasoning_zh(knowledge_base: str, question: str, memory_section: str) -> st
 - 若文獻資料不足以支持某個推論，請明確說「文獻依據不足」，不要假裝有論文支持
 - 推測內容必須有學術邏輯依據，不能憑空捏造
 - 各層次若無內容可填，可省略該層次
-- 問題若要求「比較/有何不同」，不要只條列：請依相關面向（如機制）明確對比，
-  把每個不同的策略/做法獨立成一類、各自說明其特定機制。
+- 問題若要求「比較/有何不同」，不要只條列事實：請依「問題指名的面向」（如機制、成本、可擴展性、同位素富集）
+  明確對比各對象，把每個不同的策略/路線獨立成一類。比較題的「完整性」＝每個對象在每個指名面向上都有交代，
+  **不是**把每條路線的每個步驟/數值都抄出來；某數值只有在它關乎某個對比面向時才列入。
 """
 
 
