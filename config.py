@@ -116,6 +116,10 @@ NLI_JOINT_VERIFY_ENABLED = True    # 多來源聯合驗證（NLI-only，便宜�
 # grounding 是否在 direct_score<0.8 時用 gemma4 重寫沒依據的句子。
 # 關掉＝grounding 回歸「純報告」：沒依據的句子據實標記給使用者，不二次 LLM 加工。
 GROUNDING_FALLBACK_ENABLED = False
+# 生成自我修正 loop（便宜版 fallback）：NLI 標記的句子，一次 batched gemma4 呼叫逐句裁定
+# 「SUPPORTED(NLI 假陰性放過)/CORRECT(對著 chunk 改寫)/UNVERIFIED(標待確認)」。單趟、不 retry。
+# 兼任「修真錯」與「濾 NLI 噪音」的第二意見。預設關，A/B 用。
+GENERATION_SELFCORRECT_ENABLED = False  # A/B 負結果：失敗多為多講/漏講/無中生有，非「矛盾」→ fix=0，correctness 零提升。保留 code 供 UNVERIFIED→刪除 的後續實驗
 # English-first pipeline：全流程用英文（Stage 4 輸出英文 → Stage 5 英文驗證 → NLI EN-vs-EN → 最後翻譯成繁體中文）
 # 優點：NLI 從跨語言變單語言（大幅提升 entailment 準確度），Verifier 推論邏輯更穩定
 # 注意：開啟後 NLI_TRANSLATE_TO_EN 會自動跳過（draft 已是英文，不需要再翻）

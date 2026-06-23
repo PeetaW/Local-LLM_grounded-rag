@@ -690,6 +690,85 @@ def has_multi_paper_reference(text: str) -> bool:
 
 
 # ══════════════════════════════════════════════════════════════════
+#  生成自我修正：對 NLI 標記句一次 batched gemma4 裁定（GENERATION_SELFCORRECT_ENABLED）
+# ══════════════════════════════════════════════════════════════════
+
+def selfcorrect_flagged(flagged: list[dict], chunks: list[dict], max_items: int = 14) -> list[dict]:
+    """
+    對 NLI 標記為「不支持」的句子做「一次」batched gemma4 裁定。
+    回傳與 flagged 等長對齊的 [{"verdict": "SUPPORTED|CORRECT|UNVERIFIED", "fixed": str}]。
+    - SUPPORTED：source 其實支持（NLI 假陰性）→ 保留不動。
+    - CORRECT  ：source 矛盾/部分支持 → fixed 給對著 source 改寫後的句子。
+    - UNVERIFIED：source 根本沒這資訊。
+    呼叫/解析失敗 → 全部回 SUPPORTED（保守：不動答案）。單趟、不 retry。
+    """
+    import requests as _req, json as _json, re as _re
+    if not flagged:
+        return []
+    flagged = flagged[:max_items]
+
+    cmap = {}
+    for c in chunks:
+        cmap[c.get("id", c.get("source", ""))] = c.get("text", "")
+
+    # 去重 source（多句常共用同一 chunk），各給字母代號
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    srcs, src_blocks = {}, []
+    for r in flagged:
+        cid = r.get("best_chunk")
+        if cid and cid not in srcs and cid in cmap:
+            srcs[cid] = letters[len(srcs)] if len(srcs) < len(letters) else "?"
+            src_blocks.append(f"[{srcs[cid]}] {cmap[cid][:2400]}")
+
+    items = [f"[{i}] (source {srcs.get(r.get('best_chunk'), '?')}) {r['sentence']}"
+             for i, r in enumerate(flagged, 1)]
+
+    prompt = (
+        "An automated NLI check flagged the following answer CLAIMS as possibly NOT supported "
+        "by their SOURCE excerpt. The check has MANY FALSE POSITIVES (it often flags claims that "
+        "ARE supported but phrased differently, or that state only part of a list). "
+        "Your job is mainly to RESCUE those false positives, not to rewrite.\n"
+        "STRONGLY PREFER 'SUPPORTED'. For each claim:\n"
+        "- SUPPORTED (default): the source supports the claim, even if worded differently, even if "
+        "the claim states only one item of a list or omits sub-details. Keep unchanged.\n"
+        "- CORRECT: ONLY if the source DIRECTLY CONTRADICTS the claim (e.g. a different number, the "
+        "opposite fact). Then rewrite MINIMALLY — fix only the contradicted part, keep everything else.\n"
+        "- UNVERIFIED: ONLY if the source clearly contains nothing about this claim.\n"
+        "When in doubt, choose SUPPORTED.\n\n"
+        'Output ONLY a JSON array, one object per claim IN ORDER:\n'
+        '[{"i":1,"verdict":"SUPPORTED","fixed":""}, ...]\n'
+        "(fixed = minimally rewritten claim ONLY when verdict is CORRECT, else empty string)\n\n"
+        "SOURCES:\n" + "\n\n".join(src_blocks) + "\n\nCLAIMS:\n" + "\n".join(items)
+    )
+
+    default = [{"verdict": "SUPPORTED", "fixed": ""} for _ in flagged]
+    try:
+        _t = time.perf_counter()
+        resp = _req.post(
+            f"{cfg.OLLAMA_BASE_URL}/api/generate",
+            json={"model": cfg.SYNTHESIS_MODEL, "prompt": prompt, "stream": False,
+                  "options": {"temperature": 0.1, "num_predict": 2048, "num_ctx": 16384}},
+            timeout=600,
+        )
+        _add_llm_time(time.perf_counter() - _t)
+        resp.raise_for_status()
+        raw = _re.sub(r'```json|```', '', resp.json().get("response", "[]")).strip()
+        m = _re.search(r'\[.*\]', raw, _re.S)
+        parsed = _json.loads(m.group(0) if m else raw)
+    except Exception:
+        return default
+
+    out = []
+    for i in range(len(flagged)):
+        v = parsed[i] if i < len(parsed) and isinstance(parsed[i], dict) else {}
+        verdict = str(v.get("verdict", "SUPPORTED")).upper()
+        if verdict not in ("SUPPORTED", "CORRECT", "UNVERIFIED"):
+            verdict = "SUPPORTED"
+        out.append({"verdict": verdict, "fixed": (v.get("fixed") or "").strip()})
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════
 #  2-B：子命題拆解驗證（NLI_DECOMPOSE_ENABLED 控制）
 # ══════════════════════════════════════════════════════════════════
 

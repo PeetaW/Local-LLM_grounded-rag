@@ -202,6 +202,7 @@ def run_grounding_check(
         reset_grounding_timers,
         get_grounding_timers,
         release_nli_gpu,
+        selfcorrect_flagged,
         _add_llm_time,
     )
 
@@ -265,6 +266,37 @@ def run_grounding_check(
             _status("  ✅ [Grounding Fallback] gemma4 修正完成，重新執行 grounding 審查...")
             sentences = split_into_sentences(full_text)
             citation_results = check_citation_grounding(sentences, chunks)
+
+    # ── 生成自我修正 loop（便宜版）：一次 batched gemma4 裁定 NLI 標記的直引句 ──
+    if getattr(cfg, "GENERATION_SELFCORRECT_ENABLED", False) and unsupported:
+        _status(f"  🔧 [Self-Correct] {len(unsupported)} 句被 NLI 標記，送 gemma4 一次裁定...")
+        import time as _t_mod
+        _t0 = _t_mod.perf_counter()
+        verdicts = selfcorrect_flagged(unsupported, chunks)
+        _add_llm_time(_t_mod.perf_counter() - _t0)
+        n_keep = n_fix = n_unv = 0
+        for r, v in zip(unsupported, verdicts):
+            sent = r["sentence"]
+            if v["verdict"] == "CORRECT" and v["fixed"]:
+                full_text = full_text.replace(sent, v["fixed"], 1); n_fix += 1
+            elif v["verdict"] == "UNVERIFIED":
+                full_text = full_text.replace(sent, sent.rstrip() + " [待確認]", 1); n_unv += 1
+            else:
+                n_keep += 1  # SUPPORTED → NLI 假陰性，保留不動
+        # 可解析標記（_status 走 callback 不進 log，這行用 print 進 log 供 A/B 統計）
+        print(f"[selfcorrect] flagged={len(unsupported)} keep={n_keep} fix={n_fix} unverify={n_unv}", flush=True)
+        _status(f"  ✅ [Self-Correct] 保留(NLI假陰性) {n_keep} / 修正 {n_fix} / 待確認 {n_unv}")
+        if n_fix or n_unv:  # 答案有變才需重算報告
+            sentences = split_into_sentences(full_text)
+            citation_results = check_citation_grounding(sentences, chunks)
+            partitioned = _partition_results_by_section(citation_results, full_text)
+            section_scores = {
+                key: {"score": compute_grounding_score(results),
+                      "n_supported": sum(1 for r in results if r["supported"]),
+                      "n_total": len(results)}
+                for key, results in partitioned.items()
+            }
+            grounding_score = compute_grounding_score(citation_results)
 
     nli_report = format_grounding_report(citation_results, section_scores=section_scores)
 
