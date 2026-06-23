@@ -268,25 +268,30 @@ def run_grounding_check(
             citation_results = check_citation_grounding(sentences, chunks)
 
     # ── 生成自我修正 loop（便宜版）：一次 batched gemma4 裁定 NLI 標記的直引句 ──
-    if getattr(cfg, "GENERATION_SELFCORRECT_ENABLED", False) and unsupported:
-        _status(f"  🔧 [Self-Correct] {len(unsupported)} 句被 NLI 標記，送 gemma4 一次裁定...")
-        import time as _t_mod
+    # 只送「信心極低」的句子（真捏造高發區），borderline 多是 NLI 假陰性 → 不送、省成本。
+    _sc_max = getattr(cfg, "SELFCORRECT_ENTAIL_MAX", 0.2)
+    confident_unsup = [r for r in unsupported if r.get("confidence", 1.0) < _sc_max]
+    if getattr(cfg, "GENERATION_SELFCORRECT_ENABLED", False) and confident_unsup:
+        _status(f"  🔧 [Self-Correct] {len(confident_unsup)} 句低信心(<{_sc_max})，送 gemma4 一次裁定...")
+        import re as _re_mod, time as _t_mod
         _t0 = _t_mod.perf_counter()
-        verdicts = selfcorrect_flagged(unsupported, chunks)
+        verdicts = selfcorrect_flagged(confident_unsup, chunks)
         _add_llm_time(_t_mod.perf_counter() - _t0)
-        n_keep = n_fix = n_unv = 0
-        for r, v in zip(unsupported, verdicts):
+        n_keep = n_fix = n_del = 0
+        for r, v in zip(confident_unsup, verdicts):
             sent = r["sentence"]
             if v["verdict"] == "CORRECT" and v["fixed"]:
                 full_text = full_text.replace(sent, v["fixed"], 1); n_fix += 1
             elif v["verdict"] == "UNVERIFIED":
-                full_text = full_text.replace(sent, sent.rstrip() + " [待確認]", 1); n_unv += 1
+                full_text = full_text.replace(sent, "", 1); n_del += 1   # 無中生有 → 刪除
             else:
                 n_keep += 1  # SUPPORTED → NLI 假陰性，保留不動
-        # 可解析標記（_status 走 callback 不進 log，這行用 print 進 log 供 A/B 統計）
-        print(f"[selfcorrect] flagged={len(unsupported)} keep={n_keep} fix={n_fix} unverify={n_unv}", flush=True)
-        _status(f"  ✅ [Self-Correct] 保留(NLI假陰性) {n_keep} / 修正 {n_fix} / 待確認 {n_unv}")
-        if n_fix or n_unv:  # 答案有變才需重算報告
+        if n_del:  # 清掉刪除後殘留的空 bullet / 空行
+            full_text = _re_mod.sub(r'(?m)^\s*[\*\-]\s*$\n?', '', full_text)
+            full_text = _re_mod.sub(r'\n{3,}', '\n\n', full_text)
+        print(f"[selfcorrect] flagged={len(confident_unsup)} keep={n_keep} fix={n_fix} delete={n_del}", flush=True)
+        _status(f"  ✅ [Self-Correct] 保留(假陰性) {n_keep} / 修正 {n_fix} / 刪除幻覺 {n_del}")
+        if n_fix or n_del:  # 答案有變才需重算報告
             sentences = split_into_sentences(full_text)
             citation_results = check_citation_grounding(sentences, chunks)
             partitioned = _partition_results_by_section(citation_results, full_text)

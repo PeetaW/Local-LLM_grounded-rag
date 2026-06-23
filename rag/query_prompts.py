@@ -70,7 +70,9 @@ Please write a comprehensive answer in English. The answer must be organized int
 
 ## [Direct Paper Evidence]
 Content drawn directly from the papers above.
-Each statement must be labeled with its source as [Paper Name].
+Each statement must be labeled with ONLY the specific paper(s) listed in that fact's
+own source (來源/source field). NEVER attach a paper to a claim it did not state — if a
+fact has one source, cite exactly that one, not every selected paper.
 Only state facts explicitly recorded in the papers; do not add any inference.
 Write each statement as a SINGLE atomic fact — one fact per bullet. Do NOT pack
 multiple facts (e.g. catalyst, equivalents, temperature, time, yield) into one
@@ -95,6 +97,9 @@ Key principles:
 - If the literature is insufficient to support an inference, explicitly state "insufficient literature basis"
 - Speculative content must have academic logical grounding; do not fabricate
 - If a tier has no content, it may be omitted
+- If the question asks how things COMPARE or DIFFER, do not just list them: organize the answer
+  to explicitly contrast them along the relevant dimensions (e.g. mechanism), naming each
+  distinct strategy/approach as its own category with its specific mechanism.
 """
 
 
@@ -113,7 +118,8 @@ def _reasoning_zh(knowledge_base: str, question: str, memory_section: str) -> st
 
 ## 【論文直接依據】
 直接來自上述論文原文的內容。
-每個陳述必須以【論文名稱】標注來源。
+每個陳述只能標注「該事實自己的來源」（事實清單裡那個事實的來源欄）。
+**絕不可把沒講過這個論點的論文掛上去**——某事實只有一個來源，就只標那一個，不要把所有選中的論文都掛上。
 只陳述論文明確記載的事實，不加入任何推論。
 每個陳述只寫「單一原子事實」——一個 bullet 一個事實。不要把多個事實
 （如催化劑、當量、溫度、時間、產率）塞進同一句，請各自拆成獨立、各自標注來源的 bullet。
@@ -136,6 +142,8 @@ def _reasoning_zh(knowledge_base: str, question: str, memory_section: str) -> st
 - 若文獻資料不足以支持某個推論，請明確說「文獻依據不足」，不要假裝有論文支持
 - 推測內容必須有學術邏輯依據，不能憑空捏造
 - 各層次若無內容可填，可省略該層次
+- 問題若要求「比較/有何不同」，不要只條列：請依相關面向（如機制）明確對比，
+  把每個不同的策略/做法獨立成一類、各自說明其特定機制。
 """
 
 

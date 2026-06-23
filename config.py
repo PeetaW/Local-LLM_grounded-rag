@@ -120,6 +120,9 @@ GROUNDING_FALLBACK_ENABLED = False
 # 「SUPPORTED(NLI 假陰性放過)/CORRECT(對著 chunk 改寫)/UNVERIFIED(標待確認)」。單趟、不 retry。
 # 兼任「修真錯」與「濾 NLI 噪音」的第二意見。預設關，A/B 用。
 GENERATION_SELFCORRECT_ENABLED = False  # A/B 負結果：失敗多為多講/漏講/無中生有，非「矛盾」→ fix=0，correctness 零提升。保留 code 供 UNVERIFIED→刪除 的後續實驗
+# 只把「信心極低（entailment < 此值）」的標記句送 corrector：低信心才是真捏造高發區，
+# borderline(0.2~0.5) 多是 NLI 假陰性 → 不送、省成本。UNVERIFIED 裁定 → 直接刪除幻覺句。
+SELFCORRECT_ENTAIL_MAX = 0.2
 # English-first pipeline：全流程用英文（Stage 4 輸出英文 → Stage 5 英文驗證 → NLI EN-vs-EN → 最後翻譯成繁體中文）
 # 優點：NLI 從跨語言變單語言（大幅提升 entailment 準確度），Verifier 推論邏輯更穩定
 # 注意：開啟後 NLI_TRANSLATE_TO_EN 會自動跳過（draft 已是英文，不需要再翻）

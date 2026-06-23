@@ -86,6 +86,13 @@ Phase 0/1 證實：失敗都在生成端，分三種形狀，各需不同機制�
 **meta 結論**：此語料天花板＝生成保真度；post-hoc 修正槓桿有限。最高信心起手＝**無中生有→刪除**（小改、可立刻測）。
 **注意**：刪除依賴 corrector UNVERIFIED（高精度、偏保守），**不可**用 NLI 原始標記直接刪（90% 假陰性會刪掉正確內容）。
 
+#### 第一輪進度（2026-06-23，eval_citfix）
+- ✅ **citation 精確**（query_prompts 直引段：只標該事實自己的來源）→ 明確大勝，Q09 從「掛全 5 篇」→ 單篇來源。**修好出處透明支柱。**
+- ✅ **跨論文比較**（比較題按機制分類別平鋪）→ Q09 質性改善。
+- ✅ **reference 補強**（Q04 儲存條件、Q06 boronate ester）→ 量測變誠實。
+- ✅ **selfcorrect UNVERIFIED→刪除 + entailment<0.2 gating**（`SELFCORRECT_ENTAIL_MAX`），flag 仍預設關。
+- ⚠️ **未解張力**：atomic-completeness（列全部，救 Q01）vs 比較/精簡（Q08 1.0→0.5）。同 prompt 兩股力對撞，待調。下次完整 baseline 觀察 Q08。
+
 ---
 
 ## 建議推進序（2026-06-23 更新：Phase 0 已完成，重排）
