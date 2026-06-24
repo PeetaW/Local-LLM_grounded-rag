@@ -115,6 +115,14 @@ def execute_structured_query(
         knowledge_base = "\n\n".join(sub_answers)
     _status(f"[synthesis] 完成 elapsed_ms={int((time.perf_counter()-t2)*1000)}")
 
+    # ── Stage 3.5: 可答性 gate（Phase 1：log-only，不改路由）─────────
+    if cfg.ANSWERABILITY_GATE_ENABLED and rag_found_anything:
+        from rag.answerability import assess_answerability
+        _ans = assess_answerability(question, knowledge_base)
+        _kb_head = " ".join((knowledge_base or "")[:240].split())
+        _status(f"[answerability] verdict={_ans['verdict']} kb_chars={len(knowledge_base or '')} "
+                f"kb_head={_kb_head} reason={_ans['reason'][:160]}")
+
     # ── Stage 4: LLM synthesis ───────────────────────────────────────
     t3 = time.perf_counter()
     if not rag_found_anything:

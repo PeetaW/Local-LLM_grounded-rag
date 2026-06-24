@@ -123,6 +123,10 @@ GENERATION_SELFCORRECT_ENABLED = False  # A/B 負結果：失敗多為多講/漏
 # 只把「信心極低（entailment < 此值）」的標記句送 corrector：低信心才是真捏造高發區，
 # borderline(0.2~0.5) 多是 NLI 假陰性 → 不送、省成本。UNVERIFIED 裁定 → 直接刪除幻覺句。
 SELFCORRECT_ENTAIL_MAX = 0.2
+# 可答性 gate（answerability gate）：Stage 3 之後判「蒸餾事實是否真的包含答案、非只同主題」。
+# 比 rag_found_anything（只看檢索非空）更細。Phase 1＝log-only（只印 verdict、不改路由），
+# 驗證分類器訊號可靠後再接「NOT_ANSWERABLE→誠實棄答」的路由（Phase 2）。
+ANSWERABILITY_GATE_ENABLED = False
 # English-first pipeline：全流程用英文（Stage 4 輸出英文 → Stage 5 英文驗證 → NLI EN-vs-EN → 最後翻譯成繁體中文）
 # 優點：NLI 從跨語言變單語言（大幅提升 entailment 準確度），Verifier 推論邏輯更穩定
 # 注意：開啟後 NLI_TRANSLATE_TO_EN 會自動跳過（draft 已是英文，不需要再翻）

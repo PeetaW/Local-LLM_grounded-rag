@@ -37,6 +37,15 @@ import 時還連帶觸發 main.py 全域初始化。目標：拆成薄 transport
 回答前判「檢索 chunk 是否真的**包含**答案，而非只是主題相關」；只相關→走誠實棄答。
 根治 Q11 那種「有免責橫幅但仍編造具體數字」的過度延伸。
 
+#### Phase 1 完成（2026-06-23）— 分類器建好 + 驗證通過（log-only，未接路由）
+做法:`rag/answerability.py` `assess_answerability(question, knowledge_base)`→{verdict, reason}。判 Stage 3 蒸餾後的 KB（生成用的同一份）。用 LLM_MODEL（gemma4，與 Stage 3 同模型→不觸發 VRAM swap）。Stage 3.5 log-only 接進 `execute_structured_query`，flag `ANSWERABILITY_GATE_ENABLED`（預設關）。
+**坑 1＝空回應**:gemma4 是 thinking 模型，判定任務開思考會把 num_predict 全燒在思考通道、response 吐空（done_reason=length, eval_count 滿但 response 空）→ **加 `think:False`（同 judge.py 對 qwen3 的修法）**。temperature 0.1（>0）。
+**坑 2＝綜合題校準**:初版對比較/聚合題過嚴（要求「比較」現成在 facts 裡）→ 改 prompt 區分「底層輸入缺失（→NOT）」vs「只是最終綜合形式沒現成、但輸入齊全（→ANSWERABLE）」。
+**驗證（Q01/05/06/08/12 代表題）**:Q12 三次全中 NOT_ANSWERABLE（假前提/真缺值）;Q01/05/06 ANSWERABLE;**Q08 ANSWERABLE↔NOT 隨 run 變動**——查 kb_chars 釐清:rich KB（5737 字含各路線產率）→ANSWERABLE 對、thin KB→NOT 也對。**gate 沒判錯，是忠實反映 KB**。
+**意外發現＝Stage 3 蒸餾對大型比較題不穩定**:同題 Q08 有時蒸出含全部數字、有時壓成高層摘要丟數字;因生成用同一份 KB，薄 KB 時生成本來也答不好 → **gate 在薄 KB 判 NOT 不是誤殺，是正確抓到「這次蒸餾退化」**。gate 意外成為蒸餾品質偵測器。→ 蒸餾穩定性列為未來獨立槓桿。
+**結論:Phase 1 通過，gate 訊號可信。** 待 Phase 2 接路由（NOT_ANSWERABLE→誠實棄答/降信心）。
+**Phase 2 路由設計待議**:薄-KB 的 NOT 該硬棄答還是軟警告?（薄 KB 生成也差→硬棄答可能反而對）;真缺值（Q12）該硬棄答。傾向「高精度才硬棄答、borderline 軟警告」。
+
 ### B. 匯入健檢（ingestion sanity check）
 論文匯入後自動用它自己的摘要/標題生 query，確認索引回得出合理 chunk + grounding 跑得動，
 抓出抽取失敗（如掃描檔 OCR 壞）的論文，不需 gold 標籤。**與 pipeline_v4 的 per-paper 狀態追蹤共用地基。**

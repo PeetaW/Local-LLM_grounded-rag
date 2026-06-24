@@ -326,6 +326,8 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
             "latency": metrics.parse_stage_latencies(status_lines),
             "wall_seconds": wall_s,
             "issues": metrics.count_issues(answer),
+            "answerability": next((ln.split("[answerability]", 1)[1].strip()
+                                   for ln in status_lines if "[answerability]" in ln), None),
             "answer": answer,
         }
         rows.append(row)
