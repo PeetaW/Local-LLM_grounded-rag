@@ -8,22 +8,46 @@ import requests
 import config as cfg
 
 _SYSTEM = (
-    "You decide whether a set of distilled facts CONTAINS the information needed to answer a "
-    "question. You are NOT answering the question yourself. Judge ONE thing: do the facts contain "
-    "the underlying information the question asks about? Being about the SAME TOPIC is NOT enough — "
-    "the facts must actually contain the requested information.\n"
-    "IMPORTANT — synthesis questions: if the question asks to COMPARE, CONTRAST, or AGGREGATE, the "
-    "facts are ANSWERABLE as long as they contain the underlying per-item information needed to "
-    "build that answer (e.g. the per-route yields/costs needed for a comparison). The comparison "
-    "itself need NOT be pre-written in the facts — assembling it is the answer step. Judge whether "
-    "the INPUTS are present, not whether the finished synthesized form is present.\n"
-    "Be conservative toward ANSWERABLE: if the facts contain a direct OR substantially partial "
-    "answer, or the underlying inputs for a synthesis question, say ANSWERABLE. Say NOT_ANSWERABLE "
-    "ONLY when the underlying information itself is absent — the question asks for value/result X "
-    "and the facts simply never state X (no amount of synthesis could produce it). A question "
-    "resting on a false premise the facts contradict is also NOT_ANSWERABLE (the requested thing "
-    "does not exist in the facts)."
+    "You decide how well a set of distilled facts can answer a question. You are NOT answering the "
+    "question yourself. Judge ONE thing: do the facts contain the underlying information the "
+    "question asks about? Being about the SAME TOPIC is NOT enough — the facts must actually "
+    "contain the requested information.\n"
+    "SYNTHESIS questions: if the question asks to COMPARE, CONTRAST, or AGGREGATE, judge whether "
+    "the underlying per-item INPUTS are present (e.g. the per-route yields/costs needed for a "
+    "comparison). The comparison itself need NOT be pre-written — assembling it is the answer step.\n"
+    "Choose exactly one verdict:\n"
+    "- ANSWERABLE: the facts contain a direct answer, or the full underlying inputs for a synthesis "
+    "question. The question can be answered well.\n"
+    "- PARTIAL: the facts contain SOME relevant information bearing on the question, but it is "
+    "incomplete or thin — the question can be only partially answered, with gaps.\n"
+    "- NOT_ANSWERABLE: the requested information is genuinely ABSENT — the question asks for "
+    "value/result X and the facts simply never state X (no amount of synthesis could produce it), "
+    "or the question rests on a false premise the facts contradict. Use this only when the facts "
+    "are merely on the same topic but do not contain the requested thing at all.\n"
+    "Bias: when unsure between ANSWERABLE and PARTIAL, prefer ANSWERABLE; when unsure between "
+    "PARTIAL and NOT_ANSWERABLE, prefer PARTIAL. Reserve NOT_ANSWERABLE for genuine absence."
 )
+_VERDICTS = ("ANSWERABLE", "PARTIAL", "NOT_ANSWERABLE")
+
+# Phase 2 路由用的告示文字。
+ABSTAIN_NOTICE = (
+    "⚠️ **誠實棄答**：檢索到的內容與此問題相關，但並不包含可直接回答的資訊。"
+    "為避免編造不存在的數據，本系統選擇不作答。建議換個問法，或確認該主題是否涵蓋於文獻庫中。\n"
+)
+WEAK_NOTICE = (
+    "⚠️ **資料可能不足**：檢索內容僅部分涵蓋此問題，以下回答可能不完整，請謹慎參考並自行查證。\n\n"
+)
+
+
+def gate_route(verdict: str):
+    """verdict → (abstain: bool, notice: str)。
+    NOT_ANSWERABLE→硬棄答（跳生成）；PARTIAL→軟警告（照常生成、加橫幅）；其餘→正常。
+    verdict=None（未判定/呼叫失敗）保守當正常，不棄答。"""
+    if verdict == "NOT_ANSWERABLE":
+        return True, ABSTAIN_NOTICE
+    if verdict == "PARTIAL":
+        return False, WEAK_NOTICE
+    return False, ""
 
 
 def assess_answerability(question: str, knowledge_base: str,
@@ -38,7 +62,7 @@ def assess_answerability(question: str, knowledge_base: str,
     prompt = (
         f"FACTS:\n{knowledge_base}\n\n"
         f"QUESTION:\n{question}\n\n"
-        "Output exactly two lines:\nVERDICT: <ANSWERABLE|NOT_ANSWERABLE>\nREASON: <one sentence>"
+        "Output exactly two lines:\nVERDICT: <ANSWERABLE|PARTIAL|NOT_ANSWERABLE>\nREASON: <one sentence>"
     )
     payload = {
         "model": model,
@@ -62,11 +86,13 @@ def assess_answerability(question: str, knowledge_base: str,
     except Exception as e:
         return {"verdict": None, "reason": f"answerability call failed: {e}"}
 
-    m = re.search(r"VERDICT:\s*(ANSWERABLE|NOT_ANSWERABLE)", out, re.I)
+    m = re.search(r"VERDICT:\s*(ANSWERABLE|PARTIAL|NOT[_ ]ANSWERABLE)", out, re.I)
     if not m:
-        # 容錯：整段找關鍵詞
+        # 容錯：整段找關鍵詞（NOT 先於 ANSWERABLE，因後者是前者子字串）
         if re.search(r"\bNOT[_ ]ANSWERABLE\b", out, re.I):
             verdict = "NOT_ANSWERABLE"
+        elif re.search(r"\bPARTIAL\b", out, re.I):
+            verdict = "PARTIAL"
         elif re.search(r"\bANSWERABLE\b", out, re.I):
             verdict = "ANSWERABLE"
         else:
@@ -80,7 +106,10 @@ def assess_answerability(question: str, knowledge_base: str,
 
 if __name__ == "__main__":
     # 自檢：不呼叫模型，只測解析與邊界（離線可跑）。
-    assert re.search(r"VERDICT:\s*(ANSWERABLE|NOT_ANSWERABLE)", "VERDICT: ANSWERABLE\nREASON: x", re.I).group(1) == "ANSWERABLE"
-    assert re.search(r"\bNOT[_ ]ANSWERABLE\b", "I think this is NOT ANSWERABLE here", re.I)
+    _rx = r"VERDICT:\s*(ANSWERABLE|PARTIAL|NOT[_ ]ANSWERABLE)"
+    assert re.search(_rx, "VERDICT: ANSWERABLE\nREASON: x", re.I).group(1).upper() == "ANSWERABLE"
+    assert re.search(_rx, "VERDICT: PARTIAL\nREASON: x", re.I).group(1).upper() == "PARTIAL"
+    # NOT_ANSWERABLE 不可被誤判成 ANSWERABLE（子字串陷阱）
+    assert re.search(_rx, "VERDICT: NOT_ANSWERABLE\nREASON: x", re.I).group(1).upper().replace(" ", "_") == "NOT_ANSWERABLE"
     assert assess_answerability("q", "")["verdict"] == "NOT_ANSWERABLE"  # 空 KB → 棄答
     print("answerability.py self-check OK")

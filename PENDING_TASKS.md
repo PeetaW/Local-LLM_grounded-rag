@@ -43,8 +43,20 @@ import 時還連帶觸發 main.py 全域初始化。目標：拆成薄 transport
 **坑 2＝綜合題校準**:初版對比較/聚合題過嚴（要求「比較」現成在 facts 裡）→ 改 prompt 區分「底層輸入缺失（→NOT）」vs「只是最終綜合形式沒現成、但輸入齊全（→ANSWERABLE）」。
 **驗證（Q01/05/06/08/12 代表題）**:Q12 三次全中 NOT_ANSWERABLE（假前提/真缺值）;Q01/05/06 ANSWERABLE;**Q08 ANSWERABLE↔NOT 隨 run 變動**——查 kb_chars 釐清:rich KB（5737 字含各路線產率）→ANSWERABLE 對、thin KB→NOT 也對。**gate 沒判錯，是忠實反映 KB**。
 **意外發現＝Stage 3 蒸餾對大型比較題不穩定**:同題 Q08 有時蒸出含全部數字、有時壓成高層摘要丟數字;因生成用同一份 KB，薄 KB 時生成本來也答不好 → **gate 在薄 KB 判 NOT 不是誤殺，是正確抓到「這次蒸餾退化」**。gate 意外成為蒸餾品質偵測器。→ 蒸餾穩定性列為未來獨立槓桿。
-**結論:Phase 1 通過，gate 訊號可信。** 待 Phase 2 接路由（NOT_ANSWERABLE→誠實棄答/降信心）。
-**Phase 2 路由設計待議**:薄-KB 的 NOT 該硬棄答還是軟警告?（薄 KB 生成也差→硬棄答可能反而對）;真缺值（Q12）該硬棄答。傾向「高精度才硬棄答、borderline 軟警告」。
+**結論:Phase 1 通過，gate 訊號可信。**
+
+#### Phase 2 完成（2026-06-23）— 三分分類器 + 路由接好兩條 pipeline（預設關，待 baseline_v5 才開）
+**設計（Peter 選「高精度硬棄答 + 其餘軟警告」）**:分類器改**三分** ANSWERABLE/PARTIAL/NOT_ANSWERABLE（`gate_route()` in answerability.py）:
+- ANSWERABLE → 正常
+- PARTIAL（有素材但不完整/薄 KB）→ 照常生成 + 軟警告橫幅（`WEAK_NOTICE`）
+- NOT_ANSWERABLE（底層資料真缺/假前提，高信心）→ **硬棄答**（`ABSTAIN_NOTICE`，跳 Stage 4-7）
+**坑（翻譯順序）**:中文軟警告橫幅不能在 EN draft 階段 prepend（會被 Stage 7 翻譯攪亂）→ 改成**翻譯後才 prepend**。棄答橫幅本身中文、Stage 7 已跳過。
+**驗證（eval_gate_route：Q12/01/08/06/10）**:
+- **Q12 → 硬棄答完美**:答案只剩棄答橫幅（84 字）、零捏造、wall 488s（跳 4-7 較快）、**correctness 1.0**（judge 對 false_premise 誠實不作答給滿，比之前半答的 0.5 更高）;gate 理由還點破假前提「BNCT 靜脈輸注非口服」。
+- **Q01/06/08/10 → 全 ANSWERABLE 正常作答、零誤殺**（Q08 此 run KB 4870 字 rich）。
+- **PARTIAL 路由未被這 5 題觸發**——分類器已用探針驗過會吐 PARTIAL（三分都用對），路由僅「翻譯後 prepend 一行」低風險，但未見真實 PARTIAL 端到端。
+**兩條 pipeline（非串流 execute_structured_query + 串流 _stream）都接了**。flag `ANSWERABILITY_GATE_ENABLED` 預設關。
+**待辦＝baseline_v5（gate on 完整 12 題）**:確認全題組無誤殺硬棄答、觀察 PARTIAL 出現率與軟警告呈現，再決定是否預設開。順帶＝新 judge 的首條完整基準線。
 
 ### B. 匯入健檢（ingestion sanity check）
 論文匯入後自動用它自己的摘要/標題生 query，確認索引回得出合理 chunk + grounding 跑得動，

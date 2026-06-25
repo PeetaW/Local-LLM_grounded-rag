@@ -115,44 +115,51 @@ def execute_structured_query(
         knowledge_base = "\n\n".join(sub_answers)
     _status(f"[synthesis] 完成 elapsed_ms={int((time.perf_counter()-t2)*1000)}")
 
-    # ── Stage 3.5: 可答性 gate（Phase 1：log-only，不改路由）─────────
+    # ── Stage 3.5: 可答性 gate（Phase 2：接路由）──────────────────────
+    # NOT_ANSWERABLE→硬棄答（跳 Stage 4-7）；PARTIAL→軟警告橫幅；ANSWERABLE→正常。
+    gate_abstain, gate_notice = False, ""
     if cfg.ANSWERABILITY_GATE_ENABLED and rag_found_anything:
-        from rag.answerability import assess_answerability
+        from rag.answerability import assess_answerability, gate_route
         _ans = assess_answerability(question, knowledge_base)
+        gate_abstain, gate_notice = gate_route(_ans["verdict"])
         _kb_head = " ".join((knowledge_base or "")[:240].split())
-        _status(f"[answerability] verdict={_ans['verdict']} kb_chars={len(knowledge_base or '')} "
-                f"kb_head={_kb_head} reason={_ans['reason'][:160]}")
+        _status(f"[answerability] verdict={_ans['verdict']} abstain={gate_abstain} "
+                f"kb_chars={len(knowledge_base or '')} kb_head={_kb_head} reason={_ans['reason'][:160]}")
 
     # ── Stage 4: LLM synthesis ───────────────────────────────────────
     t3 = time.perf_counter()
-    if not rag_found_anything:
-        _status("  ℹ️  RAG 資料庫未找到相關內容，切換至模型推理模式...")
-        fallback_notice = _FALLBACK_NOTICE
-        synthesis_prompt = build_fallback_prompt(
-            question, _build_memory_section(memory_context, is_fallback=True)
-        )
+    if gate_abstain:
+        _status("  🚪 [answerability] NOT_ANSWERABLE → 誠實棄答，跳過生成")
+        full_text = gate_notice
     else:
-        fallback_notice = ""
-        lang = "en" if cfg.EN_DRAFT_PIPELINE else "zh"
-        print(f"  {'🧠 推理' if cfg.REASONING_MODE == 'reasoning' else '📋 嚴格'}模式"
-              f"（{cfg.REASONING_MODE}）  target_paper_detected={bool(detected)}"
-              f"  streaming_mode=False  translation_applied={cfg.EN_DRAFT_PIPELINE}")
-        synthesis_prompt = build_synthesis_prompt(
-            knowledge_base, question,
-            _build_memory_section(memory_context, is_fallback=False),
-            cfg.REASONING_MODE, lang,
-        )
+        if not rag_found_anything:
+            _status("  ℹ️  RAG 資料庫未找到相關內容，切換至模型推理模式...")
+            fallback_notice = _FALLBACK_NOTICE
+            synthesis_prompt = build_fallback_prompt(
+                question, _build_memory_section(memory_context, is_fallback=True)
+            )
+        else:
+            fallback_notice = ""  # 軟警告橫幅在翻譯後才加（見 Stage 7 後），避免中文橫幅被送進翻譯
+            lang = "en" if cfg.EN_DRAFT_PIPELINE else "zh"
+            print(f"  {'🧠 推理' if cfg.REASONING_MODE == 'reasoning' else '📋 嚴格'}模式"
+                  f"（{cfg.REASONING_MODE}）  target_paper_detected={bool(detected)}"
+                  f"  streaming_mode=False  translation_applied={cfg.EN_DRAFT_PIPELINE}")
+            synthesis_prompt = build_synthesis_prompt(
+                knowledge_base, question,
+                _build_memory_section(memory_context, is_fallback=False),
+                cfg.REASONING_MODE, lang,
+            )
 
-    print("\n 最終綜合回答（Stage 4 初稿）：")
-    full_text = fallback_notice
-    for chunk in Settings.llm.stream_complete(synthesis_prompt):
-        print(chunk.delta, end="", flush=True)
-        full_text += chunk.delta
-    print("\n")
+        print("\n 最終綜合回答（Stage 4 初稿）：")
+        full_text = fallback_notice
+        for chunk in Settings.llm.stream_complete(synthesis_prompt):
+            print(chunk.delta, end="", flush=True)
+            full_text += chunk.delta
+        print("\n")
     _status(f"[synthesis-llm] 完成 elapsed_ms={int((time.perf_counter()-t3)*1000)}")
 
     # ── Stage 5: Verification ────────────────────────────────────────
-    if cfg.VERIFY_ENABLED and rag_found_anything:
+    if cfg.VERIFY_ENABLED and rag_found_anything and not gate_abstain:
         t4 = time.perf_counter()
         _status("\n  🔍 [verification] Stage 5: 邏輯自洽驗證中...")
         full_text = _verifier.verify_and_correct(
@@ -162,7 +169,7 @@ def execute_structured_query(
 
     # ── Stage 6: Citation grounding ──────────────────────────────────
     nli_report = ""
-    if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything:
+    if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything and not gate_abstain:
         t5 = time.perf_counter()
         _status("\n[grounding] 開始")
         try:
@@ -177,11 +184,16 @@ def execute_structured_query(
         _status(f"[grounding] 完成 elapsed_ms={int((time.perf_counter()-t5)*1000)}")
 
     # ── Stage 7: Translation ─────────────────────────────────────────
-    if cfg.EN_DRAFT_PIPELINE and rag_found_anything:
+    # 棄答橫幅本來就是中文，不需翻譯（也避免 gemma 翻一段固定中文）。
+    if cfg.EN_DRAFT_PIPELINE and rag_found_anything and not gate_abstain:
         t6 = time.perf_counter()
         _status("\n[translation] 開始")
         full_text = translate_to_traditional_chinese(full_text, on_status=on_status)
         _status(f"[translation] 完成 elapsed_ms={int((time.perf_counter()-t6)*1000)}")
+
+    # PARTIAL 軟警告：翻譯後才加（橫幅本身已是中文，不送進翻譯）。棄答時 full_text 已是橫幅，不重複。
+    if gate_notice and not gate_abstain:
+        full_text = gate_notice + full_text
 
     if nli_report:
         full_text += nli_report
@@ -266,37 +278,50 @@ def execute_structured_query_stream(
         knowledge_base = "\n\n".join(sub_answers)
     yield f"[STATUS] [synthesis] 完成 elapsed_ms={int((time.perf_counter()-t2)*1000)}\n"
 
+    # ── Stage 3.5: 可答性 gate（Phase 2：接路由）──────────────────────
+    gate_abstain, gate_notice = False, ""
+    if cfg.ANSWERABILITY_GATE_ENABLED and rag_found_anything:
+        from rag.answerability import assess_answerability, gate_route
+        _ans = assess_answerability(question, knowledge_base)
+        gate_abstain, gate_notice = gate_route(_ans["verdict"])
+        yield f"[STATUS] [answerability] verdict={_ans['verdict']} abstain={gate_abstain}\n"
+
     # ── Stage 4: LLM synthesis ───────────────────────────────────────
     t3 = time.perf_counter()
-    if not rag_found_anything:
-        yield "[STATUS] ⚠️ RAG 未找到相關內容，切換至模型知識推理...\n"
-        fallback_notice = _FALLBACK_NOTICE
-        synthesis_prompt = build_fallback_prompt(
-            question, _build_memory_section(memory_context, is_fallback=True)
-        )
+    if gate_abstain:
+        yield "[STATUS] 🚪 [answerability] NOT_ANSWERABLE → 誠實棄答，跳過生成\n"
+        yield gate_notice
+        full_text = gate_notice
     else:
-        fallback_notice = ""
-        lang = "en" if cfg.EN_DRAFT_PIPELINE else "zh"
-        if cfg.REASONING_MODE == "reasoning":
-            yield "[STATUS] 🧠 推理模式，LLM 綜合推論中...\n"
+        if not rag_found_anything:
+            yield "[STATUS] ⚠️ RAG 未找到相關內容，切換至模型知識推理...\n"
+            fallback_notice = _FALLBACK_NOTICE
+            synthesis_prompt = build_fallback_prompt(
+                question, _build_memory_section(memory_context, is_fallback=True)
+            )
         else:
-            yield "[STATUS] 📋 嚴格模式，LLM 整理論文內容中...\n"
-        synthesis_prompt = build_synthesis_prompt(
-            knowledge_base, question,
-            _build_memory_section(memory_context, is_fallback=False),
-            cfg.REASONING_MODE, lang,
-        )
+            fallback_notice = ""  # PARTIAL 軟警告在翻譯後才加，避免中文橫幅被送進翻譯
+            lang = "en" if cfg.EN_DRAFT_PIPELINE else "zh"
+            if cfg.REASONING_MODE == "reasoning":
+                yield "[STATUS] 🧠 推理模式，LLM 綜合推論中...\n"
+            else:
+                yield "[STATUS] 📋 嚴格模式，LLM 整理論文內容中...\n"
+            synthesis_prompt = build_synthesis_prompt(
+                knowledge_base, question,
+                _build_memory_section(memory_context, is_fallback=False),
+                cfg.REASONING_MODE, lang,
+            )
 
-    if fallback_notice:
-        yield fallback_notice
-    full_text = fallback_notice
-    for chunk in Settings.llm.stream_complete(synthesis_prompt):
-        yield chunk.delta
-        full_text += chunk.delta
+        if fallback_notice:
+            yield fallback_notice
+        full_text = fallback_notice
+        for chunk in Settings.llm.stream_complete(synthesis_prompt):
+            yield chunk.delta
+            full_text += chunk.delta
     yield f"\n[STATUS] [synthesis-llm] 完成 elapsed_ms={int((time.perf_counter()-t3)*1000)}\n"
 
     # ── Stage 5: Verification ────────────────────────────────────────
-    if cfg.VERIFY_ENABLED and rag_found_anything:
+    if cfg.VERIFY_ENABLED and rag_found_anything and not gate_abstain:
         t4 = time.perf_counter()
         yield "[STATUS] 🔍 [verification] Stage 5: 邏輯自洽驗證中...\n"
         corrected = _verifier.verify_and_correct(
@@ -312,7 +337,7 @@ def execute_structured_query_stream(
 
     # ── Stage 6: Citation grounding ──────────────────────────────────
     nli_report = ""
-    if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything:
+    if cfg.CITATION_GROUNDING_ENABLED and rag_found_anything and not gate_abstain:
         t5 = time.perf_counter()
         yield "[STATUS] [grounding] 開始\n"
         try:
@@ -329,7 +354,7 @@ def execute_structured_query_stream(
         yield f"[STATUS] [grounding] 完成 elapsed_ms={int((time.perf_counter()-t5)*1000)}\n"
 
     # ── Stage 7: Translation ─────────────────────────────────────────
-    if cfg.EN_DRAFT_PIPELINE and rag_found_anything:
+    if cfg.EN_DRAFT_PIPELINE and rag_found_anything and not gate_abstain:
         t6 = time.perf_counter()
         yield "[STATUS] 🌏 [translation] 翻譯英文答案為繁體中文...\n"
         translated = translate_to_traditional_chinese(full_text, on_status=on_status)
@@ -338,6 +363,12 @@ def execute_structured_query_stream(
             yield translated
             full_text = translated
         yield f"[STATUS] [translation] 完成 elapsed_ms={int((time.perf_counter()-t6)*1000)}\n"
+
+    # PARTIAL 軟警告：翻譯後才加（橫幅已是中文，不送進翻譯）。棄答時 full_text 已是橫幅，不重複。
+    if gate_notice and not gate_abstain:
+        yield "\n\n---\n"
+        yield gate_notice
+        full_text = gate_notice + full_text
 
     if nli_report:
         yield nli_report
