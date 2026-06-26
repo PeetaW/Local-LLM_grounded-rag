@@ -107,6 +107,15 @@ def load_all_papers():
     pdf_files = sorted([
         f for f in os.listdir(cfg.PAPERS_DIR) if f.endswith(".pdf")
     ])
+
+    # ── 匯入健檢：跳過內容重複的冗餘份（保留排序首位）──────────
+    # 冗餘份不建索引；其既有索引由下方 _cleanup_orphan_indexes 順手清掉（不刪 PDF）。
+    from rag.corpus_health import duplicate_skip_set
+    skip = duplicate_skip_set(pdf_files)
+    for redundant, keep in skip.items():
+        print(f"  ⏭️  匯入健檢：跳過重複論文 {redundant}（內容同 {keep}）")
+    pdf_files = [f for f in pdf_files if f not in skip]
+
     paper_names = {f.replace(".pdf", "") for f in pdf_files}
     _cleanup_orphan_indexes(paper_names)
     print(f"找到 {len(pdf_files)} 篇論文，開始建立索引...\n")

@@ -55,6 +55,13 @@ import os
 import sys
 
 
+# ── --health 模式：語料健檢報告，在重度初始化之前攔截 ──────
+if "--health" in sys.argv:
+    from rag.corpus_health import audit_report
+    print(audit_report())
+    sys.exit(0)
+
+
 # ── --rerun-vl 模式：在所有重度初始化之前攔截 ──────────────
 if "--rerun-vl" in sys.argv:
     from rag.vl_processor import rerun_failed_vl, get_failed_vl_images

@@ -70,6 +70,13 @@ import 時還連帶觸發 main.py 全域初始化。目標：拆成薄 transport
 論文匯入後自動用它自己的摘要/標題生 query，確認索引回得出合理 chunk + grounding 跑得動，
 抓出抽取失敗（如掃描檔 OCR 壞）的論文，不需 gold 標籤。**與 pipeline_v4 的 per-paper 狀態追蹤共用地基。**
 
+#### MVP 完成（2026-06-26，spec＝ingestion_health_spec.md）
+起因＝語料審計發現 31 篇有 4 項污染。`rag/corpus_health.py` + `main.py --health` + indexer 去重 hook。零 gold。
+**四類檢查**:① **精確重複**（正規化全文 sha）→ **自動跳過**冗餘份（indexer `duplicate_skip_set`，既有索引由 orphan cleanup 順手清，不刪 PDF）;② **疑似近重複**（同 metadata title、內容 sha 不同）→ 只警告人工審查（不自動跳，避免丟內容;排除含 SI 成員的組＝主文+補充非近重複）;③ **SI 當獨立論文**（檔名 regex:大寫 SI 後綴避開 synthesis + supplement/supporting info）→ 旗標;④ **抽取健康**（text_len<500 或 garbage_ratio>0.05）→ 被動報告。
+**審計實測（boron_bnct）**:精確重複 1 組（45464，自動跳過、保留與 gold 同名的 `41467_2024_Article_45464`）;近重複 1 組（Pinacol）;SI 2 篇;抽取 0（全正常）。
+**生效**:下次 `main.py` 啟動，indexer 跳過 `s41467-024-45464-z (1)` + orphan 清其索引 → 修掉 Q10 那種「同篇當兩篇引用」的 live 污染（31→30 有效篇）。
+**Phase 2**:SI→主文出處綁定、自我查詢可答性（LLM/篇）、`--fix` 自動刪檔、health 寫入 metadata（pipeline_v4 地基）。皆未做（YAGNI/風險）。
+
 ### C. 延遲：retrieval 327s 拆解
 baseline 後 retrieval 是最大階段，待拆（檢索本身 vs Ollama model swap）。
 
