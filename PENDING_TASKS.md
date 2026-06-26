@@ -58,6 +58,14 @@ import 時還連帶觸發 main.py 全域初始化。目標：拆成薄 transport
 **兩條 pipeline（非串流 execute_structured_query + 串流 _stream）都接了**。flag `ANSWERABILITY_GATE_ENABLED` 預設關。
 **待辦＝baseline_v5（gate on 完整 12 題）**:確認全題組無誤殺硬棄答、觀察 PARTIAL 出現率與軟警告呈現，再決定是否預設開。順帶＝新 judge 的首條完整基準線。
 
+#### baseline_v5 結果（2026-06-26）— gate 驗證通過，✅ 預設開
+**新 judge + gate on 首條完整基準線**:correctness **0.833**、grounding 0.741、total **918s**（比 v4 1011s 還低，Q12 棄答省 Stage 4-7）、選擇 100%/覆蓋 97.5%。
+**gate 全題組**:8 ANSWERABLE（Q01-06,09,10 正常）/ 2 PARTIAL（Q07,Q08 軟警告+作答）/ 1 硬棄答（Q12 corr 1.0）/ 1 None（Q11 rag_found=False 走既有 fallback）。
+**三驗收全過**:① **零誤殺硬棄答**（11 in-corpus 無一被錯誤棄答，只 Q12 真假前提棄答）;② **PARTIAL 校準大勝**——Q07(corr 0.25)、Q08(corr 0.5) 正是全題組最弱兩題，gate 精準命中（Q07 理由「KB 沒解釋動態共價鍵如何作用於氟離子結合」屬實，figure_dependent）;③ Q12 硬棄答穩定 corr 1.0。
+**意外好處＝gate 誠實訊號與真實正確性正相關**（PARTIAL 抓到最弱答案），順便當「低品質答案偵測器」。
+**決定:gate 預設開**（config `ANSWERABILITY_GATE_ENABLED=True`）。**0.833 = 新 judge 基準線**，未來與此比，≤v4 是舊 judge 不可跨比。
+**順帶暴露 robustness 標的**:Q07 corr 0.25（figure_dependent，KB 缺動態共價鍵機制——可能圖/scheme 內容沒抽到）= 真實答不好的題，接下來 robustness 工作的具體入口之一。
+
 ### B. 匯入健檢（ingestion sanity check）
 論文匯入後自動用它自己的摘要/標題生 query，確認索引回得出合理 chunk + grounding 跑得動，
 抓出抽取失敗（如掃描檔 OCR 壞）的論文，不需 gold 標籤。**與 pipeline_v4 的 per-paper 狀態追蹤共用地基。**
@@ -141,8 +149,15 @@ citation 修正全題組站得住（無 bullet 掛 4–5 篇）＝結構性勝�
 ## 建議推進序（2026-06-23 更新：Phase 0 已完成，重排）
 1. ✅ baseline_v3、✅ agentic loop Phase 0、✅ 生成修正 loop Phase 1（負結果：fix=0）
 2. **無中生有→刪除**（E：把 selfcorrect 的 UNVERIFIED 改成刪除幻覺句）— 最高信心起手，Q06 測
-3. 可答性 gate（A）— 安全/誠實；與「整篇都不 grounded→棄答」共用訊號
+3. ✅ 可答性 gate（A）— Phase 1+2 完成（三分路由、硬棄答 Q12 驗證 correctness 1.0）；預設關待 baseline_v5 才開
 4. 多講/漏講修正（E）— 生成 prompt 答題勿轉錄 + 數值完整性比對；prompt 易翻車，獨立 A/B
 5. pipeline_v4 分階段索引（1）→ 順帶解鎖匯入健檢（B）
 6. memory_redesign（2）
 7. retrieval 拆解（C）、api-refactor（3）視情況
+
+### ⭐ 方向決定（2026-06-23，Peter）：v5 之後選「robustness/品質」非「速度」
+Peter 明確:下一個槓桿走「對真實使用者更穩、答得更準」，**不是速度**。→ retrieval（C，~400s 最大延遲）**延後不放棄**——肯定得拆，只是順位往後。**起手很便宜**:profile 切成 檢索compute / 子問題 LLM 推論 / 模型 swap 三塊（本專案「慢」多是 swap）；可當「別的長 run 在跑時順手做的填空題」，不必排專門回合。
+**v5 之後候選（依此方向重排，待 v5 數據定案）**:
+- **B 匯入健檢 / 資料衛生**:接今天揪到的**重複入庫**（45464 同篇兩份、ChemComm 正文 vs SI）。真實使用者匯入場景的實 bug，gate 已讓「匯入後答不出」可偵測。
+- **Stage 3 蒸餾穩定性**:接今天發現的 KB 變異（Q08 有時 5737 字 rich、有時壓成高層摘要）。同時傷品質與 gate 可靠度（薄 KB→生成也差），槓桿比 retrieval 大、直接動正確性。
+兩者擇一起手，v5 跑完看數據（PARTIAL 出現率、有無誤殺、蒸餾穩定度）再定。
