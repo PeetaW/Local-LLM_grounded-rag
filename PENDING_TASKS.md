@@ -75,6 +75,7 @@ import 時還連帶觸發 main.py 全域初始化。目標：拆成薄 transport
 **四類檢查**:① **精確重複**（正規化全文 sha）→ **自動跳過**冗餘份（indexer `duplicate_skip_set`，既有索引由 orphan cleanup 順手清，不刪 PDF）;② **疑似近重複**（同 metadata title、內容 sha 不同）→ 只警告人工審查（不自動跳，避免丟內容;排除含 SI 成員的組＝主文+補充非近重複）;③ **SI 當獨立論文**（檔名 regex:大寫 SI 後綴避開 synthesis + supplement/supporting info）→ 旗標;④ **抽取健康**（text_len<500 或 garbage_ratio>0.05）→ 被動報告。
 **審計實測（boron_bnct）**:精確重複 1 組（45464，自動跳過、保留與 gold 同名的 `41467_2024_Article_45464`）;近重複 1 組（Pinacol）;SI 2 篇;抽取 0（全正常）。
 **生效**:下次 `main.py` 啟動，indexer 跳過 `s41467-024-45464-z (1)` + orphan 清其索引 → 修掉 Q10 那種「同篇當兩篇引用」的 live 污染（31→30 有效篇）。
+**驗證（2026-06-26，eval_dedup_check，Q07/Q10，dedup 生效後）**:Q10 citation 完全收斂（`s41467-024-45464-z` 提及 0、全 32 次指向單一正規名）= 同篇當兩篇徹底修好;corr 0.75→1.0。**意外加碼**:dedup 騰出的選擇槽被真正不同的相關論文補上——Q07 從 `[45464, s41467...(1)]`（同篇佔兩槽）變 `[45464, Chemistry…Ono boroxine]`，corr 0.25→0.5。零回歸（兩題皆升）。確認 dedup 兩益:① citation 不分裂（確定性）② 騰槽讓相關論文進得來。
 **Phase 2**:SI→主文出處綁定、自我查詢可答性（LLM/篇）、`--fix` 自動刪檔、health 寫入 metadata（pipeline_v4 地基）。皆未做（YAGNI/風險）。
 
 ### C. 延遲：retrieval 327s 拆解
