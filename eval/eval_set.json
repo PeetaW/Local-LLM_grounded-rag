@@ -103,7 +103,7 @@
       "gold_papers": [
         "41467_2024_Article_45464"
       ],
-      "reference_answer": "The reported water-stable boroxine forms from 2-hydroxyphenylboronic acid (HO-PBA), which spontaneously dehydrates at room temperature into a boroxine (a cyclic trimer, e.g. a trimer-H2O complex) bearing dynamic covalent B-O bonds and aggregation-induced emission enhancement. The dynamic covalent bonds let the B-O bonds undergo fast exchange in aqueous solution, which underlies (1) selective, strong fluoride-ion (F-) binding in water, significantly stronger than phenylboronic acid, and (2) a boroxine-cross-linked hydrogel with high acid-base/pH stability and a reversible gel-sol transition. This breaks the long-held view that boroxines cannot be used in water due to hydrolytic instability.",
+      "reference_answer": "報導的水穩定硼氧烷/硼氧環結構來自 2-羥基苯硼酸（HO-PBA）。在環境條件下，HO-PBA 會自發脫水形成具有動態共價 B-O 鍵與聚集誘導增強發光活性的二聚體；接觸水後，該二聚體會轉化為水穩定的硼氧烷結構，可描述為 HO-PBA 三聚體-H2O 複合物/環狀三聚體。該結構在室溫下可穩定 7 天；HO-PBA 三聚體在 2.4 < pH < 9 穩定，CH3-HO-PBA 在 2.4 < pH < 10 穩定。動態共價 B-O 鍵可在室溫水相介質中快速交換，讓硼氧烷在水中保持可交換且可配位的結構，因此能選擇性且強力結合氟離子（F-，親和力高於苯硼酸）。在水凝膠中，HO-PBA 衍生硼氧烷作為可逆交聯點形成 polymer network；該水凝膠具有高酸鹼/pH 穩定性（包含 pH 2 與 pH 10），且可透過加入過量 HO-PBA 三聚體造成去交聯/gel-to-sol，再以 THF 洗去多餘 HO-PBA 讓網絡重建/sol-to-gel。",
       "gold_spans": [
         "their utilization in aqueous media is a formidable task due to hydrolytic instability",
         "2-hydroxyphenylboronic acid undergoes spontaneous dehydration to form a dimer with dynamic covalent bonds and aggregation-induced enhanced emission activity",

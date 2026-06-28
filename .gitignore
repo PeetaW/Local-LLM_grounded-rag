@@ -39,6 +39,7 @@ eval/results/*.json
 memory_db/
 !memory_db/.gitkeep
 *.chroma
+e--Projects-rag-project/
 
 # ── Internal dev docs ─────────────────────────────────
 pipeline_v2_task_spec.md

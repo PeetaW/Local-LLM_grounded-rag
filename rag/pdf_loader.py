@@ -3,11 +3,24 @@
 # 回傳 LlamaIndex Document 列表供後續建立索引使用
 
 import os
+import sys
 import json
 import fitz  # PyMuPDF
 from llama_index.core.schema import Document
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config as cfg
+
+# Latin f-連字正規化：PDF 常把 fi/fl 等存成單一 Unicode 連字（U+FB00–FB04），
+# 導致 BM25「fluoride」比對不到「ﬂuoride」、grounding entailment 也被 token 不符拉低。
+# 只換這 5 個 f-連字（外科手術式），不用整段 NFKC，避免動到化學式的上下標/特殊符號。
+_LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl"}
+
+
+def _normalize_ligatures(text: str) -> str:
+    for lig, rep in _LIGATURES.items():
+        text = text.replace(lig, rep)
+    return text
 
 
 def load_pdf_with_pymupdf(pdf_path, vl_output_dir=None):
@@ -61,6 +74,8 @@ def load_pdf_with_pymupdf(pdf_path, vl_output_dir=None):
             if text.strip():
                 full_text += f"\n{text}"
         doc.close()
+
+    full_text = _normalize_ligatures(full_text)
 
     documents = [Document(
         text=full_text,
@@ -119,3 +134,11 @@ def load_pdf_with_pymupdf(pdf_path, vl_output_dir=None):
     print()
 
     return documents
+
+
+if __name__ == "__main__":
+    # 自檢：連字正規化（離線）。
+    assert _normalize_ligatures("boroxines toward ﬂuoride and eﬃcient ﬁlms") == \
+        "boroxines toward fluoride and efficient films"
+    assert _normalize_ligatures("no ligatures here") == "no ligatures here"
+    print("pdf_loader ligature self-check OK")

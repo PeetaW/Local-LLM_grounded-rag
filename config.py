@@ -162,7 +162,7 @@ INDEX_BUILD_CONFIG = {
     "chunk_size":          CHUNK_SIZE,
     "chunk_overlap":       CHUNK_OVERLAP,
     "embed_model":         EMBED_MODEL,
-    "parser":              "pymupdf",
+    "parser":              "pymupdf-lig1",  # -lig1：f-連字正規化（改版需重建索引，故 bump 標記）
     "include_vl":          True,
     "context_summary":     CONTEXT_SUMMARY_ENABLED,
 }
