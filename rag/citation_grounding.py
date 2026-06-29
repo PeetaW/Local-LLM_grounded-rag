@@ -42,6 +42,15 @@ def _add_llm_time(dt: float):
 _nli_model = None
 _nli_tokenizer = None
 _NLI_LABEL_MAP = None   # {0: "contradiction", 1: "neutral", 2: "entailment"} 或依模型決定
+_nli_error_reported = False
+
+
+def _report_nli_error(e: Exception):
+    global _nli_error_reported
+    if not _nli_error_reported:
+        msg = str(e).replace("\n", " ")[:240]
+        print(f"  [NLI-error] {type(e).__name__}: {msg}")
+        _nli_error_reported = True
 
 
 def _nli_wants_cuda() -> bool:
@@ -63,18 +72,27 @@ def _get_nli_model():
         from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
         model_name = "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
-        print("  📦 載入 mDeBERTa 多語言 NLI 模型（三分類模式）...")
-        _nli_tokenizer = AutoTokenizer.from_pretrained(model_name)
-        _nli_model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        model_path = model_name
+        local_only = False
+        try:
+            from huggingface_hub import snapshot_download
+            model_path = snapshot_download(model_name, local_files_only=True)
+            local_only = True
+        except Exception as e:
+            print(f"  [NLI] local cache lookup failed; using HF id ({type(e).__name__})")
+
+        print("  Loading mDeBERTa multilingual NLI model (3-way)...")
+        _nli_tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=local_only)
+        _nli_model = AutoModelForSequenceClassification.from_pretrained(model_path, local_files_only=local_only)
         _nli_model.eval()
         id2label = _nli_model.config.id2label  # e.g. {0: "CONTRADICTION", 1: "NEUTRAL", 2: "ENTAILMENT"}
         _NLI_LABEL_MAP = {v.upper(): k for k, v in id2label.items()}
-        print(f"  ✅ mDeBERTa 載入完成（labels: {id2label}）")
+        print(f"  mDeBERTa loaded (labels: {id2label})")
 
     target = "cuda" if _nli_wants_cuda() else "cpu"
     if str(next(_nli_model.parameters()).device).split(":")[0] != target:
         _nli_model = _nli_model.to(target)
-        print(f"  ✅ mDeBERTa device: {target}")
+        print(f"  mDeBERTa device: {target}")
     return _nli_model, _nli_tokenizer, _NLI_LABEL_MAP
 
 
@@ -444,7 +462,8 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
                 win_chunk_ids.append(cid)
         try:
             scores_list = _run_nli_batch(win_texts, [hypothesis] * len(win_texts))
-        except Exception:
+        except Exception as e:
+            _report_nli_error(e)
             scores_list = []
         for cid, scores in zip(win_chunk_ids, scores_list):
             e_score = scores["entailment"]
@@ -856,7 +875,8 @@ def decompose_and_verify(conclusion: str, facts: list[dict]) -> dict:
         best_source = None
         try:
             scores_list = _run_nli_batch(fact_texts, [claim] * len(fact_texts))
-        except Exception:
+        except Exception as e:
+            _report_nli_error(e)
             scores_list = []
         for fact, scores in zip(facts, scores_list):
             if scores["entailment"] > best_score:
@@ -924,7 +944,8 @@ def joint_verify(claim: str, facts: list[dict]) -> dict:
     fact_texts = [fact["text"][:512] for fact in facts]
     try:
         scores_list = _run_nli_batch(fact_texts, [claim] * len(fact_texts))
-    except Exception:
+    except Exception as e:
+        _report_nli_error(e)
         scores_list = []
     scored_facts = []
     for fact, scores in zip(facts, scores_list):
