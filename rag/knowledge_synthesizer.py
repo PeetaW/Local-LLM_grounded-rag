@@ -5,7 +5,7 @@ import config as cfg
 
 logger = logging.getLogger(__name__)
 
-SYNTHESIS_SYSTEM_PROMPT = """
+_BASE_SYNTHESIS_SYSTEM_PROMPT = """
 你是一個學術文獻整理助手。
 你的唯一任務是將論文段落整理成結構化的已知事實清單。
 
@@ -17,6 +17,18 @@ SYNTHESIS_SYSTEM_PROMPT = """
 5. 使用繁體中文輸出（無論輸入語言）
 6. 禁止輸出任何形式的推論、假設或背景補充
 """
+
+_TERM_FIDELITY_RULES = """
+7. 專有名詞保真：酵素、試劑、化合物、方法名、模型名必須保留原文英文拼法；可加中文說明，但英文原詞不可省略或替換
+8. 禁止近義替換：chymotrypsin 與 trypsin 是不同酵素；原文寫哪一個就逐字保留哪一個
+"""
+
+
+def _system_prompt() -> str:
+    if getattr(cfg, "TERM_FIDELITY_GUARD_ENABLED", False):
+        return _BASE_SYNTHESIS_SYSTEM_PROMPT + _TERM_FIDELITY_RULES
+    return _BASE_SYNTHESIS_SYSTEM_PROMPT
+
 
 class KnowledgeSynthesizer:
     def __init__(
@@ -88,7 +100,7 @@ class KnowledgeSynthesizer:
                 f"{self.base_url}/api/generate",
                 json={
                     "model":  self.model,
-                    "system": SYNTHESIS_SYSTEM_PROMPT,
+                    "system": _system_prompt(),
                     "prompt": user_prompt,
                     "stream": True,
                     "options": {

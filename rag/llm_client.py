@@ -31,6 +31,17 @@ import config as cfg
 # 全域變數，供其他模組 import 使用
 planning_llm = None
 
+
+def _main_system_prompt() -> str:
+    prompt = cfg.LLM_SYSTEM_PROMPT
+    if cfg.TERM_FIDELITY_GUARD_ENABLED:
+        prompt += (
+            "專有名詞保真：酵素、試劑、化合物、方法名與縮寫需保留原文英文拼法；"
+            "不可把 chymotrypsin、trypsin 等相近但不同的技術名詞互相替換。"
+        )
+    return prompt
+
+
 def init_llm_and_embedding():
     """
     初始化 LLM 與 Embedding，並寫入 LlamaIndex 全域 Settings。
@@ -52,7 +63,7 @@ def init_llm_and_embedding():
         timeout=cfg.LLM_TIMEOUT,
         http_client=http_client,
         context_window=cfg.LLM_CONTEXT_WINDOW,
-        system_prompt=cfg.LLM_SYSTEM_PROMPT,
+        system_prompt=_main_system_prompt(),
     )
 
     # 規劃用小模型：qwen2.5:14b

@@ -87,6 +87,8 @@ RERANKER_TOP_N     = 8       # 最終餵給 gemma4 的 chunk 數
 # ── Stage 3：知識蒸餾 ─────────────────────────────────────
 SYNTHESIS_ENABLED = True
 SYNTHESIS_MODEL   = "gemma4:31b"    # 同時用於 Stage 3 和 Stage 4
+# A/B：保留英文專有名詞，避免 chymotrypsin/trypsin 這類酵素名在蒸餾/翻譯中被近義替換。
+TERM_FIDELITY_GUARD_ENABLED = False
 
 # ── Stage 5：邏輯自洽驗證 ─────────────────────────────
 VERIFY_ENABLED      = True

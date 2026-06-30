@@ -9,6 +9,30 @@
 # EN mode is used when EN_DRAFT_PIPELINE is enabled (higher accuracy);
 # the final answer is translated to Traditional Chinese by query_translation.py.
 
+import config as cfg
+
+
+def _term_fidelity_en() -> str:
+    if not getattr(cfg, "TERM_FIDELITY_GUARD_ENABLED", False):
+        return ""
+    return """
+TERM FIDELITY:
+- Preserve exact English spellings of enzymes, reagents, compounds, methods, model names, and abbreviations from the Known Facts List.
+- Do not translate, normalize, or substitute near-synonyms for technical names. For example, chymotrypsin and trypsin are different enzymes; copying one as the other is a factual error.
+- If the final answer is later translated, keep the English term in parentheses on first mention when useful.
+"""
+
+
+def _term_fidelity_zh() -> str:
+    if not getattr(cfg, "TERM_FIDELITY_GUARD_ENABLED", False):
+        return ""
+    return """
+【專有名詞保真】
+- 酵素、試劑、化合物、方法名、模型名與縮寫，必須保留事實清單中的原文英文拼法。
+- 不可把技術名詞翻譯成近義詞或替換成看似相近的名稱。例如 chymotrypsin 與 trypsin 是不同酵素；原文是哪一個就保留哪一個。
+- 可加中文說明，但第一次出現時請保留英文原詞於括號中。
+"""
+
 
 def build_synthesis_prompt(
     knowledge_base: str,
@@ -63,6 +87,8 @@ def _reasoning_en(knowledge_base: str, question: str, memory_section: str) -> st
 
 {memory_section}
 
+{_term_fidelity_en()}
+
 ---
 Original question: {question}
 
@@ -114,6 +140,8 @@ def _reasoning_zh(knowledge_base: str, question: str, memory_section: str) -> st
 
 {memory_section}
 
+{_term_fidelity_zh()}
+
 ---
 原始問題：{question}
 
@@ -158,6 +186,8 @@ def _strict_en(knowledge_base: str, question: str, memory_section: str) -> str:
 
 {memory_section}
 
+{_term_fidelity_en()}
+
 ---
 Original question: {question}
 
@@ -176,6 +206,8 @@ def _strict_zh(knowledge_base: str, question: str, memory_section: str) -> str:
 {knowledge_base}
 
 {memory_section}
+
+{_term_fidelity_zh()}
 
 ---
 原始問題：{question}

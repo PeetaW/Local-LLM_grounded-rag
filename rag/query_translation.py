@@ -5,6 +5,17 @@
 import config as cfg
 
 
+def _term_fidelity_rules() -> str:
+    if not getattr(cfg, "TERM_FIDELITY_GUARD_ENABLED", False):
+        return ""
+    return (
+        "- Preserve exact English spellings for enzymes, reagents, compounds, method names, model names, and abbreviations; "
+        "include the English term in parentheses if you translate the surrounding phrase.\n"
+        "- Do not substitute near-synonyms for technical names. For example, chymotrypsin and trypsin are different enzymes; "
+        "keep whichever term appears in the source answer.\n"
+    )
+
+
 def translate_to_traditional_chinese(text: str, on_status=None) -> str:
     """
     Translate an academic answer from English to Traditional Chinese.
@@ -30,6 +41,7 @@ def translate_to_traditional_chinese(text: str, on_status=None) -> str:
         "- Paper name labels [Paper Name] → 【Paper Name】 (keep the name itself unchanged)\n"
         "- Preserve all numbers, units (wt%, °C, rpm, g, mL, h), and chemical formulas exactly.\n"
         "- Keep label tags unchanged: [Fact N], [Insufficient Evidence], [Unverified], VERIFY_PASS, VERIFY_FAIL.\n"
+        f"{_term_fidelity_rules()}"
         "- Do not add any explanation, preamble, or markdown fence.\n\n"
         f"Answer to translate:\n{text}"
     )
