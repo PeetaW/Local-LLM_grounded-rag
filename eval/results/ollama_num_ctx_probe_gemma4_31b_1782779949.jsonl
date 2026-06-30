@@ -1,0 +1,8 @@
+{"route": "/api/generate", "model": "gemma4:31b", "requested_num_ctx": 512, "status": 200, "elapsed_s": 63.0, "prompt_eval_count": 2047, "eval_count": 1, "done_reason": "length", "response": "OK", "error": null}
+{"route": "/api/generate", "model": "gemma4:31b", "requested_num_ctx": 1024, "status": 200, "elapsed_s": 3.1, "prompt_eval_count": 2047, "eval_count": 1, "done_reason": "length", "response": "OK", "error": null}
+{"route": "/api/generate", "model": "gemma4:31b", "requested_num_ctx": 2048, "status": 200, "elapsed_s": 3.2, "prompt_eval_count": 2047, "eval_count": 1, "done_reason": "length", "response": "OK", "error": null}
+{"route": "/api/generate", "model": "gemma4:31b", "requested_num_ctx": 4096, "status": 200, "elapsed_s": 25.6, "prompt_eval_count": 4095, "eval_count": 1, "done_reason": "length", "response": "OK", "error": null}
+{"route": "/v1/chat/completions", "model": "gemma4:31b", "requested_num_ctx": 512, "status": 200, "elapsed_s": 30.2, "prompt_tokens": 5633, "completion_tokens": 8, "finish_reason": "length", "response": "", "error": null}
+{"route": "/v1/chat/completions", "model": "gemma4:31b", "requested_num_ctx": 1024, "status": 200, "elapsed_s": 3.2, "prompt_tokens": 5633, "completion_tokens": 8, "finish_reason": "length", "response": "", "error": null}
+{"route": "/v1/chat/completions", "model": "gemma4:31b", "requested_num_ctx": 2048, "status": 200, "elapsed_s": 3.1, "prompt_tokens": 5633, "completion_tokens": 8, "finish_reason": "length", "response": "", "error": null}
+{"route": "/v1/chat/completions", "model": "gemma4:31b", "requested_num_ctx": 4096, "status": 200, "elapsed_s": 3.1, "prompt_tokens": 5633, "completion_tokens": 8, "finish_reason": "length", "response": "", "error": null}
