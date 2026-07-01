@@ -34,6 +34,22 @@ def _term_fidelity_zh() -> str:
 """
 
 
+def _comparison_tradeoff_en() -> str:
+    if not getattr(cfg, "COMPARISON_TRADEOFF_GUARD_ENABLED", False):
+        return ""
+    return """
+- If the question asks for a comparison of synthetic routes, include one explicit "Central trade-off:" sentence that directly contrasts high-purity/enantiopure and/or isotopically enriched material against scalability and cost-effectiveness. If a named dimension is not reported for a route, say it is not reported instead of inferring it.
+"""
+
+
+def _comparison_tradeoff_zh() -> str:
+    if not getattr(cfg, "COMPARISON_TRADEOFF_GUARD_ENABLED", False):
+        return ""
+    return """
+- 問題若要求比較合成路線，請寫出一句明確的「核心權衡：」，直接對比「高純度/光學純度與同位素富集」和「可擴展性與成本效益」。若某路線沒有報導某個指名面向，請說明「未報導」，不要自行推論。
+"""
+
+
 def build_synthesis_prompt(
     knowledge_base: str,
     question: str,
@@ -129,6 +145,7 @@ Key principles:
   For a comparison question, COMPLETENESS means covering each compared item on each named dimension —
   NOT transcribing every reaction step or value of each item. Include a specific value only when it
   bears on one of those comparison dimensions.
+{_comparison_tradeoff_en()}
 """
 
 
@@ -176,6 +193,7 @@ def _reasoning_zh(knowledge_base: str, question: str, memory_section: str) -> st
 - 問題若要求「比較/有何不同」，不要只條列事實：請依「問題指名的面向」（如機制、成本、可擴展性、同位素富集）
   明確對比各對象，把每個不同的策略/路線獨立成一類。比較題的「完整性」＝每個對象在每個指名面向上都有交代，
   **不是**把每條路線的每個步驟/數值都抄出來；某數值只有在它關乎某個對比面向時才列入。
+{_comparison_tradeoff_zh()}
 """
 
 
@@ -193,6 +211,7 @@ Original question: {question}
 
 Based on the above data, write a comprehensive and well-organized synthesized answer in English.
 If there are differences across papers, clearly compare them.
+{_comparison_tradeoff_en()}
 Only use the content from the above data; do not add your own information.
 Every factual statement must be labeled with its source [Paper Name].
 If a paper's query result indicates it does not address this topic, do not fill the gap with content from other papers; state that this paper has no relevant data.
@@ -214,6 +233,7 @@ def _strict_zh(knowledge_base: str, question: str, memory_section: str) -> str:
 
 請根據以上資料，用繁體中文撰寫一份完整、有條理的綜合回答。
 如果各論文有差異，請明確比較。
+{_comparison_tradeoff_zh()}
 只使用上述資料中的內容，不要自行補充。
 每個事實陳述都必須以【論文名稱】標注來源，不得混用不同論文的內容。
 如果某篇論文的查詢結果顯示「此論文未涉及此議題」，則不得用其他論文的內容來填補，應直接說明該論文無相關資料。

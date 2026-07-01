@@ -87,6 +87,7 @@ from rag.query_grounding_flow import (
 from rag.query_prompts import build_synthesis_prompt, build_fallback_prompt
 from rag.query_translation import translate_to_traditional_chinese
 import rag.query_pipeline as pipeline_module
+import config as cfg
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -585,6 +586,20 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
         q = "UNIQUE_QUESTION_TEXT_FOR_TEST"
         prompt = build_synthesis_prompt("kb", q, "", "strict", "zh")
         self.assertIn(q, prompt)
+
+    def test_comparison_tradeoff_guard_is_ab_switch(self):
+        old = cfg.COMPARISON_TRADEOFF_GUARD_ENABLED
+        try:
+            cfg.COMPARISON_TRADEOFF_GUARD_ENABLED = False
+            prompt = build_synthesis_prompt("kb", "Compare A and B", "", "reasoning", "en")
+            self.assertNotIn("Central trade-off", prompt)
+
+            cfg.COMPARISON_TRADEOFF_GUARD_ENABLED = True
+            prompt = build_synthesis_prompt("kb", "Compare A and B", "", "reasoning", "en")
+            self.assertIn("Central trade-off", prompt)
+            self.assertIn("high-purity", prompt)
+        finally:
+            cfg.COMPARISON_TRADEOFF_GUARD_ENABLED = old
 
 
 class TestBuildFallbackPrompt(unittest.TestCase):
