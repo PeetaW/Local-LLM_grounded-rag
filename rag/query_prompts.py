@@ -38,7 +38,7 @@ def _comparison_tradeoff_en() -> str:
     if not getattr(cfg, "COMPARISON_TRADEOFF_GUARD_ENABLED", False):
         return ""
     return """
-- If the question asks for a comparison of synthetic routes, include one explicit "Central trade-off:" sentence that directly contrasts high-purity/enantiopure and/or isotopically enriched material against scalability and cost-effectiveness. If a named dimension is not reported for a route, say it is not reported instead of inferring it.
+- If the question asks for a comparison of synthetic routes, include one explicit "Central trade-off:" sentence that synthesizes the corpus-level trade-off between high-purity/enantiopure and/or isotopically enriched material versus scalability and cost-effectiveness. Do not frame the central trade-off as one route merely not reporting a dimension; route-level missing dimensions may be mentioned only as caveats.
 """
 
 
@@ -46,7 +46,7 @@ def _comparison_tradeoff_zh() -> str:
     if not getattr(cfg, "COMPARISON_TRADEOFF_GUARD_ENABLED", False):
         return ""
     return """
-- 問題若要求比較合成路線，請寫出一句明確的「核心權衡：」，直接對比「高純度/光學純度與同位素富集」和「可擴展性與成本效益」。若某路線沒有報導某個指名面向，請說明「未報導」，不要自行推論。
+- 問題若要求比較合成路線，請寫出一句明確的「核心權衡：」，從整體文獻層級綜合「高純度/光學純度與同位素富集」相對於「可擴展性與成本效益」的取捨。不要把核心權衡寫成某一路線只是「未報導」某面向；個別路線缺少的面向只能作為 caveat 補充。
 """
 
 

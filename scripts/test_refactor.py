@@ -598,6 +598,7 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
             prompt = build_synthesis_prompt("kb", "Compare A and B", "", "reasoning", "en")
             self.assertIn("Central trade-off", prompt)
             self.assertIn("high-purity", prompt)
+            self.assertIn("corpus-level", prompt)
         finally:
             cfg.COMPARISON_TRADEOFF_GUARD_ENABLED = old
 
