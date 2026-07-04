@@ -362,6 +362,37 @@ class TestSelectRelevantPapers(unittest.TestCase):
         self.assertEqual(result, ["paper_b"])
 
 
+class TestPlanSubQuestions(unittest.TestCase):
+    def _llm_resp(self, text):
+        r = MagicMock()
+        r.text = text
+        return r
+
+    def test_comparison_prompt_preserves_original_dimensions(self):
+        papers = ["paper_a"]
+        meta = {"paper_a": {"short_desc": "desc", "main_topic": "topic"}}
+        captured = {}
+
+        def complete(prompt):
+            captured["prompt"] = prompt
+            return self._llm_resp('[{"paper": "paper_a", "sub_q": "Q?"}]')
+
+        with patch("rag.metadata_manager.load_metadata", return_value=meta):
+            with patch("rag.llm_client.planning_llm") as mock_llm:
+                mock_llm.model = "planner"
+                mock_llm.complete.side_effect = complete
+                result = plan_sub_questions(
+                    "Compare synthetic routes focusing on isotopic enrichment, scalability, and cost-effectiveness.",
+                    papers,
+                )
+
+        self.assertEqual(result[0]["paper"], "paper_a")
+        prompt = captured["prompt"]
+        self.assertIn("跨論文比較", prompt)
+        self.assertIn("reports, reviews, or compares synthetic routes", prompt)
+        self.assertIn("isotopic enrichment, scalability, cost-effectiveness, safety", prompt)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # query_retrieval — is_empty_result (pure)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -620,6 +651,8 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
             self.assertIn("review/comparison source", prompt)
             self.assertIn("route rows must directly synthesize the target compound", prompt)
             self.assertIn("compares multiple approaches", prompt)
+            self.assertIn("not background", prompt)
+            self.assertIn("exclusion", prompt)
             self.assertIn("do not include derivative/formulation/solubility", prompt)
             self.assertIn("do not leave its source implicit", prompt)
         finally:

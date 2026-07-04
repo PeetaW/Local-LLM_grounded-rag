@@ -193,6 +193,9 @@ def plan_sub_questions(question: str, paper_names: list) -> list:
    子問題應包含：
    - What is the main research objective and novelty?
    - What are the key findings and conclusions?
+6. 若問題要求跨論文比較，子問題必須保留原始問題的比較面向；不要只問 main objective/novelty。
+   例如合成路線比較題應詢問每篇論文是否 reports, reviews, or compares synthetic routes/approaches to the target compound，
+   並要求抽出與原問題指定面向相關的證據（例如 isotopic enrichment, scalability, cost-effectiveness, safety）。
 以 JSON 陣列回傳，格式如下，只輸出 JSON，不要其他文字：
 [
 {{"paper": "論文檔名（不含.pdf）或 ALL", "sub_q": "子問題內容"}},

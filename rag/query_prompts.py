@@ -59,6 +59,7 @@ def _comparison_query_scaffold_en() -> str:
 COMPARISON SCAFFOLD:
 - If the question asks for a cross-paper comparison, begin with a short "Comparison scaffold:" section using rows in this shape: source role | item/route | source paper(s) | defining evidence | relevant comparison dimensions | caveats.
 - Source role must be one of: route, review/comparison source, background. For synthetic-route questions, route rows must directly synthesize the target compound; review/comparison source rows must preserve that the paper compares multiple approaches on the question's dimensions such as scalability and cost-effectiveness; do not include derivative/formulation/solubility/biological-property papers as routes.
+- If a paper is described as reviewing, evaluating, weighing, or comparing multiple synthetic approaches, classify it as review/comparison source, not background, even if it does not provide a single experimental route. Do not invent other source roles such as exclusion.
 - Each row must name the source paper(s) that support that row. If a route comes from one paper, do not leave its source implicit.
 - Use the scaffold rows as the basis for the synthesis. Do not add risks, costs, scale-up claims, or caveats unless they are supported by the facts above or explicitly marked as speculation.
 """
@@ -71,6 +72,7 @@ def _comparison_query_scaffold_zh() -> str:
 【比較鷹架】
 - 問題若要求跨文獻比較，請先輸出一小段「比較鷹架：」，每列使用這個格式：來源角色 | 項目/路線 | 來源論文 | 定義依據 | 相關比較面向 | 限制/caveat。
 - 來源角色只能是：route、review/comparison source、background。若是合成路線題，route 列必須直接合成目標化合物；review/comparison source 列必須保留該論文「比較多種 approaches 在問題指名面向（如 scalability、cost-effectiveness）上的差異」這種綜述層級事實；不要把衍生物、劑型、增溶或生物性質論文列成合成路線。
+- 若某篇論文被描述為 reviewing、evaluating、weighing 或 comparing 多種 synthetic approaches，必須歸類為 review/comparison source，不可降成 background，即使它沒有提供單一路線實驗步驟。不可自創 exclusion 等其他來源角色。
 - 每列都必須寫出支持該列的來源論文；若某路線只來自單一論文，不可省略來源。
 - 後續綜合只能依這些鷹架列進行比較。不要加入事實清單未支持的風險、成本、放大製程主張或 caveat；除非明確標為模型推測。
 """
