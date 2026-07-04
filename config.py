@@ -91,6 +91,8 @@ SYNTHESIS_MODEL   = "gemma4:31b"    # 同時用於 Stage 3 和 Stage 4
 TERM_FIDELITY_GUARD_ENABLED = False
 # A/B：比較題強制點出 named dimensions 之間的核心 trade-off（例如純度/富集 vs 成本/放大）。
 COMPARISON_TRADEOFF_GUARD_ENABLED = False
+# A/B：比較題在 Stage 4 先輸出 query-time source-attributed comparison rows，再依 rows 綜合。
+COMPARISON_QUERY_SCAFFOLD_ENABLED = False
 
 # ── Stage 5：邏輯自洽驗證 ─────────────────────────────
 VERIFY_ENABLED      = True

@@ -599,8 +599,31 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
             self.assertIn("Central trade-off", prompt)
             self.assertIn("high-purity", prompt)
             self.assertIn("corpus-level", prompt)
+            self.assertIn("route map", prompt)
+            self.assertIn("directly synthesizes the target compound", prompt)
+            self.assertIn("Do not list derivative", prompt)
+            self.assertIn("enantioselective alkylation followed by enzymatic hydrolysis", prompt)
         finally:
             cfg.COMPARISON_TRADEOFF_GUARD_ENABLED = old
+
+    def test_comparison_query_scaffold_is_ab_switch(self):
+        old = cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED
+        try:
+            cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED = False
+            prompt = build_synthesis_prompt("kb", "Compare A and B", "", "reasoning", "en")
+            self.assertNotIn("Comparison scaffold", prompt)
+
+            cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED = True
+            prompt = build_synthesis_prompt("kb", "Compare A and B", "", "reasoning", "en")
+            self.assertIn("Comparison scaffold", prompt)
+            self.assertIn("source role | item/route | source paper(s)", prompt)
+            self.assertIn("review/comparison source", prompt)
+            self.assertIn("route rows must directly synthesize the target compound", prompt)
+            self.assertIn("compares multiple approaches", prompt)
+            self.assertIn("do not include derivative/formulation/solubility", prompt)
+            self.assertIn("do not leave its source implicit", prompt)
+        finally:
+            cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED = old
 
 
 class TestBuildFallbackPrompt(unittest.TestCase):

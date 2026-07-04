@@ -38,6 +38,7 @@ def _comparison_tradeoff_en() -> str:
     if not getattr(cfg, "COMPARISON_TRADEOFF_GUARD_ENABLED", False):
         return ""
     return """
+- For synthetic-route comparison questions, first include a compact route map that names each distinct route that directly synthesizes the target compound and its defining step(s). Do not list derivative, formulation, solubility, uptake, toxicity, or biological-property studies as synthetic routes to the target compound. If a hybrid chemo-enzymatic route is supported, explicitly state that it combines enantioselective alkylation followed by enzymatic hydrolysis.
 - If the question asks for a comparison of synthetic routes, include one explicit "Central trade-off:" sentence that synthesizes the corpus-level trade-off between high-purity/enantiopure and/or isotopically enriched material versus scalability and cost-effectiveness. Do not frame the central trade-off as one route merely not reporting a dimension; route-level missing dimensions may be mentioned only as caveats.
 """
 
@@ -46,7 +47,32 @@ def _comparison_tradeoff_zh() -> str:
     if not getattr(cfg, "COMPARISON_TRADEOFF_GUARD_ENABLED", False):
         return ""
     return """
+- 問題若要求比較合成路線，請先用精簡的路線圖列出每條「直接合成目標化合物」的不同路線及其定義步驟。不要把衍生物、劑型、增溶、攝取、毒性或生物性質研究列為目標化合物的合成路線。若文獻支持 hybrid chemo-enzymatic route，請明確寫出它結合 enantioselective alkylation followed by enzymatic hydrolysis。
 - 問題若要求比較合成路線，請寫出一句明確的「核心權衡：」，從整體文獻層級綜合「高純度/光學純度與同位素富集」相對於「可擴展性與成本效益」的取捨。不要把核心權衡寫成某一路線只是「未報導」某面向；個別路線缺少的面向只能作為 caveat 補充。
+"""
+
+
+def _comparison_query_scaffold_en() -> str:
+    if not getattr(cfg, "COMPARISON_QUERY_SCAFFOLD_ENABLED", False):
+        return ""
+    return """
+COMPARISON SCAFFOLD:
+- If the question asks for a cross-paper comparison, begin with a short "Comparison scaffold:" section using rows in this shape: source role | item/route | source paper(s) | defining evidence | relevant comparison dimensions | caveats.
+- Source role must be one of: route, review/comparison source, background. For synthetic-route questions, route rows must directly synthesize the target compound; review/comparison source rows must preserve that the paper compares multiple approaches on the question's dimensions such as scalability and cost-effectiveness; do not include derivative/formulation/solubility/biological-property papers as routes.
+- Each row must name the source paper(s) that support that row. If a route comes from one paper, do not leave its source implicit.
+- Use the scaffold rows as the basis for the synthesis. Do not add risks, costs, scale-up claims, or caveats unless they are supported by the facts above or explicitly marked as speculation.
+"""
+
+
+def _comparison_query_scaffold_zh() -> str:
+    if not getattr(cfg, "COMPARISON_QUERY_SCAFFOLD_ENABLED", False):
+        return ""
+    return """
+【比較鷹架】
+- 問題若要求跨文獻比較，請先輸出一小段「比較鷹架：」，每列使用這個格式：來源角色 | 項目/路線 | 來源論文 | 定義依據 | 相關比較面向 | 限制/caveat。
+- 來源角色只能是：route、review/comparison source、background。若是合成路線題，route 列必須直接合成目標化合物；review/comparison source 列必須保留該論文「比較多種 approaches 在問題指名面向（如 scalability、cost-effectiveness）上的差異」這種綜述層級事實；不要把衍生物、劑型、增溶或生物性質論文列成合成路線。
+- 每列都必須寫出支持該列的來源論文；若某路線只來自單一論文，不可省略來源。
+- 後續綜合只能依這些鷹架列進行比較。不要加入事實清單未支持的風險、成本、放大製程主張或 caveat；除非明確標為模型推測。
 """
 
 
@@ -146,6 +172,7 @@ Key principles:
   NOT transcribing every reaction step or value of each item. Include a specific value only when it
   bears on one of those comparison dimensions.
 {_comparison_tradeoff_en()}
+{_comparison_query_scaffold_en()}
 """
 
 
@@ -194,6 +221,7 @@ def _reasoning_zh(knowledge_base: str, question: str, memory_section: str) -> st
   明確對比各對象，把每個不同的策略/路線獨立成一類。比較題的「完整性」＝每個對象在每個指名面向上都有交代，
   **不是**把每條路線的每個步驟/數值都抄出來；某數值只有在它關乎某個對比面向時才列入。
 {_comparison_tradeoff_zh()}
+{_comparison_query_scaffold_zh()}
 """
 
 
@@ -212,6 +240,7 @@ Original question: {question}
 Based on the above data, write a comprehensive and well-organized synthesized answer in English.
 If there are differences across papers, clearly compare them.
 {_comparison_tradeoff_en()}
+{_comparison_query_scaffold_en()}
 Only use the content from the above data; do not add your own information.
 Every factual statement must be labeled with its source [Paper Name].
 If a paper's query result indicates it does not address this topic, do not fill the gap with content from other papers; state that this paper has no relevant data.
@@ -234,6 +263,7 @@ def _strict_zh(knowledge_base: str, question: str, memory_section: str) -> str:
 請根據以上資料，用繁體中文撰寫一份完整、有條理的綜合回答。
 如果各論文有差異，請明確比較。
 {_comparison_tradeoff_zh()}
+{_comparison_query_scaffold_zh()}
 只使用上述資料中的內容，不要自行補充。
 每個事實陳述都必須以【論文名稱】標注來源，不得混用不同論文的內容。
 如果某篇論文的查詢結果顯示「此論文未涉及此議題」，則不得用其他論文的內容來填補，應直接說明該論文無相關資料。
