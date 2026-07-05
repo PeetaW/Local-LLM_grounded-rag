@@ -59,13 +59,14 @@ def _comparison_query_scaffold_en() -> str:
         return ""
     return """
 COMPARISON SCAFFOLD:
-- If the question asks for a cross-paper comparison, begin with a short "Comparison scaffold:" section using rows in this shape: source role | item/route | source paper(s) | defining evidence | relevant comparison dimensions | caveats.
-- Source role must be one of: route, review/comparison source, background. For synthetic-route questions, route rows must directly synthesize the target compound; review/comparison source rows must preserve that the paper compares multiple approaches on the question's dimensions such as scalability and cost-effectiveness; do not include derivative/formulation/solubility/biological-property papers as routes.
+- If the question asks for a cross-paper comparison, begin with a short "Comparison scaffold:" section using one short bullet per relevant source role. Do not use a Markdown table.
+- Source role must be one of: route, review/comparison source, background. For synthetic-route questions, route bullets must directly synthesize the target compound; review/comparison source bullets must preserve that the paper compares multiple approaches on the question's dimensions such as scalability and cost-effectiveness; do not include derivative/formulation/solubility/biological-property papers as routes.
 - If a paper is described as reviewing, evaluating, weighing, or comparing multiple synthetic approaches, classify it as review/comparison source, not background, even if it does not provide a single experimental route. Do not invent other source roles such as exclusion.
-- The scaffold is the only route table. Do not add a second route map, exhaustive historical route variants, or every yield/condition unless the user explicitly asks for full experimental conditions.
-- For high-level comparison questions, use reference-level qualitative summaries. Do not include exact temperatures, pH values, yields, cost multipliers, reagent amounts, named intermediates, or detailed operational conditions unless the user explicitly asks for numeric/procedural details. Keep only broad route identifiers and dimension-bearing qualitative evidence.
-- Each row must name the source paper(s) that support that row. If a route comes from one paper, do not leave its source implicit.
-- After the scaffold, write only a concise synthesis of at most 3 short paragraphs: direct route(s), review/comparison source(s), and the central trade-off. Do not add separate sections for route families, derivative/formulation context, safety reviews, or long numeric yield/condition details unless the user explicitly asks for them.
+- For synthetic-route comparison questions, do not include background rows unless they directly compare synthesis of the target compound on the requested dimensions.
+- The scaffold is the only route map. Do not add exhaustive historical route variants or every yield/condition unless the user explicitly asks for full experimental conditions.
+- For high-level comparison questions, use reference-level qualitative summaries. Do not include exact temperatures, pH values, yields, cost multipliers, route family lists, patent names, reagent/catalyst/oxidant names, named intermediates, protecting groups, or detailed operational conditions unless the user explicitly asks for numeric/procedural details. Keep only broad route identifiers and dimension-bearing qualitative evidence.
+- Each bullet must name the source paper(s) that support that bullet. If a route comes from one paper, do not leave its source implicit.
+- After the scaffold, write exactly two short evidence bullets followed by one "Central trade-off:" sentence. One bullet should summarize the direct route evidence; one bullet should summarize the review/comparison source evidence. Do not add separate sections or expand beyond the scaffold with route/reagent examples, route families, derivative/formulation context, safety reviews, or numeric/procedural details unless the user explicitly asks for them.
 """
 
 
@@ -74,13 +75,14 @@ def _comparison_query_scaffold_zh() -> str:
         return ""
     return """
 【比較鷹架】
-- 問題若要求跨文獻比較，請先輸出一小段「比較鷹架：」，每列使用這個格式：來源角色 | 項目/路線 | 來源論文 | 定義依據 | 相關比較面向 | 限制/caveat。
-- 來源角色只能是：route、review/comparison source、background。若是合成路線題，route 列必須直接合成目標化合物；review/comparison source 列必須保留該論文「比較多種 approaches 在問題指名面向（如 scalability、cost-effectiveness）上的差異」這種綜述層級事實；不要把衍生物、劑型、增溶或生物性質論文列成合成路線。
+- 問題若要求跨文獻比較，請先輸出一小段「比較鷹架：」，每個相關 source role 只用一個短 bullet。不要使用 Markdown 表格。
+- 來源角色只能是：route、review/comparison source、background。若是合成路線題，route bullet 必須直接合成目標化合物；review/comparison source bullet 必須保留該論文「比較多種 approaches 在問題指名面向（如 scalability、cost-effectiveness）上的差異」這種綜述層級事實；不要把衍生物、劑型、增溶或生物性質論文列成合成路線。
 - 若某篇論文被描述為 reviewing、evaluating、weighing 或 comparing 多種 synthetic approaches，必須歸類為 review/comparison source，不可降成 background，即使它沒有提供單一路線實驗步驟。不可自創 exclusion 等其他來源角色。
-- 比較鷹架就是唯一的路線表。不要再輸出第二個 route map、完整歷史路線變體清單，或每個產率/條件；除非使用者明確要求完整實驗條件。
-- 若是高層比較題，請使用 reference-level qualitative summaries。不要列出精確溫度、pH、產率、成本倍數、試劑用量、具名中間體或詳細操作條件；除非使用者明確要求數值或實驗操作細節。只保留寬層級路線辨識與和比較面向直接相關的定性證據。
-- 每列都必須寫出支持該列的來源論文；若某路線只來自單一論文，不可省略來源。
-- 鷹架後最多只寫三段短綜合：直接路線、review/comparison source、核心權衡。不要另開 route family、derivative/formulation context、安全性綜述或長篇數值/條件細節段落，除非使用者明確要求。
+- 若是合成路線比較題，不要列出 background rows，除非該來源直接比較目標化合物合成在問題指定面向上的差異。
+- 比較鷹架就是唯一的 route map。不要再輸出完整歷史路線變體清單，或每個產率/條件；除非使用者明確要求完整實驗條件。
+- 若是高層比較題，請使用 reference-level qualitative summaries。不要列出精確溫度、pH、產率、成本倍數、route family lists、專利名稱、試劑/催化劑/氧化劑名稱、具名中間體、保護基或詳細操作條件；除非使用者明確要求數值或實驗操作細節。只保留寬層級路線辨識與和比較面向直接相關的定性證據。
+- 每個 bullet 都必須寫出支持該列的來源論文；若某路線只來自單一論文，不可省略來源。
+- 鷹架後只能寫兩個短 evidence bullets，接著寫一句「核心權衡：」。一個 bullet 摘要直接路線證據；一個 bullet 摘要 review/comparison source 證據。不要另開段落標題，也不要超出鷹架再展開 route/reagent examples、route families、derivative/formulation context、安全性綜述或數值/操作細節，除非使用者明確要求。
 """
 
 
