@@ -523,6 +523,37 @@ class TestRunSubqueriesParallel(unittest.TestCase):
         run_subqueries_parallel(valid_tasks, {}, on_status=statuses.append)
         self.assertTrue(any("[retrieval-timing]" in s for s in statuses))
 
+    @patch("rag.query_retrieval._generate_from_nodes", return_value="Generated answer")
+    @patch("rag.query_retrieval._retrieve_nodes", return_value=["raw evidence"])
+    @patch("rag.query_retrieval.prepare_query_text", return_value="clean query")
+    def test_evidence_mode_skips_subanswer_llm(self, _, __, mock_generate):
+        old = cfg.STAGE2_LLM_SUBANSWERS_ENABLED
+        try:
+            cfg.STAGE2_LLM_SUBANSWERS_ENABLED = False
+            with patch("rag.metadata_manager.load_metadata", return_value={
+                "PaperA": {"title": "A Comprehensive Review of Routes", "short_desc": ""}
+            }):
+                results = run_subqueries_parallel([(0, "【PaperA】", MagicMock(), "Q?")], {})
+            self.assertIn("Retrieved evidence snippets", results[0][1])
+            self.assertIn("role_hint=review/comparison source", results[0][1])
+            self.assertIn("not paper evidence", results[0][1])
+            mock_generate.assert_not_called()
+        finally:
+            cfg.STAGE2_LLM_SUBANSWERS_ENABLED = old
+
+    @patch("rag.query_retrieval._generate_from_nodes", return_value="Generated answer")
+    @patch("rag.query_retrieval._retrieve_nodes", return_value=["raw evidence"])
+    @patch("rag.query_retrieval.prepare_query_text", return_value="clean query")
+    def test_subanswer_mode_uses_llm(self, _, __, mock_generate):
+        old = cfg.STAGE2_LLM_SUBANSWERS_ENABLED
+        try:
+            cfg.STAGE2_LLM_SUBANSWERS_ENABLED = True
+            results = run_subqueries_parallel([(0, "【PaperA】", MagicMock(), "Q?")], {})
+            self.assertEqual(results[0][1], "Generated answer")
+            mock_generate.assert_called_once()
+        finally:
+            cfg.STAGE2_LLM_SUBANSWERS_ENABLED = old
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # eval.metrics — retrieval timing parse
@@ -726,6 +757,7 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
             self.assertIn("METHOD KEY STEPS", prompt)
             self.assertIn("process-defining level", prompt)
             self.assertIn("Do not promote starting-material preparation/protection", prompt)
+            self.assertIn("Do not write exclusion notes", prompt)
             self.assertIn("acidic hydrolysis/deprotection of the auxiliary", prompt)
             self.assertIn("chymotrypsin-catalysed enzymatic hydrolysis", prompt)
             self.assertIn("not as a key step", prompt)

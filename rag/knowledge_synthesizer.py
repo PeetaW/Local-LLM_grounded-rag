@@ -23,11 +23,63 @@ _TERM_FIDELITY_RULES = """
 8. 禁止近義替換：chymotrypsin 與 trypsin 是不同酵素；原文寫哪一個就逐字保留哪一個
 """
 
+_COMPARISON_QUERY_HINTS = (
+    "compare", "comparison", "different", "difference", "route", "routes",
+    "approach", "approaches", "scalability", "cost-effectiveness", "cost",
+    "isotopic", "enrichment", "比較", "差異", "不同", "路線", "策略",
+    "可擴展", "放大", "成本", "同位素", "富集",
+)
+
 
 def _system_prompt() -> str:
     if getattr(cfg, "TERM_FIDELITY_GUARD_ENABLED", False):
         return _BASE_SYNTHESIS_SYSTEM_PROMPT + _TERM_FIDELITY_RULES
     return _BASE_SYNTHESIS_SYSTEM_PROMPT
+
+
+def _is_comparison_query(query: str) -> bool:
+    text = (query or "").lower()
+    return any(hint in text for hint in _COMPARISON_QUERY_HINTS)
+
+
+def _comparison_schema_instruction(query: str) -> str:
+    if not getattr(cfg, "STAGE3_COMPARISON_SCHEMA_ENABLED", False):
+        return ""
+    if not _is_comparison_query(query):
+        return ""
+    return """
+【比較題蒸餾格式】
+若問題要求比較，請用下列小節整理事實；沒有資料的小節可省略：
+
+[source_roles]
+- source: ...; role: route / review/comparison source / background; evidence: ...（來源：...）
+
+[direct_route_evidence]
+- 只放直接合成目標化合物的路線事實。
+
+[review_comparison_evidence]
+- 若 Source metadata 出現 role_hint=review/comparison source，保留它是綜述/比較來源，不要改寫成該文提供單一路線。
+
+[dimension_evidence]
+- scalability: ...
+- cost-effectiveness: ...
+- isotopic enrichment: ...
+
+額外規則：
+- Source metadata 與 guidance lines 只用來判斷來源角色；它們 are not paper evidence，不可當作可引用論文事實。
+- review/comparison source 若描述某路線，只能寫「該綜述/比較來源報導或比較某路線」，不要寫成「該論文提供/實作該合成路線」。
+- 保留問題指名的比較面向；與面向無關的實驗條件、產率、試劑細節可省略。
+""".strip()
+
+
+def _build_user_prompt(formatted: str, query: str) -> str:
+    schema = _comparison_schema_instruction(query)
+    schema_block = f"\n\n{schema}" if schema else ""
+    return (
+        f"參考問題方向（僅供整理聚焦，不影響事實陳述）：{query}{schema_block}\n\n"
+        f"請將以下論文段落整理為結構化已知事實清單：\n\n"
+        f"--- 論文段落開始 ---\n{formatted}\n--- 論文段落結束 ---"
+    )
 
 
 class KnowledgeSynthesizer:
@@ -77,11 +129,7 @@ class KnowledgeSynthesizer:
         formatted = self._format_chunks(chunks)
         total_chars = sum(len(c.get("text","")) for c in chunks)
 
-        user_prompt = (
-            f"參考問題方向（僅供整理聚焦，不影響事實陳述）：{query}\n\n"
-            f"請將以下論文段落整理為結構化已知事實清單：\n\n"
-            f"--- 論文段落開始 ---\n{formatted}\n--- 論文段落結束 ---"
-        )
+        user_prompt = _build_user_prompt(formatted, query)
 
         def _status(msg):
             if on_status:

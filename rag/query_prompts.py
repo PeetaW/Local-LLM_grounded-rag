@@ -93,6 +93,7 @@ def _method_key_step_en() -> str:
 METHOD KEY STEPS:
 - If the question asks for a hybrid process, method, or key steps, answer at the process-defining level, not as a full experimental protocol.
 - Do not promote starting-material preparation/protection, background/previous methods, analytical characterization, workup, or alternative/control routes into key steps unless the user explicitly asks for a full protocol.
+- Use the previous exclusion rule only to omit non-core details. Do not write exclusion notes such as "starting-material preparation is not a core step"; simply leave non-core steps out unless the paper explicitly states that exclusion.
 - For the L-p-boronophenylalanine hybrid chemo-enzymatic process, the core key steps are: enantioselective alkylation to set the stereocentre; acidic hydrolysis/deprotection of the auxiliary to give the amino-acid methyl ester; chymotrypsin-catalysed enzymatic hydrolysis to optically pure L-BPA. Mention non-enzymatic hydrolysis only as a comparison/caveat, not as a key step.
 """
 
@@ -104,6 +105,7 @@ def _method_key_step_zh() -> str:
 【方法題核心步驟】
 - 問題若詢問 hybrid process、method 或 key steps，請用「定義該製程的核心步驟」回答，不要寫成完整實驗 protocol。
 - 不要把起始物準備/保護、背景/先前方法、分析表徵、workup、替代或對照路線升格成 key steps，除非使用者明確要求完整 protocol。
+- 上一條排除規則只用來省略非核心細節。不要輸出「某步驟不是核心步驟」這類排除說明；除非論文明確這樣說，直接省略非核心步驟即可。
 - 若題目是 L-p-boronophenylalanine 的 hybrid chemo-enzymatic process，核心 key steps 是：enantioselective alkylation 建立手性中心；acidic hydrolysis/deprotection of the auxiliary 得到 amino-acid methyl ester；chymotrypsin-catalysed enzymatic hydrolysis 得到 optically pure L-BPA。non-enzymatic hydrolysis 只能作為比較/caveat，不可列為 key step。
 """
 

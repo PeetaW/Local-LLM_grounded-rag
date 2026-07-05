@@ -97,6 +97,40 @@ def _generate_from_nodes(engine, nodes, query_text: str) -> str:
     return str(response)
 
 
+def _source_note(label: str) -> str:
+    name = label.strip("【】")
+    try:
+        from rag.metadata_manager import load_metadata
+        meta = load_metadata().get(name, {})
+    except Exception:
+        meta = {}
+    title = str(meta.get("title", "") or "")
+    desc = str(meta.get("short_desc", "") or "")
+    role = "review/comparison source" if "review" in title.lower() or "綜述" in desc else "paper source"
+    return f"Source metadata (not paper evidence): role_hint={role}; title={title or name}; desc={desc}"
+
+
+def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
+    if nodes is None:
+        return "No standalone retriever output was available."
+    if not nodes:
+        return "No relevant retrieved evidence snippets."
+
+    lines = [
+        f"Sub-question: {query_text}",
+        _source_note(label),
+        "Use only snippets below as citable paper evidence; metadata/guidance lines are not paper evidence.",
+        "Retrieved evidence snippets:",
+    ]
+    # ponytail: fixed tiny evidence pack; tune count/length only if eval shows quality loss.
+    for i, nws in enumerate(nodes[:2], 1):
+        node = getattr(nws, "node", nws)
+        text = node.get_content() if hasattr(node, "get_content") else str(node)
+        text = " ".join(text.split())[:900]
+        lines.append(f"[Snippet {i}] {text}")
+    return "\n".join(lines)
+
+
 def build_subquery_tasks(sub_questions: list, paper_engines_to_use: dict, paper_engines: dict):
     """
     Flatten sub_questions × papers into a task list.
@@ -183,10 +217,13 @@ def run_subqueries_parallel(valid_tasks: list, prefilled: dict, on_status=None) 
     for task_idx in sorted(retrieved.keys()):
         label, engine, query_text, nodes = retrieved[task_idx]
         try:
-            result = _generate_from_nodes(engine, nodes, query_text)
-            # P1 診斷：區分「檢索回空」與「有 node 但生成回空」
-            tag = "（空/無內容）" if is_empty_result(result) else ""
-            print(f"  ✍️  [Phase B] {label} 生成 {len(result)} 字元 {tag}")
+            if cfg.STAGE2_LLM_SUBANSWERS_ENABLED:
+                result = _generate_from_nodes(engine, nodes, query_text)
+                tag = "（空/無內容）" if is_empty_result(result) else ""
+                print(f"  ✍️  [Phase B] {label} 生成 {len(result)} 字元 {tag}")
+            else:
+                result = _nodes_to_evidence_block(nodes, query_text, label)
+                print(f"  🧾 [Phase B] {label} evidence block {len(result)} 字元")
             results[task_idx] = (label, result)
         except Exception as e:
             print(f"  ❌ [Phase B] {label} 生成例外：{e}")

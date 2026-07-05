@@ -93,6 +93,8 @@ TERM_FIDELITY_GUARD_ENABLED = True
 COMPARISON_TRADEOFF_GUARD_ENABLED = True
 # A/B：比較題在 Stage 4 先輸出 query-time source-attributed comparison rows，再依 rows 綜合。
 COMPARISON_QUERY_SCAFFOLD_ENABLED = True
+# A/B：比較題在 Stage 3 保留 source role 與比較面向，避免 review/comparison source 被壓成 route。
+STAGE3_COMPARISON_SCHEMA_ENABLED = True
 # A/B：方法/key-step 題只摘要核心步驟，不把起始物準備、背景方法或替代/對照路線升格成 key steps。
 METHOD_KEY_STEP_GUARD_ENABLED = True
 
@@ -107,6 +109,8 @@ JUDGE_MODEL         = VERIFY_MODEL
 
 # ── Stage 2：並行子查詢 ────────────────────────────────
 SUBQUERY_MAX_WORKERS = 4   # 並行子查詢的 thread pool 大小
+# A/B：True=每個子查詢先用 LLM 生成子答案；False=直接把 retrieved chunks 打包給 Stage 3 蒸餾。
+STAGE2_LLM_SUBANSWERS_ENABLED = False
 
 # ── 各 Stage num_ctx 設定 ──────────────────────────────
 # Stage 1（qwen2.5:14b）與 Stage 4（gemma4:31b）透過 LlamaIndex 呼叫，
