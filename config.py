@@ -25,7 +25,7 @@ OLLAMA_BASE_URL   = "http://localhost:11434"
 OLLAMA_API_KEY    = "ollama"   # Ollama 不需要真實 key，固定填這個
 
 # ── LLM 設定 ──────────────────────────────────────────
-LLM_MODEL         = "gemma4:31b"
+LLM_MODEL         = "qwen3.5:27b"
 PLANNING_LLM_MODEL = "qwen2.5:14b"
 VL_MODEL = "qwen3-vl:32b"
 VL_AUTO_RUN = True
@@ -43,7 +43,7 @@ CITATION_GROUNDING_ENABLED = True   # 改成 False 可以關閉審查
 # "strict"    → 只引用論文原文，不做推論（高精確度，防幻覺）
 # "reasoning" → 允許跨文獻推論與知識延伸，但必須標注認知層次
 # 可在對話中動態切換，或在這裡設定預設值
-REASONING_MODE = "reasoning"
+REASONING_MODE = "strict"
 
 
 LLM_SYSTEM_PROMPT = (
@@ -88,11 +88,13 @@ RERANKER_TOP_N     = 8       # 最終餵給 gemma4 的 chunk 數
 SYNTHESIS_ENABLED = True
 SYNTHESIS_MODEL   = "gemma4:31b"    # 同時用於 Stage 3 和 Stage 4
 # A/B：保留英文專有名詞，避免 chymotrypsin/trypsin 這類酵素名在蒸餾/翻譯中被近義替換。
-TERM_FIDELITY_GUARD_ENABLED = False
+TERM_FIDELITY_GUARD_ENABLED = True
 # A/B：比較題強制點出 named dimensions 之間的核心 trade-off（例如純度/富集 vs 成本/放大）。
-COMPARISON_TRADEOFF_GUARD_ENABLED = False
+COMPARISON_TRADEOFF_GUARD_ENABLED = True
 # A/B：比較題在 Stage 4 先輸出 query-time source-attributed comparison rows，再依 rows 綜合。
-COMPARISON_QUERY_SCAFFOLD_ENABLED = False
+COMPARISON_QUERY_SCAFFOLD_ENABLED = True
+# A/B：方法/key-step 題只摘要核心步驟，不把起始物準備、背景方法或替代/對照路線升格成 key steps。
+METHOD_KEY_STEP_GUARD_ENABLED = True
 
 # ── Stage 5：邏輯自洽驗證 ─────────────────────────────
 VERIFY_ENABLED      = True
@@ -132,7 +134,7 @@ SELFCORRECT_ENTAIL_MAX = 0.2
 # 可答性 gate（answerability gate）：Stage 3 之後判蒸餾 KB 是否含答案（三分 ANSWERABLE/PARTIAL/
 # NOT_ANSWERABLE）。ANSWERABLE→正常；PARTIAL→生成+軟警告橫幅；NOT_ANSWERABLE→誠實硬棄答（跳 Stage 4-7）。
 # 預設開（baseline_v5 驗證：零誤殺硬棄答、PARTIAL 精準命中最弱兩題 Q07/Q08、Q12 棄答 corr 1.0、總延遲未增）。
-ANSWERABILITY_GATE_ENABLED = True
+ANSWERABILITY_GATE_ENABLED = False
 # English-first pipeline：全流程用英文（Stage 4 輸出英文 → Stage 5 英文驗證 → NLI EN-vs-EN → 最後翻譯成繁體中文）
 # 優點：NLI 從跨語言變單語言（大幅提升 entailment 準確度），Verifier 推論邏輯更穩定
 # 注意：開啟後 NLI_TRANSLATE_TO_EN 會自動跳過（draft 已是英文，不需要再翻）

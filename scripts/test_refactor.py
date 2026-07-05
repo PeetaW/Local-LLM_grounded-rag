@@ -15,6 +15,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval"))
 
 # ── Windows UTF-8 fix ────────────────────────────────────────────────────────
 # Debug print statements in the rag modules use emoji (🔬 ⏳ 📋 🔗 …).
@@ -87,6 +88,7 @@ from rag.query_grounding_flow import (
 from rag.query_prompts import build_synthesis_prompt, build_fallback_prompt
 from rag.query_translation import translate_to_traditional_chinese
 import rag.query_pipeline as pipeline_module
+import metrics as eval_metrics
 import config as cfg
 
 
@@ -512,6 +514,31 @@ class TestRunSubqueriesParallel(unittest.TestCase):
         self.assertEqual(results[0][0], "【PaperB】")
         self.assertEqual(results[1][0], "【PaperA】")
 
+    @patch("rag.query_retrieval._generate_from_nodes", return_value="Answer")
+    @patch("rag.query_retrieval._retrieve_nodes", return_value=[])
+    @patch("rag.query_retrieval.prepare_query_text", return_value="q")
+    def test_emits_retrieval_timing_status(self, *_):
+        statuses = []
+        valid_tasks = [(0, "【PaperA】", MagicMock(), "Q?")]
+        run_subqueries_parallel(valid_tasks, {}, on_status=statuses.append)
+        self.assertTrue(any("[retrieval-timing]" in s for s in statuses))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# eval.metrics — retrieval timing parse
+# ══════════════════════════════════════════════════════════════════════════════
+class TestEvalMetrics(unittest.TestCase):
+    def test_parse_retrieval_timing(self):
+        lat = eval_metrics.parse_stage_latencies([
+            "[retrieval] 完成 rag_found=True elapsed_ms=100",
+            "[retrieval-timing] tasks=3 prefilled=1 phase_a_ms=20 phase_b_ms=80",
+        ])
+        self.assertEqual(lat["retrieval"], 100)
+        self.assertEqual(lat["retrieval_tasks"], 3)
+        self.assertEqual(lat["retrieval_prefilled"], 1)
+        self.assertEqual(lat["retrieval_phase_a"], 20)
+        self.assertEqual(lat["retrieval_phase_b"], 80)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # query_grounding_flow — section extraction (pure regex)
@@ -687,6 +714,24 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
             cfg.COMPARISON_TRADEOFF_GUARD_ENABLED = old_tradeoff
             cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED = old_scaffold
 
+    def test_method_key_step_guard_is_ab_switch(self):
+        old = cfg.METHOD_KEY_STEP_GUARD_ENABLED
+        try:
+            cfg.METHOD_KEY_STEP_GUARD_ENABLED = False
+            prompt = build_synthesis_prompt("kb", "What are the key steps?", "", "strict", "en")
+            self.assertNotIn("METHOD KEY STEPS", prompt)
+
+            cfg.METHOD_KEY_STEP_GUARD_ENABLED = True
+            prompt = build_synthesis_prompt("kb", "What are the key steps?", "", "strict", "en")
+            self.assertIn("METHOD KEY STEPS", prompt)
+            self.assertIn("process-defining level", prompt)
+            self.assertIn("Do not promote starting-material preparation/protection", prompt)
+            self.assertIn("acidic hydrolysis/deprotection of the auxiliary", prompt)
+            self.assertIn("chymotrypsin-catalysed enzymatic hydrolysis", prompt)
+            self.assertIn("not as a key step", prompt)
+        finally:
+            cfg.METHOD_KEY_STEP_GUARD_ENABLED = old
+
 
 class TestBuildFallbackPrompt(unittest.TestCase):
     def test_contains_question(self):
@@ -739,6 +784,7 @@ def _setup_cfg(cfg_mock):
     cfg_mock.SYNTHESIS_ENABLED = False
     cfg_mock.VERIFY_ENABLED = False
     cfg_mock.CITATION_GROUNDING_ENABLED = False
+    cfg_mock.ANSWERABILITY_GATE_ENABLED = False
     cfg_mock.EN_DRAFT_PIPELINE = False
     cfg_mock.REASONING_MODE = "strict"
     cfg_mock.SUBQUERY_MAX_WORKERS = 1

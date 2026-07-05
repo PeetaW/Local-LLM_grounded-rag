@@ -4,6 +4,7 @@
 # Phase B (serial):   LLM answer generation (gemma4 loaded once).
 
 import concurrent.futures
+import time
 
 import config as cfg
 from rag.query_embedding_guard import prepare_query_text
@@ -134,7 +135,7 @@ def build_subquery_tasks(sub_questions: list, paper_engines_to_use: dict, paper_
     return valid_tasks, prefilled
 
 
-def run_subqueries_parallel(valid_tasks: list, prefilled: dict) -> list:
+def run_subqueries_parallel(valid_tasks: list, prefilled: dict, on_status=None) -> list:
     """
     Two-phase execution to minimise Ollama model-switching overhead:
       Phase A (parallel): embed guard + vector retrieval (bge-m3 stays loaded)
@@ -142,9 +143,17 @@ def run_subqueries_parallel(valid_tasks: list, prefilled: dict) -> list:
 
     Returns list of (label, result_str) in original sub-question order.
     """
+    def _status(msg):
+        if on_status:
+            on_status(msg)
+        else:
+            print(msg)
+
     results = dict(prefilled)
 
     # ── Phase A: parallel embed + retrieval ─────────────────────────
+    phase_a_start = time.perf_counter()
+
     def _retrieve_one(task):
         task_idx, label, engine, sub_q = task
         try:
@@ -167,8 +176,10 @@ def run_subqueries_parallel(valid_tasks: list, prefilled: dict) -> list:
         for f in concurrent.futures.as_completed(futures):
             task_idx, label, engine, query_text, nodes = f.result()
             retrieved[task_idx] = (label, engine, query_text, nodes)
+    phase_a_ms = int((time.perf_counter() - phase_a_start) * 1000)
 
     # ── Phase B: serial LLM generation (gemma4 loaded once) ─────────
+    phase_b_start = time.perf_counter()
     for task_idx in sorted(retrieved.keys()):
         label, engine, query_text, nodes = retrieved[task_idx]
         try:
@@ -180,5 +191,10 @@ def run_subqueries_parallel(valid_tasks: list, prefilled: dict) -> list:
         except Exception as e:
             print(f"  ❌ [Phase B] {label} 生成例外：{e}")
             results[task_idx] = (label, f"{label}生成失敗：{e}")
+    phase_b_ms = int((time.perf_counter() - phase_b_start) * 1000)
+    _status(
+        f"[retrieval-timing] tasks={len(valid_tasks)} prefilled={len(prefilled)} "
+        f"phase_a_ms={phase_a_ms} phase_b_ms={phase_b_ms}"
+    )
 
     return [(label, result) for _, (label, result) in sorted(results.items())]

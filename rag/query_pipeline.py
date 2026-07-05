@@ -86,7 +86,7 @@ def execute_structured_query(
     _status(f"\n[retrieval] 開始")
     _status(f"\n  ⚡ 並行檢索 {len(sub_questions)} 個子問題中（workers={cfg.SUBQUERY_MAX_WORKERS}）...")
     valid_tasks, prefilled = build_subquery_tasks(sub_questions, paper_engines_to_use, paper_engines)
-    ordered_results = run_subqueries_parallel(valid_tasks, prefilled)
+    ordered_results = run_subqueries_parallel(valid_tasks, prefilled, on_status=_status)
 
     sub_answers = []
     rag_found_anything = False
@@ -250,7 +250,10 @@ def execute_structured_query_stream(
     rag_found_anything = False
     yield f"[STATUS] ⚡ 並行檢索 {len(sub_questions)} 個子問題中（workers={cfg.SUBQUERY_MAX_WORKERS}）...\n"
     valid_tasks, prefilled = build_subquery_tasks(sub_questions, paper_engines_to_use, paper_engines)
-    ordered_results = run_subqueries_parallel(valid_tasks, prefilled)
+    retrieval_msgs = []
+    ordered_results = run_subqueries_parallel(valid_tasks, prefilled, on_status=retrieval_msgs.append)
+    for msg in retrieval_msgs:
+        yield f"[STATUS] {msg}\n"
 
     for label, result in ordered_results:
         sub_answers.append(f"{label}\n{result}")

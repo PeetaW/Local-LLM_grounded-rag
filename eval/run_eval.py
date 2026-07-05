@@ -167,6 +167,8 @@ def _write_markdown_report(out: dict, path: str):
     L.append(f"| 平均總延遲 | {_ms_to_s(s.get('avg_total_ms'))} |")
     L.append(f"| 平均 planning 延遲 | {_ms_to_s(s.get('avg_planning_ms'))} |")
     L.append(f"| 平均 retrieval 延遲 | {_ms_to_s(s.get('avg_retrieval_ms'))} |")
+    L.append(f"| └ Phase A embed/vector/BM25 | {_ms_to_s(s.get('avg_retrieval_phase_a_ms'))} |")
+    L.append(f"| └ Phase B 子答案生成 | {_ms_to_s(s.get('avg_retrieval_phase_b_ms'))} |")
     L.append(f"| 平均 grounding 延遲 | {_ms_to_s(s.get('avg_grounding_ms'))} |")
     L.append(f"| └ 其中 NLI | {_ms_to_s(s.get('avg_grounding_nli_ms'))} |")
     L.append(f"| └ 其中 gemma4 | {_ms_to_s(s.get('avg_grounding_llm_ms'))} |")

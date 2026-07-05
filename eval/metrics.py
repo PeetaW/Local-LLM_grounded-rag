@@ -34,6 +34,15 @@ def parse_stage_latencies(status_lines: list) -> dict:
     ml = re.search(r'grounding-timing[^\n]*?llm_ms=(\d+)', text)
     out["grounding_nli"] = int(mn.group(1)) if mn else None
     out["grounding_llm"] = int(ml.group(1)) if ml else None
+    rt = re.search(
+        r'retrieval-timing[^\n]*?tasks=(\d+)[^\n]*?prefilled=(\d+)'
+        r'[^\n]*?phase_a_ms=(\d+)[^\n]*?phase_b_ms=(\d+)',
+        text,
+    )
+    out["retrieval_tasks"] = int(rt.group(1)) if rt else None
+    out["retrieval_prefilled"] = int(rt.group(2)) if rt else None
+    out["retrieval_phase_a"] = int(rt.group(3)) if rt else None
+    out["retrieval_phase_b"] = int(rt.group(4)) if rt else None
     return out
 
 
@@ -109,6 +118,8 @@ def summarize(rows: list) -> dict:
         "avg_total_ms":         _avg("latency", "total"),
         "avg_planning_ms":      _avg("latency", "planning"),
         "avg_retrieval_ms":     _avg("latency", "retrieval"),
+        "avg_retrieval_phase_a_ms": _avg("latency", "retrieval_phase_a"),
+        "avg_retrieval_phase_b_ms": _avg("latency", "retrieval_phase_b"),
         "avg_grounding_ms":     _avg("latency", "grounding"),
         "avg_grounding_nli_ms": _avg("latency", "grounding_nli"),
         "avg_grounding_llm_ms": _avg("latency", "grounding_llm"),
