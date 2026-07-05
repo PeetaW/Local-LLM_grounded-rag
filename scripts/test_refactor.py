@@ -389,8 +389,9 @@ class TestPlanSubQuestions(unittest.TestCase):
         self.assertEqual(result[0]["paper"], "paper_a")
         prompt = captured["prompt"]
         self.assertIn("跨論文比較", prompt)
-        self.assertIn("reports, reviews, or compares synthetic routes", prompt)
+        self.assertIn("reports, reviews, or compares high-level synthetic approaches", prompt)
         self.assertIn("isotopic enrichment, scalability, cost-effectiveness, safety", prompt)
+        self.assertIn("不要詢問 exhaustive procedural details", prompt)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -653,10 +654,33 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
             self.assertIn("compares multiple approaches", prompt)
             self.assertIn("not background", prompt)
             self.assertIn("exclusion", prompt)
+            self.assertIn("only route table", prompt)
+            self.assertIn("second route map", prompt)
+            self.assertIn("exhaustive historical route variants", prompt)
+            self.assertIn("reference-level qualitative summaries", prompt)
+            self.assertIn("exact temperatures", prompt)
+            self.assertIn("cost multipliers", prompt)
+            self.assertIn("broad route identifiers", prompt)
+            self.assertIn("at most 3 short paragraphs", prompt)
+            self.assertIn("Do not add separate sections", prompt)
             self.assertIn("do not include derivative/formulation/solubility", prompt)
             self.assertIn("do not leave its source implicit", prompt)
         finally:
             cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED = old
+
+    def test_tradeoff_guard_skips_route_map_when_scaffold_enabled(self):
+        old_tradeoff = cfg.COMPARISON_TRADEOFF_GUARD_ENABLED
+        old_scaffold = cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED
+        try:
+            cfg.COMPARISON_TRADEOFF_GUARD_ENABLED = True
+            cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED = True
+            prompt = build_synthesis_prompt("kb", "Compare routes", "", "strict", "en")
+            self.assertIn("Central trade-off", prompt)
+            self.assertIn("Comparison scaffold", prompt)
+            self.assertNotIn("first include a compact route map", prompt)
+        finally:
+            cfg.COMPARISON_TRADEOFF_GUARD_ENABLED = old_tradeoff
+            cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED = old_scaffold
 
 
 class TestBuildFallbackPrompt(unittest.TestCase):

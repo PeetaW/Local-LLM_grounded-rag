@@ -188,14 +188,15 @@ def plan_sub_questions(question: str, paper_names: list) -> list:
 1. 如果問題中明確提到某篇論文的檔名或 paper ID（例如 S1878029613002417），所有子問題的 paper 欄位都必須設為該論文的完整檔名（不含.pdf），絕對不可以設為 ALL。
 2. 只有當問題明確要求「比較所有論文」或「所有論文都要查」時，才可以使用 ALL。
 3. 子問題請用英文撰寫，使用學術論文常見的詞彙（例如 synthesis procedure, preparation method, reagents used, experimental conditions）。
-4. 若問題涉及合成或實驗方法，必須額外拆出一個子問題專門詢問具體操作參數，例如：amounts, concentrations, temperature, stirring speed, reaction time。
+4. 若問題涉及合成或實驗方法，且不是跨論文比較題，必須額外拆出一個子問題專門詢問具體操作參數，例如：amounts, concentrations, temperature, stirring speed, reaction time。
 5. 若問題詢問「重點」「主要發現」「貢獻」「結論」「這篇在說什麼」，
    子問題應包含：
    - What is the main research objective and novelty?
    - What are the key findings and conclusions?
 6. 若問題要求跨論文比較，子問題必須保留原始問題的比較面向；不要只問 main objective/novelty。
-   例如合成路線比較題應詢問每篇論文是否 reports, reviews, or compares synthetic routes/approaches to the target compound，
-   並要求抽出與原問題指定面向相關的證據（例如 isotopic enrichment, scalability, cost-effectiveness, safety）。
+   例如合成路線比較題應詢問每篇論文是否 reports, reviews, or compares high-level synthetic approaches to the target compound，
+   並要求抽出與原問題指定面向相關的高層證據（例如 isotopic enrichment, scalability, cost-effectiveness, safety）。
+   不要詢問 exhaustive procedural details、amounts、temperatures、step-by-step route variants，除非使用者明確要求完整實驗條件。
 以 JSON 陣列回傳，格式如下，只輸出 JSON，不要其他文字：
 [
 {{"paper": "論文檔名（不含.pdf）或 ALL", "sub_q": "子問題內容"}},

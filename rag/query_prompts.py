@@ -37,8 +37,9 @@ def _term_fidelity_zh() -> str:
 def _comparison_tradeoff_en() -> str:
     if not getattr(cfg, "COMPARISON_TRADEOFF_GUARD_ENABLED", False):
         return ""
+    route_map_rule = "" if getattr(cfg, "COMPARISON_QUERY_SCAFFOLD_ENABLED", False) else "- For synthetic-route comparison questions, first include a compact route map that names each distinct route that directly synthesizes the target compound and its defining step(s). Do not list derivative, formulation, solubility, uptake, toxicity, or biological-property studies as synthetic routes to the target compound. If a hybrid chemo-enzymatic route is supported, explicitly state that it combines enantioselective alkylation followed by enzymatic hydrolysis.\n"
     return """
-- For synthetic-route comparison questions, first include a compact route map that names each distinct route that directly synthesizes the target compound and its defining step(s). Do not list derivative, formulation, solubility, uptake, toxicity, or biological-property studies as synthetic routes to the target compound. If a hybrid chemo-enzymatic route is supported, explicitly state that it combines enantioselective alkylation followed by enzymatic hydrolysis.
+""" + route_map_rule + """
 - If the question asks for a comparison of synthetic routes, include one explicit "Central trade-off:" sentence that synthesizes the corpus-level trade-off between high-purity/enantiopure and/or isotopically enriched material versus scalability and cost-effectiveness. Do not frame the central trade-off as one route merely not reporting a dimension; route-level missing dimensions may be mentioned only as caveats.
 """
 
@@ -46,8 +47,9 @@ def _comparison_tradeoff_en() -> str:
 def _comparison_tradeoff_zh() -> str:
     if not getattr(cfg, "COMPARISON_TRADEOFF_GUARD_ENABLED", False):
         return ""
+    route_map_rule = "" if getattr(cfg, "COMPARISON_QUERY_SCAFFOLD_ENABLED", False) else "- 問題若要求比較合成路線，請先用精簡的路線圖列出每條「直接合成目標化合物」的不同路線及其定義步驟。不要把衍生物、劑型、增溶、攝取、毒性或生物性質研究列為目標化合物的合成路線。若文獻支持 hybrid chemo-enzymatic route，請明確寫出它結合 enantioselective alkylation followed by enzymatic hydrolysis。\n"
     return """
-- 問題若要求比較合成路線，請先用精簡的路線圖列出每條「直接合成目標化合物」的不同路線及其定義步驟。不要把衍生物、劑型、增溶、攝取、毒性或生物性質研究列為目標化合物的合成路線。若文獻支持 hybrid chemo-enzymatic route，請明確寫出它結合 enantioselective alkylation followed by enzymatic hydrolysis。
+""" + route_map_rule + """
 - 問題若要求比較合成路線，請寫出一句明確的「核心權衡：」，從整體文獻層級綜合「高純度/光學純度與同位素富集」相對於「可擴展性與成本效益」的取捨。不要把核心權衡寫成某一路線只是「未報導」某面向；個別路線缺少的面向只能作為 caveat 補充。
 """
 
@@ -60,8 +62,10 @@ COMPARISON SCAFFOLD:
 - If the question asks for a cross-paper comparison, begin with a short "Comparison scaffold:" section using rows in this shape: source role | item/route | source paper(s) | defining evidence | relevant comparison dimensions | caveats.
 - Source role must be one of: route, review/comparison source, background. For synthetic-route questions, route rows must directly synthesize the target compound; review/comparison source rows must preserve that the paper compares multiple approaches on the question's dimensions such as scalability and cost-effectiveness; do not include derivative/formulation/solubility/biological-property papers as routes.
 - If a paper is described as reviewing, evaluating, weighing, or comparing multiple synthetic approaches, classify it as review/comparison source, not background, even if it does not provide a single experimental route. Do not invent other source roles such as exclusion.
+- The scaffold is the only route table. Do not add a second route map, exhaustive historical route variants, or every yield/condition unless the user explicitly asks for full experimental conditions.
+- For high-level comparison questions, use reference-level qualitative summaries. Do not include exact temperatures, pH values, yields, cost multipliers, reagent amounts, named intermediates, or detailed operational conditions unless the user explicitly asks for numeric/procedural details. Keep only broad route identifiers and dimension-bearing qualitative evidence.
 - Each row must name the source paper(s) that support that row. If a route comes from one paper, do not leave its source implicit.
-- Use the scaffold rows as the basis for the synthesis. Do not add risks, costs, scale-up claims, or caveats unless they are supported by the facts above or explicitly marked as speculation.
+- After the scaffold, write only a concise synthesis of at most 3 short paragraphs: direct route(s), review/comparison source(s), and the central trade-off. Do not add separate sections for route families, derivative/formulation context, safety reviews, or long numeric yield/condition details unless the user explicitly asks for them.
 """
 
 
@@ -73,8 +77,10 @@ def _comparison_query_scaffold_zh() -> str:
 - 問題若要求跨文獻比較，請先輸出一小段「比較鷹架：」，每列使用這個格式：來源角色 | 項目/路線 | 來源論文 | 定義依據 | 相關比較面向 | 限制/caveat。
 - 來源角色只能是：route、review/comparison source、background。若是合成路線題，route 列必須直接合成目標化合物；review/comparison source 列必須保留該論文「比較多種 approaches 在問題指名面向（如 scalability、cost-effectiveness）上的差異」這種綜述層級事實；不要把衍生物、劑型、增溶或生物性質論文列成合成路線。
 - 若某篇論文被描述為 reviewing、evaluating、weighing 或 comparing 多種 synthetic approaches，必須歸類為 review/comparison source，不可降成 background，即使它沒有提供單一路線實驗步驟。不可自創 exclusion 等其他來源角色。
+- 比較鷹架就是唯一的路線表。不要再輸出第二個 route map、完整歷史路線變體清單，或每個產率/條件；除非使用者明確要求完整實驗條件。
+- 若是高層比較題，請使用 reference-level qualitative summaries。不要列出精確溫度、pH、產率、成本倍數、試劑用量、具名中間體或詳細操作條件；除非使用者明確要求數值或實驗操作細節。只保留寬層級路線辨識與和比較面向直接相關的定性證據。
 - 每列都必須寫出支持該列的來源論文；若某路線只來自單一論文，不可省略來源。
-- 後續綜合只能依這些鷹架列進行比較。不要加入事實清單未支持的風險、成本、放大製程主張或 caveat；除非明確標為模型推測。
+- 鷹架後最多只寫三段短綜合：直接路線、review/comparison source、核心權衡。不要另開 route family、derivative/formulation context、安全性綜述或長篇數值/條件細節段落，除非使用者明確要求。
 """
 
 
