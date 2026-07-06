@@ -144,6 +144,13 @@ def _q_status(row: dict) -> str:
     return "⚠️" if warn else "✅"
 
 
+def _correctness_candidate(answer: str, artifacts: dict, reference: str = "") -> tuple[str, str]:
+    candidate = (artifacts or {}).get("answer_for_judge")
+    if candidate and not any("\u4e00" <= ch <= "\u9fff" for ch in reference or ""):
+        return candidate, "answer_for_judge"
+    return answer, "answer"
+
+
 def _write_markdown_report(out: dict, path: str):
     """產生人類好掃的 Markdown 報告（與 JSON 並存）。"""
     s = out.get("summary", {})
@@ -201,6 +208,7 @@ def _write_markdown_report(out: dict, path: str):
         L.append(f"- detected_paper：`{r.get('detected_paper')}`")
         L.append(f"- 選出論文：{r.get('selected_papers')}")
         L.append(f"- gold_papers：{r.get('gold_papers')}")
+        L.append(f"- correctness candidate：`{r.get('correctness_candidate_source', 'answer')}`")
         L.append(
             f"- 論文選擇命中率：{_fmt(r.get('paper_selection_recall'), pct=True)}　"
             f"檢索覆蓋率：{_fmt(r.get('retrieval_span_recall'), pct=True)}　"
@@ -232,6 +240,7 @@ def _print_row(row: dict):
     print(f"  檢索覆蓋率    : {ret if ret is not None else 'N/A（無 gold_spans）'}")
     cr = row.get("correctness")
     print(f"  正確性(judge) : {cr if cr is not None else 'N/A'}")
+    print(f"  judge candidate: {row.get('correctness_candidate_source', 'answer')}")
     print(f"  grounding     : {row['grounding_score']}")
     def _s(k):
         v = lat.get(k)
@@ -290,6 +299,7 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
 
         # 3) 跑完整 pipeline（--retrieval-only 時跳過，只看選擇/檢索）
         status_lines = []
+        artifacts = {}
         if retrieval_only:
             answer, wall_s = "", 0.0
         else:
@@ -297,6 +307,7 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
             try:
                 answer = execute_structured_query(
                     qtext, paper_engines, "", on_status=status_lines.append,
+                    on_artifact=artifacts.__setitem__,
                 )
             except Exception as e:
                 answer = f"[PIPELINE ERROR] {e}"
@@ -305,12 +316,13 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
         # 4) 正確性 LLM-judge（有 reference_answer 且非 retrieval-only 時）
         correctness, correctness_detail = None, None
         reference = q.get("reference_answer", "")
+        answer_for_judge, candidate_source = _correctness_candidate(answer, artifacts, reference)
         if reference and not retrieval_only and answer:
             from judge import judge_correctness  # 同目錄
-            j = judge_correctness(qtext, answer, reference)
+            j = judge_correctness(qtext, answer_for_judge, reference)
             correctness = j["score"]
             correctness_detail = {"raw": j["raw"], "reason": j["reason"]}
-            print(f"  ⚖️  [Judge] correctness={correctness}（{j['raw']}/5）：{j['reason'][:80]}")
+            print(f"  ⚖️  [Judge] correctness={correctness}（{j['raw']}/5, {candidate_source}）：{j['reason'][:80]}")
 
         row = {
             "id": qid,
@@ -324,6 +336,8 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
             "grounding_score": metrics.parse_grounding_score(answer),
             "correctness": correctness,
             "correctness_detail": correctness_detail,
+            "correctness_candidate_source": candidate_source,
+            "answer_for_judge": answer_for_judge,
             "counts": metrics.parse_counts(status_lines),
             "latency": metrics.parse_stage_latencies(status_lines),
             "wall_seconds": wall_s,

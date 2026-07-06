@@ -89,6 +89,7 @@ from rag.query_prompts import build_synthesis_prompt, build_fallback_prompt
 from rag.query_translation import translate_to_traditional_chinese
 import rag.query_pipeline as pipeline_module
 import metrics as eval_metrics
+import run_eval as eval_run
 import config as cfg
 
 
@@ -679,7 +680,9 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
 
     def test_comparison_tradeoff_guard_is_ab_switch(self):
         old = cfg.COMPARISON_TRADEOFF_GUARD_ENABLED
+        old_scaffold = cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED
         try:
+            cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED = False
             cfg.COMPARISON_TRADEOFF_GUARD_ENABLED = False
             prompt = build_synthesis_prompt("kb", "Compare A and B", "", "reasoning", "en")
             self.assertNotIn("Central trade-off", prompt)
@@ -695,6 +698,7 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
             self.assertIn("enantioselective alkylation followed by enzymatic hydrolysis", prompt)
         finally:
             cfg.COMPARISON_TRADEOFF_GUARD_ENABLED = old
+            cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED = old_scaffold
 
     def test_comparison_query_scaffold_is_ab_switch(self):
         old = cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED
@@ -710,6 +714,7 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
             self.assertIn("Do not use a Markdown table", prompt)
             self.assertIn("review/comparison source", prompt)
             self.assertIn("route bullets must directly synthesize the target compound", prompt)
+            self.assertIn("chymotrypsin-catalysed enzymatic hydrolysis", prompt)
             self.assertIn("compares multiple approaches", prompt)
             self.assertIn("not background", prompt)
             self.assertIn("exclusion", prompt)
@@ -760,6 +765,10 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
             self.assertIn("Do not write exclusion notes", prompt)
             self.assertIn("acidic hydrolysis/deprotection of the auxiliary", prompt)
             self.assertIn("chymotrypsin-catalysed enzymatic hydrolysis", prompt)
+            self.assertIn("Schoellkopf-type auxiliary", prompt)
+            self.assertIn("4-bromomethylbenzeneboronate", prompt)
+            self.assertIn("~74% e.e.", prompt)
+            self.assertIn("up to 100% e.e.", prompt)
             self.assertIn("not as a key step", prompt)
         finally:
             cfg.METHOD_KEY_STEP_GUARD_ENABLED = old
@@ -789,6 +798,22 @@ class TestTranslateToTraditionalChinese(unittest.TestCase):
         mock_post.return_value = mock_resp
         result = translate_to_traditional_chinese("English text to translate")
         self.assertEqual(result, "繁體中文翻譯結果")
+
+    @patch("requests.post")
+    def test_term_fidelity_preserves_route_defining_phrase(self, mock_post):
+        old = cfg.TERM_FIDELITY_GUARD_ENABLED
+        try:
+            cfg.TERM_FIDELITY_GUARD_ENABLED = True
+            mock_resp = MagicMock()
+            mock_resp.ok = True
+            mock_resp.json.return_value = {"response": "繁體中文翻譯結果"}
+            mock_post.return_value = mock_resp
+            translate_to_traditional_chinese("x")
+            prompt = mock_post.call_args.kwargs["json"]["prompt"]
+            self.assertIn("chymotrypsin-catalysed enzymatic hydrolysis", prompt)
+            self.assertIn("Preserve route-defining phrases", prompt)
+        finally:
+            cfg.TERM_FIDELITY_GUARD_ENABLED = old
 
     @patch("requests.post")
     def test_returns_original_on_connection_error(self, mock_post):
@@ -884,6 +909,57 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         )
         self.assertIn("資料來源說明", result)
         self.assertIn("Model knowledge answer.", result)
+
+    @patch("rag.query_pipeline.translate_to_traditional_chinese")
+    @patch("rag.query_pipeline.run_grounding_check")
+    @patch("rag.query_pipeline.run_subqueries_parallel")
+    @patch("rag.query_pipeline.build_subquery_tasks")
+    @patch("rag.query_pipeline.plan_sub_questions")
+    @patch("rag.query_pipeline.detect_target_paper")
+    @patch("rag.query_pipeline.cfg")
+    @patch("rag.query_pipeline.Settings")
+    def test_on_artifact_captures_pre_translation_answer(
+        self, mock_settings, mock_cfg,
+        mock_detect, mock_plan, mock_build, mock_run,
+        mock_grounding, mock_translate,
+    ):
+        _setup_cfg(mock_cfg)
+        mock_cfg.EN_DRAFT_PIPELINE = True
+        mock_detect.return_value = "paper_a"
+        mock_plan.return_value = [{"paper": "paper_a", "sub_q": "Q?"}]
+        mock_build.return_value = ([], {})
+        mock_run.return_value = [(
+            "【paper_a】",
+            "The synthesis used Fe3O4 at 80°C for 4 hours with EDTA reagent solution.",
+        )]
+        chunk = MagicMock()
+        chunk.delta = "English draft answer."
+        mock_settings.llm.stream_complete.return_value = [chunk]
+        mock_translate.return_value = "繁中最終答案"
+
+        artifacts = {}
+        result = pipeline_module.execute_structured_query(
+            "question?", {"paper_a": MagicMock()}, on_artifact=artifacts.__setitem__,
+        )
+
+        self.assertEqual(artifacts["answer_for_judge"], "English draft answer.")
+        self.assertEqual(result, "繁中最終答案")
+
+
+class TestRunEvalCorrectnessCandidate(unittest.TestCase):
+    def test_prefers_pre_translation_answer_for_judge(self):
+        candidate, source = eval_run._correctness_candidate(
+            "繁中最終答案", {"answer_for_judge": "English draft answer"}
+        )
+        self.assertEqual(candidate, "English draft answer")
+        self.assertEqual(source, "answer_for_judge")
+
+    def test_uses_final_answer_for_chinese_reference(self):
+        candidate, source = eval_run._correctness_candidate(
+            "繁中最終答案", {"answer_for_judge": "English draft answer"}, "中文標準答案"
+        )
+        self.assertEqual(candidate, "繁中最終答案")
+        self.assertEqual(source, "answer")
 
 
 class TestExecuteStructuredQueryStream(unittest.TestCase):

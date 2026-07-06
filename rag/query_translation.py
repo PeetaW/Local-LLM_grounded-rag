@@ -13,6 +13,8 @@ def _term_fidelity_rules() -> str:
         "include the English term in parentheses if you translate the surrounding phrase.\n"
         "- Do not substitute near-synonyms for technical names. For example, chymotrypsin and trypsin are different enzymes; "
         "keep whichever term appears in the source answer.\n"
+        "- Preserve route-defining phrases verbatim in English when present, especially "
+        "\"chymotrypsin-catalysed enzymatic hydrolysis\"; add Chinese explanation after it if helpful.\n"
     )
 
 

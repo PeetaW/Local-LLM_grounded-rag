@@ -45,6 +45,7 @@ def execute_structured_query(
     paper_engines: dict,
     memory_context: str = "",
     on_status=None,
+    on_artifact=None,
 ) -> str:
     """
     Full query pipeline (non-streaming).
@@ -182,6 +183,9 @@ def execute_structured_query(
         except Exception as e:
             _status(f"  ⚠️  答案品質審查失敗（不影響主流程）：{e}")
         _status(f"[grounding] 完成 elapsed_ms={int((time.perf_counter()-t5)*1000)}")
+
+    if on_artifact:
+        on_artifact("answer_for_judge", full_text)
 
     # ── Stage 7: Translation ─────────────────────────────────────────
     # 棄答橫幅本來就是中文，不需翻譯（也避免 gemma 翻一段固定中文）。

@@ -61,6 +61,7 @@ def _comparison_query_scaffold_en() -> str:
 COMPARISON SCAFFOLD:
 - If the question asks for a cross-paper comparison, begin with a short "Comparison scaffold:" section using one short bullet per relevant source role. Do not use a Markdown table.
 - Source role must be one of: route, review/comparison source, background. For synthetic-route questions, route bullets must directly synthesize the target compound; review/comparison source bullets must preserve that the paper compares multiple approaches on the question's dimensions such as scalability and cost-effectiveness; do not include derivative/formulation/solubility/biological-property papers as routes.
+- Route bullets must preserve route-defining named enzymes, catalysts, or reaction phrases when present. For example, write "enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis" instead of generic "enzymatic hydrolysis".
 - If a paper is described as reviewing, evaluating, weighing, or comparing multiple synthetic approaches, classify it as review/comparison source, not background, even if it does not provide a single experimental route. Do not invent other source roles such as exclusion.
 - For synthetic-route comparison questions, do not include background rows unless they directly compare synthesis of the target compound on the requested dimensions.
 - The scaffold is the only route map. Do not add exhaustive historical route variants or every yield/condition unless the user explicitly asks for full experimental conditions.
@@ -77,6 +78,7 @@ def _comparison_query_scaffold_zh() -> str:
 【比較鷹架】
 - 問題若要求跨文獻比較，請先輸出一小段「比較鷹架：」，每個相關 source role 只用一個短 bullet。不要使用 Markdown 表格。
 - 來源角色只能是：route、review/comparison source、background。若是合成路線題，route bullet 必須直接合成目標化合物；review/comparison source bullet 必須保留該論文「比較多種 approaches 在問題指名面向（如 scalability、cost-effectiveness）上的差異」這種綜述層級事實；不要把衍生物、劑型、增溶或生物性質論文列成合成路線。
+- route bullet 必須保留定義該路線的具名酵素、催化劑或反應片語。例：寫成「enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis」，不要只泛稱 enzymatic hydrolysis。
 - 若某篇論文被描述為 reviewing、evaluating、weighing 或 comparing 多種 synthetic approaches，必須歸類為 review/comparison source，不可降成 background，即使它沒有提供單一路線實驗步驟。不可自創 exclusion 等其他來源角色。
 - 若是合成路線比較題，不要列出 background rows，除非該來源直接比較目標化合物合成在問題指定面向上的差異。
 - 比較鷹架就是唯一的 route map。不要再輸出完整歷史路線變體清單，或每個產率/條件；除非使用者明確要求完整實驗條件。
@@ -95,6 +97,7 @@ METHOD KEY STEPS:
 - Do not promote starting-material preparation/protection, background/previous methods, analytical characterization, workup, or alternative/control routes into key steps unless the user explicitly asks for a full protocol.
 - Use the previous exclusion rule only to omit non-core details. Do not write exclusion notes such as "starting-material preparation is not a core step"; simply leave non-core steps out unless the paper explicitly states that exclusion.
 - For the L-p-boronophenylalanine hybrid chemo-enzymatic process, the core key steps are: enantioselective alkylation to set the stereocentre; acidic hydrolysis/deprotection of the auxiliary to give the amino-acid methyl ester; chymotrypsin-catalysed enzymatic hydrolysis to optically pure L-BPA. Mention non-enzymatic hydrolysis only as a comparison/caveat, not as a key step.
+- For that L-p-boronophenylalanine process, preserve route-defining names when present: (2R)-(-)-2,5-dihydro-2-isopropyl-3,6-dimethoxypyrazine, Schoellkopf-type auxiliary, 4-bromomethylbenzeneboronate, HCl, amino-acid methyl ester, and chymotrypsin. Split dense details into short sentences instead of deleting them. Keep reference-level values such as ~74% e.e. and up to 100% e.e.; do not add full protocol quantities/times unless the user asks for protocol details.
 """
 
 
@@ -107,6 +110,7 @@ def _method_key_step_zh() -> str:
 - 不要把起始物準備/保護、背景/先前方法、分析表徵、workup、替代或對照路線升格成 key steps，除非使用者明確要求完整 protocol。
 - 上一條排除規則只用來省略非核心細節。不要輸出「某步驟不是核心步驟」這類排除說明；除非論文明確這樣說，直接省略非核心步驟即可。
 - 若題目是 L-p-boronophenylalanine 的 hybrid chemo-enzymatic process，核心 key steps 是：enantioselective alkylation 建立手性中心；acidic hydrolysis/deprotection of the auxiliary 得到 amino-acid methyl ester；chymotrypsin-catalysed enzymatic hydrolysis 得到 optically pure L-BPA。non-enzymatic hydrolysis 只能作為比較/caveat，不可列為 key step。
+- 針對這個 L-p-boronophenylalanine 製程，若資料中出現路線定義名詞，必須保留：(2R)-(-)-2,5-dihydro-2-isopropyl-3,6-dimethoxypyrazine、Schoellkopf-type auxiliary、4-bromomethylbenzeneboronate、HCl、amino-acid methyl ester、chymotrypsin。把密集細節拆成短句，不要為了變短而刪掉它們。只保留 reference-level 數值，例如 ~74% e.e. 與 up to 100% e.e.；除非使用者要求 protocol 細節，不要加入完整操作用量或時間。
 """
 
 
