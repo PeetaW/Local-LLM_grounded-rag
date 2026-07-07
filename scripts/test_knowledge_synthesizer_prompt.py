@@ -26,12 +26,14 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             cfg.STAGE3_COMPARISON_SCHEMA_ENABLED = True
             prompt = _build_user_prompt(
                 "FORMATTED_CHUNKS",
-                "Compare synthetic routes for scalability and cost-effectiveness.",
+                "Compare synthetic routes for scalability, cost-effectiveness, and safety.",
             )
             self.assertIn("[source_roles]", prompt)
             self.assertIn("role_hint=review/comparison source", prompt)
             self.assertIn("are not paper evidence", prompt)
             self.assertIn("[dimension_evidence]", prompt)
+            self.assertIn("- safety:", prompt)
+            self.assertIn("scalability、cost-effectiveness、safety", prompt)
             self.assertIn("FORMATTED_CHUNKS", prompt)
         finally:
             cfg.STAGE3_COMPARISON_SCHEMA_ENABLED = old

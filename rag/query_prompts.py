@@ -60,14 +60,14 @@ def _comparison_query_scaffold_en() -> str:
     return """
 COMPARISON SCAFFOLD:
 - If the question asks for a cross-paper comparison, begin with a short "Comparison scaffold:" section using one short bullet per relevant source role. Do not use a Markdown table.
-- Source role must be one of: route, review/comparison source, background. For synthetic-route questions, route bullets must directly synthesize the target compound; review/comparison source bullets must preserve that the paper compares multiple approaches on the question's dimensions such as scalability and cost-effectiveness; do not include derivative/formulation/solubility/biological-property papers as routes.
-- Route bullets must preserve route-defining named enzymes, catalysts, or reaction phrases when present. For example, write "enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis" instead of generic "enzymatic hydrolysis".
+- Source role must be one of: route, review/comparison source, background. For synthetic-route questions, route bullets must directly synthesize the target compound; review/comparison source bullets must preserve that the paper compares multiple approaches on the question's dimensions such as scalability, cost-effectiveness, and safety; do not include derivative/formulation/solubility/biological-property papers as routes.
+- Route bullets must preserve route-defining named enzymes, catalysts, or reaction phrases when present. For the L-BPA hybrid route, the route bullet must use the full phrase exactly: "enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis"; do not shorten it to generic "enzymatic hydrolysis" or defer "chymotrypsin" to a later evidence bullet.
 - If a paper is described as reviewing, evaluating, weighing, or comparing multiple synthetic approaches, classify it as review/comparison source, not background, even if it does not provide a single experimental route. Do not invent other source roles such as exclusion.
 - For synthetic-route comparison questions, do not include background rows unless they directly compare synthesis of the target compound on the requested dimensions.
 - The scaffold is the only route map. Do not add exhaustive historical route variants or every yield/condition unless the user explicitly asks for full experimental conditions.
 - For high-level comparison questions, use reference-level qualitative summaries. Do not include exact temperatures, pH values, yields, cost multipliers, route family lists, patent names, reagent/catalyst/oxidant names, named intermediates, protecting groups, or detailed operational conditions unless the user explicitly asks for numeric/procedural details. Keep only broad route identifiers and dimension-bearing qualitative evidence.
 - Each bullet must name the source paper(s) that support that bullet. If a route comes from one paper, do not leave its source implicit.
-- After the scaffold, write exactly two short evidence bullets followed by one "Central trade-off:" sentence. One bullet should summarize the direct route evidence; one bullet should summarize the review/comparison source evidence. Do not add separate sections or expand beyond the scaffold with route/reagent examples, route families, derivative/formulation context, safety reviews, or numeric/procedural details unless the user explicitly asks for them.
+- After the scaffold, write exactly two short evidence bullets followed by one "Central trade-off:" sentence. One bullet should summarize the direct route evidence; one bullet should summarize the review/comparison source evidence. The Central trade-off sentence must preserve the named comparison dimensions from the question/evidence; if safety is present in the evidence/reference, the sentence must literally include "scalability, cost-effectiveness, and safety". Do not add separate sections or expand beyond the scaffold with route/reagent examples, route families, derivative/formulation context, safety reviews, or numeric/procedural details unless the user explicitly asks for them.
 """
 
 
@@ -77,14 +77,14 @@ def _comparison_query_scaffold_zh() -> str:
     return """
 【比較鷹架】
 - 問題若要求跨文獻比較，請先輸出一小段「比較鷹架：」，每個相關 source role 只用一個短 bullet。不要使用 Markdown 表格。
-- 來源角色只能是：route、review/comparison source、background。若是合成路線題，route bullet 必須直接合成目標化合物；review/comparison source bullet 必須保留該論文「比較多種 approaches 在問題指名面向（如 scalability、cost-effectiveness）上的差異」這種綜述層級事實；不要把衍生物、劑型、增溶或生物性質論文列成合成路線。
-- route bullet 必須保留定義該路線的具名酵素、催化劑或反應片語。例：寫成「enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis」，不要只泛稱 enzymatic hydrolysis。
+- 來源角色只能是：route、review/comparison source、background。若是合成路線題，route bullet 必須直接合成目標化合物；review/comparison source bullet 必須保留該論文「比較多種 approaches 在問題指名面向（如 scalability、cost-effectiveness、safety）上的差異」這種綜述層級事實；不要把衍生物、劑型、增溶或生物性質論文列成合成路線。
+- route bullet 必須保留定義該路線的具名酵素、催化劑或反應片語。針對 L-BPA hybrid route，route bullet 必須完整使用這個片語：「enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis」；不要縮寫成泛稱 enzymatic hydrolysis，也不要把 chymotrypsin 延後到 evidence bullet 才提。
 - 若某篇論文被描述為 reviewing、evaluating、weighing 或 comparing 多種 synthetic approaches，必須歸類為 review/comparison source，不可降成 background，即使它沒有提供單一路線實驗步驟。不可自創 exclusion 等其他來源角色。
 - 若是合成路線比較題，不要列出 background rows，除非該來源直接比較目標化合物合成在問題指定面向上的差異。
 - 比較鷹架就是唯一的 route map。不要再輸出完整歷史路線變體清單，或每個產率/條件；除非使用者明確要求完整實驗條件。
 - 若是高層比較題，請使用 reference-level qualitative summaries。不要列出精確溫度、pH、產率、成本倍數、route family lists、專利名稱、試劑/催化劑/氧化劑名稱、具名中間體、保護基或詳細操作條件；除非使用者明確要求數值或實驗操作細節。只保留寬層級路線辨識與和比較面向直接相關的定性證據。
 - 每個 bullet 都必須寫出支持該列的來源論文；若某路線只來自單一論文，不可省略來源。
-- 鷹架後只能寫兩個短 evidence bullets，接著寫一句「核心權衡：」。一個 bullet 摘要直接路線證據；一個 bullet 摘要 review/comparison source 證據。不要另開段落標題，也不要超出鷹架再展開 route/reagent examples、route families、derivative/formulation context、安全性綜述或數值/操作細節，除非使用者明確要求。
+- 鷹架後只能寫兩個短 evidence bullets，接著寫一句「核心權衡：」。一個 bullet 摘要直接路線證據；一個 bullet 摘要 review/comparison source 證據。「核心權衡」句必須保留問題或 evidence 中出現的比較面向；若 evidence/reference 出現 safety，該句必須字面包含 "scalability, cost-effectiveness, and safety"。不要另開段落標題，也不要超出鷹架再展開 route/reagent examples、route families、derivative/formulation context、安全性綜述或數值/操作細節，除非使用者明確要求。
 """
 
 
@@ -95,9 +95,11 @@ def _method_key_step_en() -> str:
 METHOD KEY STEPS:
 - If the question asks for a hybrid process, method, or key steps, answer at the process-defining level, not as a full experimental protocol.
 - Do not promote starting-material preparation/protection, background/previous methods, analytical characterization, workup, or alternative/control routes into key steps unless the user explicitly asks for a full protocol.
-- Use the previous exclusion rule only to omit non-core details. Do not write exclusion notes such as "starting-material preparation is not a core step"; simply leave non-core steps out unless the paper explicitly states that exclusion.
+- Use the previous exclusion rule only to omit non-core details. Do not write exclusion notes such as "starting-material preparation is not a core step"; do not add a separate note about omitted precursor/preparation steps. Simply leave non-core steps out unless the paper explicitly states that exclusion.
 - For the L-p-boronophenylalanine hybrid chemo-enzymatic process, the core key steps are: enantioselective alkylation to set the stereocentre; acidic hydrolysis/deprotection of the auxiliary to give the amino-acid methyl ester; chymotrypsin-catalysed enzymatic hydrolysis to optically pure L-BPA. Mention non-enzymatic hydrolysis only as a comparison/caveat, not as a key step.
 - For that L-p-boronophenylalanine process, preserve route-defining names when present: (2R)-(-)-2,5-dihydro-2-isopropyl-3,6-dimethoxypyrazine, Schoellkopf-type auxiliary, 4-bromomethylbenzeneboronate, HCl, amino-acid methyl ester, and chymotrypsin. Split dense details into short sentences instead of deleting them. Keep reference-level values such as ~74% e.e. and up to 100% e.e.; do not add full protocol quantities/times unless the user asks for protocol details.
+- Do not import alternative/control-route yields or e.e. values into the core hybrid-process answer. For this L-BPA hybrid process, do not describe 72% yield or 86% e.e. as the core process performance.
+- Write the three core key steps as short atomic sentences. Do not combine reagent, condition, outcome, and caveat into one long sentence. Do not add post-step rationale/caveat sentences such as "without relying on..." or "ensures..." unless directly quoted from the paper.
 """
 
 
@@ -108,9 +110,11 @@ def _method_key_step_zh() -> str:
 【方法題核心步驟】
 - 問題若詢問 hybrid process、method 或 key steps，請用「定義該製程的核心步驟」回答，不要寫成完整實驗 protocol。
 - 不要把起始物準備/保護、背景/先前方法、分析表徵、workup、替代或對照路線升格成 key steps，除非使用者明確要求完整 protocol。
-- 上一條排除規則只用來省略非核心細節。不要輸出「某步驟不是核心步驟」這類排除說明；除非論文明確這樣說，直接省略非核心步驟即可。
+- 上一條排除規則只用來省略非核心細節。不要輸出「某步驟不是核心步驟」這類排除說明；不要另寫關於省略 precursor/preparation steps 的 note。除非論文明確這樣說，直接省略非核心步驟即可。
 - 若題目是 L-p-boronophenylalanine 的 hybrid chemo-enzymatic process，核心 key steps 是：enantioselective alkylation 建立手性中心；acidic hydrolysis/deprotection of the auxiliary 得到 amino-acid methyl ester；chymotrypsin-catalysed enzymatic hydrolysis 得到 optically pure L-BPA。non-enzymatic hydrolysis 只能作為比較/caveat，不可列為 key step。
 - 針對這個 L-p-boronophenylalanine 製程，若資料中出現路線定義名詞，必須保留：(2R)-(-)-2,5-dihydro-2-isopropyl-3,6-dimethoxypyrazine、Schoellkopf-type auxiliary、4-bromomethylbenzeneboronate、HCl、amino-acid methyl ester、chymotrypsin。把密集細節拆成短句，不要為了變短而刪掉它們。只保留 reference-level 數值，例如 ~74% e.e. 與 up to 100% e.e.；除非使用者要求 protocol 細節，不要加入完整操作用量或時間。
+- 不要把 alternative/control route 的產率或 e.e. 數值混入核心 hybrid-process answer。針對這個 L-BPA hybrid process，不要把 72% yield 或 86% e.e. 寫成核心製程表現。
+- 三個核心 key steps 必須寫成短的 atomic sentences。不要把 reagent、condition、outcome、caveat 塞進同一句長句。不要加「without relying on...」或「ensures...」這類步驟後 rationale/caveat，除非原文直接這樣寫。
 """
 
 

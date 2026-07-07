@@ -26,8 +26,8 @@ _TERM_FIDELITY_RULES = """
 _COMPARISON_QUERY_HINTS = (
     "compare", "comparison", "different", "difference", "route", "routes",
     "approach", "approaches", "scalability", "cost-effectiveness", "cost",
-    "isotopic", "enrichment", "比較", "差異", "不同", "路線", "策略",
-    "可擴展", "放大", "成本", "同位素", "富集",
+    "safety", "isotopic", "enrichment", "比較", "差異", "不同", "路線", "策略",
+    "可擴展", "放大", "成本", "安全", "同位素", "富集",
 )
 
 
@@ -63,12 +63,14 @@ def _comparison_schema_instruction(query: str) -> str:
 [dimension_evidence]
 - scalability: ...
 - cost-effectiveness: ...
+- safety: ...
 - isotopic enrichment: ...
 
 額外規則：
 - Source metadata 與 guidance lines 只用來判斷來源角色；它們 are not paper evidence，不可當作可引用論文事實。
 - review/comparison source 若描述某路線，只能寫「該綜述/比較來源報導或比較某路線」，不要寫成「該論文提供/實作該合成路線」。
-- 保留問題指名的比較面向；與面向無關的實驗條件、產率、試劑細節可省略。
+- 保留問題或原文指名的比較面向；若原文同一句或相鄰句同時提到 scalability、cost-effectiveness、safety，必須一起保留在 [dimension_evidence]。
+- 與面向無關的實驗條件、產率、試劑細節可省略。
 """.strip()
 
 
