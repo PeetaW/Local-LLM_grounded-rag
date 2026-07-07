@@ -95,6 +95,8 @@ COMPARISON_TRADEOFF_GUARD_ENABLED = True
 COMPARISON_QUERY_SCAFFOLD_ENABLED = True
 # A/B：比較題在 Stage 3 保留 source role 與比較面向，避免 review/comparison source 被壓成 route。
 STAGE3_COMPARISON_SCHEMA_ENABLED = True
+# A/B：Stage 3 事實蒸餾用英文輸出，讓英文 chunks / gold reference / eval judge 維持同語言比對。
+STAGE3_ENGLISH_DISTILLATION_ENABLED = True
 # A/B：方法/key-step 題只摘要核心步驟，不把起始物準備、背景方法或替代/對照路線升格成 key steps。
 METHOD_KEY_STEP_GUARD_ENABLED = True
 

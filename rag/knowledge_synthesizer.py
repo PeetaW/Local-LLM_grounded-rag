@@ -32,9 +32,15 @@ _COMPARISON_QUERY_HINTS = (
 
 
 def _system_prompt() -> str:
+    prompt = _BASE_SYNTHESIS_SYSTEM_PROMPT
+    if getattr(cfg, "STAGE3_ENGLISH_DISTILLATION_ENABLED", False):
+        prompt = prompt.replace(
+            "5. 使用繁體中文輸出（無論輸入語言）",
+            "5. Output in English. Preserve exact source wording for technical terms, route-defining phrases, values, and comparison dimensions.",
+        )
     if getattr(cfg, "TERM_FIDELITY_GUARD_ENABLED", False):
-        return _BASE_SYNTHESIS_SYSTEM_PROMPT + _TERM_FIDELITY_RULES
-    return _BASE_SYNTHESIS_SYSTEM_PROMPT
+        return prompt + _TERM_FIDELITY_RULES
+    return prompt
 
 
 def _is_comparison_query(query: str) -> bool:

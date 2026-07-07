@@ -12,7 +12,7 @@ if "requests" not in sys.modules:
     sys.modules["requests"] = requests_stub
 
 import config as cfg
-from rag.knowledge_synthesizer import _build_user_prompt
+from rag.knowledge_synthesizer import _build_user_prompt, _system_prompt
 
 
 class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
@@ -46,6 +46,19 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             self.assertNotIn("[source_roles]", prompt)
         finally:
             cfg.STAGE3_COMPARISON_SCHEMA_ENABLED = old
+
+    def test_english_distillation_is_ab_switch(self):
+        old = cfg.STAGE3_ENGLISH_DISTILLATION_ENABLED
+        try:
+            cfg.STAGE3_ENGLISH_DISTILLATION_ENABLED = False
+            self.assertIn("使用繁體中文輸出", _system_prompt())
+
+            cfg.STAGE3_ENGLISH_DISTILLATION_ENABLED = True
+            prompt = _system_prompt()
+            self.assertIn("Output in English", prompt)
+            self.assertNotIn("使用繁體中文輸出", prompt)
+        finally:
+            cfg.STAGE3_ENGLISH_DISTILLATION_ENABLED = old
 
 
 if __name__ == "__main__":
