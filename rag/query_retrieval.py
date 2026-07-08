@@ -110,6 +110,15 @@ def _source_note(label: str) -> str:
     return f"Source metadata (not paper evidence): role_hint={role}; title={title or name}; desc={desc}"
 
 
+def _is_comparison_query(query_text: str) -> bool:
+    text = (query_text or "").lower()
+    return any(term in text for term in (
+        "compare", "comparison", "different", "routes", "approaches",
+        "scalability", "cost-effectiveness", "isotopic", "safety",
+        "比較", "差異", "路線", "可擴展", "成本", "同位素", "安全",
+    ))
+
+
 def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
     if nodes is None:
         return "No standalone retriever output was available."
@@ -123,7 +132,12 @@ def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
         "Retrieved evidence snippets:",
     ]
     # ponytail: fixed tiny evidence pack; tune count/length only if eval shows quality loss.
-    for i, nws in enumerate(nodes[:2], 1):
+    snippet_count = (
+        getattr(cfg, "COMPARISON_EVIDENCE_SNIPPETS_PER_TASK", 4)
+        if _is_comparison_query(query_text)
+        else getattr(cfg, "STAGE2_EVIDENCE_SNIPPETS_PER_TASK", 2)
+    )
+    for i, nws in enumerate(nodes[:snippet_count], 1):
         node = getattr(nws, "node", nws)
         text = node.get_content() if hasattr(node, "get_content") else str(node)
         text = " ".join(text.split())[:900]

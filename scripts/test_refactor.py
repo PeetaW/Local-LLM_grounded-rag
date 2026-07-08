@@ -78,7 +78,7 @@ from rag.query_planning import (
 )
 from rag.query_retrieval import (
     is_empty_result, extract_paper_name,
-    build_subquery_tasks, run_subqueries_parallel,
+    build_subquery_tasks, run_subqueries_parallel, _nodes_to_evidence_block,
 )
 from rag.query_grounding_flow import (
     _extract_direct_citation_section,
@@ -542,6 +542,25 @@ class TestRunSubqueriesParallel(unittest.TestCase):
         finally:
             cfg.STAGE2_LLM_SUBANSWERS_ENABLED = old
 
+    def test_comparison_evidence_block_uses_more_snippets(self):
+        old_base = getattr(cfg, "STAGE2_EVIDENCE_SNIPPETS_PER_TASK", 2)
+        old_compare = getattr(cfg, "COMPARISON_EVIDENCE_SNIPPETS_PER_TASK", 4)
+        try:
+            cfg.STAGE2_EVIDENCE_SNIPPETS_PER_TASK = 2
+            cfg.COMPARISON_EVIDENCE_SNIPPETS_PER_TASK = 4
+            nodes = [f"snippet {i}" for i in range(1, 6)]
+
+            normal = _nodes_to_evidence_block(nodes, "What are key steps?", "【PaperA】")
+            self.assertIn("[Snippet 2]", normal)
+            self.assertNotIn("[Snippet 3]", normal)
+
+            comparison = _nodes_to_evidence_block(nodes, "Compare routes for scalability.", "【PaperA】")
+            self.assertIn("[Snippet 4]", comparison)
+            self.assertNotIn("[Snippet 5]", comparison)
+        finally:
+            cfg.STAGE2_EVIDENCE_SNIPPETS_PER_TASK = old_base
+            cfg.COMPARISON_EVIDENCE_SNIPPETS_PER_TASK = old_compare
+
     @patch("rag.query_retrieval._generate_from_nodes", return_value="Generated answer")
     @patch("rag.query_retrieval._retrieve_nodes", return_value=["raw evidence"])
     @patch("rag.query_retrieval.prepare_query_text", return_value="clean query")
@@ -755,6 +774,27 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
             cfg.COMPARISON_TRADEOFF_GUARD_ENABLED = old_tradeoff
             cfg.COMPARISON_QUERY_SCAFFOLD_ENABLED = old_scaffold
 
+    def test_comparison_json_guides_stage4_when_present(self):
+        old = cfg.COMPARISON_JSON_ENABLED
+        try:
+            cfg.COMPARISON_JSON_ENABLED = False
+            kb = '{"comparison_json": {"dimensions": {"safety": {"requested": true, "evidence_found": true}}}}'
+            prompt = build_synthesis_prompt(kb, "Compare routes", "", "strict", "en")
+            self.assertNotIn("COMPARISON JSON", prompt)
+
+            cfg.COMPARISON_JSON_ENABLED = True
+            prompt = build_synthesis_prompt(kb, "Compare routes", "", "strict", "en")
+            self.assertIn("COMPARISON JSON", prompt)
+            self.assertIn("authoritative outline", prompt)
+            self.assertIn("Use only `direct_routes` as routes", prompt)
+            self.assertIn("cover every dimension whose `requested` value is true", prompt)
+            self.assertIn("For requested dimensions with `evidence_found=true`", prompt)
+            self.assertIn("For requested dimensions with `evidence_found=false`", prompt)
+            self.assertIn("isotopic enrichment", prompt)
+            self.assertIn("scalability, cost-effectiveness, and safety", prompt)
+        finally:
+            cfg.COMPARISON_JSON_ENABLED = old
+
     def test_method_key_step_guard_is_ab_switch(self):
         old = cfg.METHOD_KEY_STEP_GUARD_ENABLED
         try:
@@ -851,12 +891,41 @@ def _setup_cfg(cfg_mock):
     cfg_mock.VERIFY_ENABLED = False
     cfg_mock.CITATION_GROUNDING_ENABLED = False
     cfg_mock.ANSWERABILITY_GATE_ENABLED = False
+    cfg_mock.STAGE4_ANSWER_VALIDATION_ENABLED = False
+    cfg_mock.STAGE4_ANSWER_REWRITE_RETRIES = 1
     cfg_mock.EN_DRAFT_PIPELINE = False
+    cfg_mock.FINAL_TRANSLATION_ENABLED = True
     cfg_mock.REASONING_MODE = "strict"
     cfg_mock.SUBQUERY_MAX_WORKERS = 1
 
 
 class TestExecuteStructuredQuery(unittest.TestCase):
+    def test_stage4_validator_flags_bad_comparison_answer(self):
+        old = cfg.STAGE4_ANSWER_VALIDATION_ENABLED
+        try:
+            cfg.STAGE4_ANSWER_VALIDATION_ENABLED = True
+            kb = """
+            {"comparison_json":{
+              "direct_routes":[{"source":"bbb0683","route_phrase":"enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis"}],
+              "review_comparison_sources":[{"source":"CMDC-20-e202500059"}],
+              "dimensions":{
+                "isotopic_enrichment":{"requested":true,"evidence_found":true},
+                "scalability":{"requested":true,"evidence_found":true},
+                "cost_effectiveness":{"requested":true,"evidence_found":true}
+              }
+            }}
+            """
+            issues = pipeline_module._stage4_answer_validation_issues(
+                "No relevant query results or paper data were provided.",
+                kb,
+                "Compare routes for isotopic enrichment, scalability, and cost-effectiveness.",
+            )
+            self.assertIn("False no-data answer", issues)
+            self.assertIn("Missing direct route phrase", issues)
+            self.assertIn("Missing review/comparison source", issues)
+        finally:
+            cfg.STAGE4_ANSWER_VALIDATION_ENABLED = old
+
     @patch("rag.query_pipeline.translate_to_traditional_chinese")
     @patch("rag.query_pipeline.run_grounding_check")
     @patch("rag.query_pipeline.run_subqueries_parallel")
@@ -951,8 +1020,87 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             "question?", {"paper_a": MagicMock()}, on_artifact=artifacts.__setitem__,
         )
 
+        self.assertIn("Fe3O4", artifacts["knowledge_base"])
         self.assertEqual(artifacts["answer_for_judge"], "English draft answer.")
         self.assertEqual(result, "繁中最終答案")
+
+    @patch("rag.query_pipeline.translate_to_traditional_chinese")
+    @patch("rag.query_pipeline.run_grounding_check")
+    @patch("rag.query_pipeline.run_subqueries_parallel")
+    @patch("rag.query_pipeline.build_subquery_tasks")
+    @patch("rag.query_pipeline.plan_sub_questions")
+    @patch("rag.query_pipeline.detect_target_paper")
+    @patch("rag.query_pipeline.cfg")
+    @patch("rag.query_pipeline.Settings")
+    def test_final_translation_can_be_disabled_for_english_draft(
+        self, mock_settings, mock_cfg,
+        mock_detect, mock_plan, mock_build, mock_run,
+        mock_grounding, mock_translate,
+    ):
+        _setup_cfg(mock_cfg)
+        mock_cfg.EN_DRAFT_PIPELINE = True
+        mock_cfg.FINAL_TRANSLATION_ENABLED = False
+        mock_detect.return_value = "paper_a"
+        mock_plan.return_value = [{"paper": "paper_a", "sub_q": "Q?"}]
+        mock_build.return_value = ([], {})
+        mock_run.return_value = [(
+            "【paper_a】",
+            "This paper reports direct evidence for the answer in retrieved chunks.",
+        )]
+        chunk = MagicMock()
+        chunk.delta = "English draft answer."
+        mock_settings.llm.stream_complete.return_value = [chunk]
+
+        result = pipeline_module.execute_structured_query(
+            "question?", {"paper_a": MagicMock()}
+        )
+
+        self.assertEqual(result, "English draft answer.")
+        mock_translate.assert_not_called()
+
+    @patch("rag.query_pipeline.translate_to_traditional_chinese")
+    @patch("rag.query_pipeline.run_grounding_check")
+    @patch("rag.query_pipeline.run_subqueries_parallel")
+    @patch("rag.query_pipeline.build_subquery_tasks")
+    @patch("rag.query_pipeline.plan_sub_questions")
+    @patch("rag.query_pipeline.detect_target_paper")
+    @patch("rag.query_pipeline.cfg")
+    @patch("rag.query_pipeline.Settings")
+    def test_stage4_validator_rewrites_bad_comparison_answer(
+        self, mock_settings, mock_cfg,
+        mock_detect, mock_plan, mock_build, mock_run,
+        mock_grounding, mock_translate,
+    ):
+        _setup_cfg(mock_cfg)
+        mock_cfg.STAGE4_ANSWER_VALIDATION_ENABLED = True
+        mock_detect.return_value = "paper_a"
+        mock_plan.return_value = [{"paper": "paper_a", "sub_q": "Q?"}]
+        mock_build.return_value = ([], {})
+        kb = """
+        {"comparison_json":{
+          "direct_routes":[{"source":"bbb0683","route_phrase":"enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis"}],
+          "review_comparison_sources":[{"source":"CMDC-20-e202500059"}],
+          "dimensions":{
+            "isotopic_enrichment":{"requested":true,"evidence_found":true},
+            "scalability":{"requested":true,"evidence_found":true},
+            "cost_effectiveness":{"requested":true,"evidence_found":true}
+          }
+        }}
+        """
+        mock_run.return_value = [("【paper_a】", kb)]
+        chunk = MagicMock()
+        chunk.delta = "No relevant query results or paper data were provided."
+        mock_settings.llm.stream_complete.return_value = [chunk]
+
+        with patch.object(pipeline_module, "_verifier") as mock_verifier:
+            mock_verifier.correct.return_value = "Corrected comparison answer."
+            result = pipeline_module.execute_structured_query(
+                "Compare routes for isotopic enrichment, scalability, and cost-effectiveness.",
+                {"paper_a": MagicMock()},
+            )
+
+        self.assertEqual(result, "Corrected comparison answer.")
+        self.assertTrue(mock_verifier.correct.called)
 
 
 class TestRunEvalCorrectnessCandidate(unittest.TestCase):

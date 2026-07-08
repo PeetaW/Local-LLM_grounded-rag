@@ -338,6 +338,7 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
             "correctness_detail": correctness_detail,
             "correctness_candidate_source": candidate_source,
             "answer_for_judge": answer_for_judge,
+            "knowledge_base": artifacts.get("knowledge_base"),
             "counts": metrics.parse_counts(status_lines),
             "latency": metrics.parse_stage_latencies(status_lines),
             "wall_seconds": wall_s,

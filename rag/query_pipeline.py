@@ -6,6 +6,7 @@
 #   execute_structured_query(...)        → str
 #   execute_structured_query_stream(...) → Generator[str, None, None]
 
+import json
 import time
 
 from llama_index.core import Settings
@@ -34,6 +35,95 @@ def _build_memory_section(memory_context: str, is_fallback: bool) -> str:
     if is_fallback:
         return "【相關歷史問答記憶，僅供參考】\n" + memory_context + "\n"
     return "---\n【相關歷史問答記憶，僅供參考】" + memory_context
+
+
+def _comparison_json_from_knowledge_base(knowledge_base: str) -> dict:
+    text = (knowledge_base or "").strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start >= 0 and end > start:
+        text = text[start:end + 1]
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    comparison = data.get("comparison_json") if isinstance(data, dict) else None
+    return comparison if isinstance(comparison, dict) else {}
+
+
+def _stage4_answer_validation_issues(answer: str, knowledge_base: str, question: str) -> str:
+    if not getattr(cfg, "STAGE4_ANSWER_VALIDATION_ENABLED", False):
+        return ""
+    comparison = _comparison_json_from_knowledge_base(knowledge_base)
+    if not comparison:
+        return ""
+
+    lower = (answer or "").lower()
+    issues = []
+    if any(marker in lower for marker in ("no relevant query results", "no paper data", "please provide the query results")):
+        issues.append(
+            "Stage4Validation | False no-data answer | The Known Facts List contains comparison_json with paper evidence; do not ask the user to provide data."
+        )
+
+    for route in comparison.get("direct_routes", []):
+        if not isinstance(route, dict):
+            continue
+        phrase = str(route.get("route_phrase", "")).strip()
+        if phrase and phrase.lower() not in lower:
+            issues.append(f"Stage4Validation | Missing direct route phrase | Include exactly: {phrase}")
+
+    for review in comparison.get("review_comparison_sources", []):
+        if not isinstance(review, dict):
+            continue
+        source = str(review.get("source", "")).strip()
+        if source and source.lower() not in lower:
+            issues.append(f"Stage4Validation | Missing review/comparison source | Include {source} as review/comparison evidence, not as a direct route.")
+
+    dimensions = comparison.get("dimensions") if isinstance(comparison.get("dimensions"), dict) else {}
+    dim_terms = {
+        "isotopic_enrichment": ("isotopic enrichment", "10b", "boron-10"),
+        "scalability": ("scalability", "scalable", "scale-up", "route efficiency", "practical synthesis"),
+        "cost_effectiveness": ("cost-effectiveness", "cost effectiveness", "cost", "lower process burden", "fewer protecting groups"),
+        "safety": ("safety", "safe", "risk"),
+    }
+    for key, terms in dim_terms.items():
+        item = dimensions.get(key)
+        if not isinstance(item, dict) or not item.get("requested"):
+            continue
+        if item.get("evidence_found") and not any(term in lower for term in terms):
+            issues.append(f"Stage4Validation | Missing requested dimension | Cover {key} using the comparison_json text and sources.")
+        if key in ("scalability", "cost_effectiveness") and any(
+            marker in lower for marker in ("did not provide", "does not provide", "not provide", "no data", "missing")
+        ):
+            issues.append(
+                f"Stage4Validation | Wrong missing-evidence claim | Do not say {key} is missing when review/comparison evidence supports a qualitative comparison."
+            )
+
+    if "central trade-off" not in lower and "core trade-off" not in lower:
+        issues.append("Stage4Validation | Missing central trade-off | Add one concise Central trade-off sentence using the requested dimensions.")
+
+    return "VERIFY_FAIL\n" + "\n".join(f"- {issue}" for issue in issues) if issues else ""
+
+
+def _rewrite_stage4_if_needed(full_text: str, knowledge_base: str, question: str, on_status=None) -> str:
+    def _status(msg):
+        if on_status:
+            on_status(msg)
+        else:
+            print(msg)
+
+    current = full_text
+    retries = getattr(cfg, "STAGE4_ANSWER_REWRITE_RETRIES", 1)
+    for attempt in range(retries):
+        issues = _stage4_answer_validation_issues(current, knowledge_base, question)
+        if not issues:
+            return current
+        preview = "; ".join(line[2:] for line in issues.splitlines()[1:3])
+        _status(f"  🔁 [stage4-validator] rewrite {attempt + 1}/{retries}: {preview}")
+        rewritten = _verifier.correct(current, knowledge_base, issues, on_status=on_status)
+        if not rewritten or rewritten == current:
+            return current
+        current = rewritten
+    return current
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -114,6 +204,8 @@ def execute_structured_query(
         )
     else:
         knowledge_base = "\n\n".join(sub_answers)
+    if on_artifact:
+        on_artifact("knowledge_base", knowledge_base)
     _status(f"[synthesis] 完成 elapsed_ms={int((time.perf_counter()-t2)*1000)}")
 
     # ── Stage 3.5: 可答性 gate（Phase 2：接路由）──────────────────────
@@ -142,9 +234,11 @@ def execute_structured_query(
         else:
             fallback_notice = ""  # 軟警告橫幅在翻譯後才加（見 Stage 7 後），避免中文橫幅被送進翻譯
             lang = "en" if cfg.EN_DRAFT_PIPELINE else "zh"
+            final_translation_enabled = getattr(cfg, "FINAL_TRANSLATION_ENABLED", True)
             print(f"  {'🧠 推理' if cfg.REASONING_MODE == 'reasoning' else '📋 嚴格'}模式"
                   f"（{cfg.REASONING_MODE}）  target_paper_detected={bool(detected)}"
-                  f"  streaming_mode=False  translation_applied={cfg.EN_DRAFT_PIPELINE}")
+                  f"  streaming_mode=False"
+                  f"  translation_applied={cfg.EN_DRAFT_PIPELINE and final_translation_enabled}")
             synthesis_prompt = build_synthesis_prompt(
                 knowledge_base, question,
                 _build_memory_section(memory_context, is_fallback=False),
@@ -158,6 +252,9 @@ def execute_structured_query(
             full_text += chunk.delta
         print("\n")
     _status(f"[synthesis-llm] 完成 elapsed_ms={int((time.perf_counter()-t3)*1000)}")
+
+    if rag_found_anything and not gate_abstain:
+        full_text = _rewrite_stage4_if_needed(full_text, knowledge_base, question, on_status=on_status)
 
     # ── Stage 5: Verification ────────────────────────────────────────
     if cfg.VERIFY_ENABLED and rag_found_anything and not gate_abstain:
@@ -189,7 +286,12 @@ def execute_structured_query(
 
     # ── Stage 7: Translation ─────────────────────────────────────────
     # 棄答橫幅本來就是中文，不需翻譯（也避免 gemma 翻一段固定中文）。
-    if cfg.EN_DRAFT_PIPELINE and rag_found_anything and not gate_abstain:
+    if (
+        cfg.EN_DRAFT_PIPELINE
+        and getattr(cfg, "FINAL_TRANSLATION_ENABLED", True)
+        and rag_found_anything
+        and not gate_abstain
+    ):
         t6 = time.perf_counter()
         _status("\n[translation] 開始")
         full_text = translate_to_traditional_chinese(full_text, on_status=on_status)
@@ -327,6 +429,18 @@ def execute_structured_query_stream(
             full_text += chunk.delta
     yield f"\n[STATUS] [synthesis-llm] 完成 elapsed_ms={int((time.perf_counter()-t3)*1000)}\n"
 
+    if rag_found_anything and not gate_abstain:
+        rewrite_msgs = []
+        corrected = _rewrite_stage4_if_needed(
+            full_text, knowledge_base, question, on_status=lambda msg: rewrite_msgs.append(msg)
+        )
+        for msg in rewrite_msgs:
+            yield f"[STATUS] {msg.strip()}\n"
+        if corrected != full_text:
+            yield "\n\n---\n"
+            yield corrected
+            full_text = corrected
+
     # ── Stage 5: Verification ────────────────────────────────────────
     if cfg.VERIFY_ENABLED and rag_found_anything and not gate_abstain:
         t4 = time.perf_counter()
@@ -361,7 +475,12 @@ def execute_structured_query_stream(
         yield f"[STATUS] [grounding] 完成 elapsed_ms={int((time.perf_counter()-t5)*1000)}\n"
 
     # ── Stage 7: Translation ─────────────────────────────────────────
-    if cfg.EN_DRAFT_PIPELINE and rag_found_anything and not gate_abstain:
+    if (
+        cfg.EN_DRAFT_PIPELINE
+        and getattr(cfg, "FINAL_TRANSLATION_ENABLED", True)
+        and rag_found_anything
+        and not gate_abstain
+    ):
         t6 = time.perf_counter()
         yield "[STATUS] 🌏 [translation] 翻譯英文答案為繁體中文...\n"
         translated = translate_to_traditional_chinese(full_text, on_status=on_status)

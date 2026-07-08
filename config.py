@@ -95,6 +95,13 @@ COMPARISON_TRADEOFF_GUARD_ENABLED = True
 COMPARISON_QUERY_SCAFFOLD_ENABLED = True
 # A/B：比較題在 Stage 3 保留 source role 與比較面向，避免 review/comparison source 被壓成 route。
 STAGE3_COMPARISON_SCHEMA_ENABLED = True
+# A/B：比較題 Stage 3 直接輸出 comparison_json，讓 Stage 4 依可檢查結構做跨文獻比較。
+COMPARISON_JSON_ENABLED = True
+COMPARISON_JSON_VALIDATION_ENABLED = True
+COMPARISON_JSON_REPAIR_RETRIES = 1
+# A/B：Stage 4 生成後檢查 comparison_json 必要結構；不合格時帶理由重寫一次。
+STAGE4_ANSWER_VALIDATION_ENABLED = True
+STAGE4_ANSWER_REWRITE_RETRIES = 1
 # A/B：Stage 3 事實蒸餾用英文輸出，讓英文 chunks / gold reference / eval judge 維持同語言比對。
 STAGE3_ENGLISH_DISTILLATION_ENABLED = True
 # A/B：方法/key-step 題只摘要核心步驟，不把起始物準備、背景方法或替代/對照路線升格成 key steps。
@@ -113,6 +120,8 @@ JUDGE_MODEL         = VERIFY_MODEL
 SUBQUERY_MAX_WORKERS = 4   # 並行子查詢的 thread pool 大小
 # A/B：True=每個子查詢先用 LLM 生成子答案；False=直接把 retrieved chunks 打包給 Stage 3 蒸餾。
 STAGE2_LLM_SUBANSWERS_ENABLED = False
+STAGE2_EVIDENCE_SNIPPETS_PER_TASK = 2
+COMPARISON_EVIDENCE_SNIPPETS_PER_TASK = 4
 
 # ── 各 Stage num_ctx 設定 ──────────────────────────────
 # Stage 1（qwen2.5:14b）與 Stage 4（gemma4:31b）透過 LlamaIndex 呼叫，
@@ -141,10 +150,12 @@ SELFCORRECT_ENTAIL_MAX = 0.2
 # NOT_ANSWERABLE）。ANSWERABLE→正常；PARTIAL→生成+軟警告橫幅；NOT_ANSWERABLE→誠實硬棄答（跳 Stage 4-7）。
 # 預設開（baseline_v5 驗證：零誤殺硬棄答、PARTIAL 精準命中最弱兩題 Q07/Q08、Q12 棄答 corr 1.0、總延遲未增）。
 ANSWERABILITY_GATE_ENABLED = False
-# English-first pipeline：全流程用英文（Stage 4 輸出英文 → Stage 5 英文驗證 → NLI EN-vs-EN → 最後翻譯成繁體中文）
+# English-first pipeline：Stage 4 輸出英文 → Stage 5 英文驗證 → NLI EN-vs-EN。
 # 優點：NLI 從跨語言變單語言（大幅提升 entailment 準確度），Verifier 推論邏輯更穩定
 # 注意：開啟後 NLI_TRANSLATE_TO_EN 會自動跳過（draft 已是英文，不需要再翻）
-EN_DRAFT_PIPELINE = True          # True = 英文 draft 全流程（預設關閉）
+EN_DRAFT_PIPELINE = True
+# Q08 validator 迭代：保留英文 draft，暫停 Stage 7 中文翻譯，避免混淆結構問題。
+FINAL_TRANSLATION_ENABLED = False
 
 # 跨語言補償：中文 hypothesis 批次翻譯成英文後再做 NLI
 # EN_DRAFT_PIPELINE=True 時此設定自動無效（draft 本身已是英文）

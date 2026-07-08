@@ -88,6 +88,42 @@ def _comparison_query_scaffold_zh() -> str:
 """
 
 
+def _comparison_json_en(knowledge_base: str) -> str:
+    if not getattr(cfg, "COMPARISON_JSON_ENABLED", False):
+        return ""
+    if '"comparison_json"' not in (knowledge_base or ""):
+        return ""
+    return """
+COMPARISON JSON:
+- The Known Facts List contains a `comparison_json` object. Treat it as the authoritative outline for cross-paper comparison.
+- Use only `direct_routes` as routes. Use `review_comparison_sources` only as review/comparison evidence, not as extra route papers.
+- The final answer must cover every dimension whose `requested` value is true under `dimensions`.
+- For requested dimensions with `evidence_found=true`, compare them using the JSON text and sources.
+- For requested dimensions with `evidence_found=false`, explicitly say the retrieved evidence did not provide that dimension; do not turn that into a corpus-level absence claim.
+- If `isotopic_enrichment.evidence_found` is true, explicitly say "isotopic enrichment" or "10B".
+- If `safety.evidence_found` is true, the Central trade-off sentence must literally include "scalability, cost-effectiveness, and safety".
+- The Central trade-off sentence must preserve all evidence_found dimensions from the JSON and must not introduce routes or dimensions absent from the JSON.
+"""
+
+
+def _comparison_json_zh(knowledge_base: str) -> str:
+    if not getattr(cfg, "COMPARISON_JSON_ENABLED", False):
+        return ""
+    if '"comparison_json"' not in (knowledge_base or ""):
+        return ""
+    return """
+【COMPARISON JSON】
+- 已知事實清單包含 `comparison_json` 物件。請把它當作跨文獻比較的權威大綱。
+- 只有 `direct_routes` 可寫成合成路線；`review_comparison_sources` 只能當作綜述/比較證據，不可改寫成額外路線論文。
+- final answer 必須涵蓋 `dimensions` 中每個 `requested=true` 的面向。
+- 對 `requested=true, evidence_found=true` 的面向，依 JSON text/sources 比較。
+- 對 `requested=true, evidence_found=false` 的面向，明確說 retrieved evidence 未提供該面向；不可寫成整個 corpus 都沒有。
+- 若 `isotopic_enrichment.evidence_found=true`，必須明確寫出 "isotopic enrichment" 或 "10B"。
+- 若 `safety.evidence_found=true`，Central trade-off / 核心權衡句必須字面包含 "scalability, cost-effectiveness, and safety"。
+- Central trade-off / 核心權衡句必須保留 JSON 中所有 evidence_found dimensions，不可新增 JSON 沒有的路線或面向。
+"""
+
+
 def _method_key_step_en() -> str:
     if not getattr(cfg, "METHOD_KEY_STEP_GUARD_ENABLED", False):
         return ""
@@ -173,6 +209,7 @@ def _reasoning_en(knowledge_base: str, question: str, memory_section: str) -> st
 
 {_term_fidelity_en()}
 {_method_key_step_en()}
+{_comparison_json_en(knowledge_base)}
 
 ---
 Original question: {question}
@@ -229,6 +266,7 @@ def _reasoning_zh(knowledge_base: str, question: str, memory_section: str) -> st
 
 {_term_fidelity_zh()}
 {_method_key_step_zh()}
+{_comparison_json_zh(knowledge_base)}
 
 ---
 原始問題：{question}
@@ -278,6 +316,7 @@ def _strict_en(knowledge_base: str, question: str, memory_section: str) -> str:
 
 {_term_fidelity_en()}
 {_method_key_step_en()}
+{_comparison_json_en(knowledge_base)}
 
 ---
 Original question: {question}
@@ -302,6 +341,7 @@ def _strict_zh(knowledge_base: str, question: str, memory_section: str) -> str:
 
 {_term_fidelity_zh()}
 {_method_key_step_zh()}
+{_comparison_json_zh(knowledge_base)}
 
 ---
 原始問題：{question}
