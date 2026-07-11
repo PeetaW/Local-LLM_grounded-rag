@@ -21,6 +21,7 @@ import json
 import time
 import datetime
 import argparse
+import re
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -149,6 +150,53 @@ def _correctness_candidate(answer: str, artifacts: dict, reference: str = "") ->
     if candidate and not any("\u4e00" <= ch <= "\u9fff" for ch in reference or ""):
         return candidate, "answer_for_judge"
     return answer, "answer"
+
+
+def _safe_file_part(value) -> str:
+    name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "item")).strip("._")
+    return name or "item"
+
+
+def _write_text_artifact(path: str, value):
+    if value is None:
+        return
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def _write_debug_artifacts(label: str, qid: str, question: str, artifacts: dict, status_lines: list, row: dict):
+    import config as cfg
+
+    if not getattr(cfg, "EVAL_DEBUG_ARTIFACTS_ENABLED", False):
+        return None
+
+    out_dir = os.path.join(RESULTS_DIR, _safe_file_part(label))
+    os.makedirs(out_dir, exist_ok=True)
+    stem = _safe_file_part(qid)
+    items = {
+        "question": question,
+        "status_log": "\n".join(status_lines),
+        "stage2_evidence": artifacts.get("stage2_evidence"),
+        "stage3_prompt": artifacts.get("stage3_prompt"),
+        "stage3_raw_output": artifacts.get("stage3_raw_output"),
+        "stage3_plain_prompt": artifacts.get("stage3_plain_prompt"),
+        "stage3_plain_output": artifacts.get("stage3_plain_output"),
+        "stage3_knowledge_base": artifacts.get("stage3_knowledge_base") or artifacts.get("knowledge_base"),
+        "stage4_prompt": artifacts.get("stage4_prompt"),
+        "stage4_draft": artifacts.get("stage4_draft"),
+        "stage4_validated": artifacts.get("stage4_validated"),
+        "stage5_verified": artifacts.get("stage5_verified"),
+        "stage6_grounded_answer": artifacts.get("stage6_grounded_answer"),
+        "stage6_grounding_report": artifacts.get("stage6_grounding_report"),
+        "answer_for_judge": row.get("answer_for_judge"),
+        "final_answer": row.get("answer"),
+    }
+    for key, value in items.items():
+        _write_text_artifact(os.path.join(out_dir, f"{stem}_{key}.txt"), value)
+    _write_text_artifact(os.path.join(out_dir, f"{stem}_judge.json"), row.get("correctness_detail"))
+    _write_text_artifact(os.path.join(out_dir, f"{stem}_row.json"), row)
+    return out_dir
 
 
 def _write_markdown_report(out: dict, path: str):
@@ -347,6 +395,10 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
                                    for ln in status_lines if "[answerability]" in ln), None),
             "answer": answer,
         }
+        artifact_dir = _write_debug_artifacts(label, qid, qtext, artifacts, status_lines, row)
+        if artifact_dir:
+            row["artifact_dir"] = artifact_dir
+            print(f"  debug artifacts: {artifact_dir}")
         rows.append(row)
         _print_row(row)
 

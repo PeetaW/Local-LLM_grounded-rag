@@ -115,6 +115,8 @@ MAX_VERIFY_RETRIES  = 2             # Stage 5 verify→correct 迴圈最多重�
 # ── Eval 正確性裁判（只在 eval/judge.py 用，不在產品 pipeline）──
 # 預設用 qwen3（未參與答案生成 → 降低 self-preference 偏誤）。答案由 gemma4 生成。
 JUDGE_MODEL         = VERIFY_MODEL
+# Eval debug artifacts：每題輸出 stage2/stage3/stage4/judge 文字檔，方便逐輪檢查 LLM 行為。
+EVAL_DEBUG_ARTIFACTS_ENABLED = True
 
 # ── Stage 2：並行子查詢 ────────────────────────────────
 SUBQUERY_MAX_WORKERS = 4   # 並行子查詢的 thread pool 大小

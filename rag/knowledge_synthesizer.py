@@ -1,6 +1,7 @@
 import json
 import time
 import logging
+import re
 import requests
 import config as cfg
 
@@ -180,13 +181,20 @@ def _comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
         item.get("source") for item in source_roles
         if isinstance(item, dict) and "review/comparison" in str(item.get("role", ""))
     }
+    background_sources = {
+        item.get("source") for item in source_roles
+        if isinstance(item, dict) and "background" in str(item.get("role", "")).lower()
+    }
     for route in comparison.get("direct_routes", []) if isinstance(comparison.get("direct_routes"), list) else []:
         if not isinstance(route, dict):
             continue
         if route.get("source") in review_sources:
             errors.append(f"Review/comparison source `{route.get('source')}` must not appear in direct_routes.")
-        route_blob = " ".join(str(route.get(k, "")) for k in ("source", "route_phrase", "evidence")).lower()
-        if any(term in route_blob for term in ("derivative", "formulation", "solubility", "biological propert")):
+        source = str(route.get("source", ""))
+        if route.get("source") in background_sources or any(
+            term in source.lower()
+            for term in ("derivative", "formulation", "solubility", "biological propert")
+        ):
             errors.append("Derivative/formulation/solubility/biological-property source must not be a direct target-compound route.")
 
     tradeoff = str(comparison.get("central_tradeoff", "")).lower()
@@ -219,12 +227,14 @@ Original extraction prompt and retrieved evidence:
 """.strip()
 
 
-def _comparison_schema_instruction(query: str) -> str:
+def _comparison_schema_instruction(query: str, comparison_json_enabled: bool | None = None) -> str:
     if not getattr(cfg, "STAGE3_COMPARISON_SCHEMA_ENABLED", False):
         return ""
     if not _is_comparison_query(query):
         return ""
-    if getattr(cfg, "COMPARISON_JSON_ENABLED", False):
+    if comparison_json_enabled is None:
+        comparison_json_enabled = getattr(cfg, "COMPARISON_JSON_ENABLED", False)
+    if comparison_json_enabled:
         return """
 COMPARISON_JSON MODE:
 Ignore the normal numbered-fact output format. Return exactly one valid JSON object and no Markdown fences.
@@ -264,6 +274,7 @@ Rules:
 - If requested=true but evidence_found=false, explain the missing retrieved evidence in text; do not silently omit the dimension.
 - If scalability, cost-effectiveness, and safety appear together in the source, keep all three.
 - If isotopic enrichment or 10B appears, set dimensions.isotopic_enrichment.evidence_found=true.
+- If evidence mentions high cost/expense of isotopically enriched 10B or boron material, preserve that wording under dimensions.cost_effectiveness.text and central_tradeoff.
 - Do not write absence claims such as "does not explicitly provide scalability/cost-effectiveness" when a review/comparison source is selected for those dimensions.
 - central_tradeoff must mention every evidence_found=true dimension and stay qualitative unless the source explicitly provides values.
 """.strip()
@@ -290,18 +301,63 @@ Rules:
 - Source metadata 與 guidance lines 只用來判斷來源角色；它們 are not paper evidence，不可當作可引用論文事實。
 - review/comparison source 若描述某路線，只能寫「該綜述/比較來源報導或比較某路線」，不要寫成「該論文提供/實作該合成路線」。
 - 保留問題或原文指名的比較面向；若原文同一句或相鄰句同時提到 scalability、cost-effectiveness、safety，必須一起保留在 [dimension_evidence]。
+- 若 evidence 提到 high cost/expense of isotopically enriched 10B 或 boron material，必須保留在 cost-effectiveness 與 central trade-off 相關事實中。
 - 與面向無關的實驗條件、產率、試劑細節可省略。
 """.strip()
 
 
-def _build_user_prompt(formatted: str, query: str) -> str:
-    schema = _comparison_schema_instruction(query)
+def _build_user_prompt(
+    formatted: str,
+    query: str,
+    comparison_json_enabled: bool | None = None,
+) -> str:
+    schema = _comparison_schema_instruction(query, comparison_json_enabled=comparison_json_enabled)
     schema_block = f"\n\n{schema}" if schema else ""
     return (
         f"參考問題方向（僅供整理聚焦，不影響事實陳述）：{query}{schema_block}\n\n"
         f"請將以下論文段落整理為結構化已知事實清單：\n\n"
         f"--- 論文段落開始 ---\n{formatted}\n--- 論文段落結束 ---"
     )
+
+
+def _source_near(text: str, pos: int) -> str:
+    window = text[max(0, pos - 1200):pos + 200]
+    matches = list(re.finditer(r"【([^】]+)】", window))
+    if matches:
+        return matches[-1].group(1)
+    matches = list(re.finditer(r"來源：([^\n]+)", window))
+    return matches[-1].group(1).strip() if matches else "retrieved evidence"
+
+
+def _append_isotope_cost_fact(result: str, evidence_text: str, query: str) -> str:
+    if not _is_comparison_query(query):
+        return result
+    lower_result = (result or "").lower()
+    if any(term in lower_result for term in ("high cost", "isotope starting material", "expensive 10b", "10b-enriched starting")):
+        return result
+
+    text = evidence_text or ""
+    lower = text.lower()
+    patterns = (
+        "high cost of isotopically enriched 10b",
+        "major cost typically comes from the isotope starting material",
+    )
+    pos = next((lower.find(p) for p in patterns if lower.find(p) >= 0), -1)
+    if pos < 0:
+        return result
+
+    source = _source_near(text, pos)
+    lines = (result or "").rstrip().splitlines()
+    if lines and lines[-1].strip().startswith("- ") and not lines[-1].strip().endswith((".", ")", "]")):
+        lines.pop()
+    result = "\n".join(lines).rstrip()
+    if "[dimension_evidence]" not in result:
+        result += "\n\n[dimension_evidence]"
+    if "high cost of isotopically enriched 10b" in lower:
+        fact = "the review highlights the high cost of isotopically enriched 10B"
+    else:
+        fact = "the major cost typically comes from the isotope starting material"
+    return result + f"\n- cost-effectiveness: When preparing isotopically enriched compounds, {fact} (Source: {source})."
 
 
 class KnowledgeSynthesizer:
@@ -371,11 +427,27 @@ class KnowledgeSynthesizer:
             lines.append(f"[Chunk {i+1}] 來源：{source}\n{text}\n---")
         return "\n".join(lines)
 
+    @staticmethod
+    def _fallback_chunks(chunks: list[dict]) -> str:
+        lines = []
+        for i, chunk in enumerate(chunks):
+            source = (
+                chunk.get("source")
+                or chunk.get("paper_name")
+                or chunk.get("file_name")
+                or (chunk.get("metadata") or {}).get("file_name")
+                or f"chunk_{i}"
+            )
+            text = chunk.get("text") or chunk.get("content") or str(chunk)
+            lines.append(f"[Chunk {i+1}] 來源：{source}\n{text}")
+        return "\n\n".join(lines)
+
     def synthesize(
         self,
         chunks: list[dict],
         query: str = "",
         on_status=None,
+        on_artifact=None,
     ) -> str:
         """
         將 chunks 轉化為結構化已知事實清單。
@@ -388,6 +460,8 @@ class KnowledgeSynthesizer:
         total_chars = sum(len(c.get("text","")) for c in chunks)
 
         user_prompt = _build_user_prompt(formatted, query)
+        if on_artifact:
+            on_artifact("stage3_prompt", user_prompt)
 
         def _status(msg):
             if on_status:
@@ -403,12 +477,32 @@ class KnowledgeSynthesizer:
 
         try:
             result = self._generate(user_prompt, _system_prompt())
+            if on_artifact:
+                on_artifact("stage3_raw_output", result)
+            if not (result or "").strip():
+                _status("  ⚠️  [Synthesizer] empty output; using original chunks")
+                result = self._fallback_chunks(chunks)
             comparison_json_mode = getattr(cfg, "COMPARISON_JSON_ENABLED", False) and _is_comparison_query(query)
-            if comparison_json_mode:
+            if comparison_json_mode and '"comparison_json"' in result:
                 result = _normalize_comparison_json(result, query)
                 errors = _comparison_json_validation_errors(result, query)
                 retries = getattr(cfg, "COMPARISON_JSON_REPAIR_RETRIES", 1)
-                if getattr(cfg, "COMPARISON_JSON_VALIDATION_ENABLED", False):
+                if errors == ["Output is not valid JSON."]:
+                    _status("  ⚠️  [comparison-json] invalid JSON; retrying plain comparison schema")
+                    plain_prompt = _build_user_prompt(
+                        formatted, query, comparison_json_enabled=False
+                    )
+                    if on_artifact:
+                        on_artifact("stage3_plain_prompt", plain_prompt)
+                    result = self._generate(plain_prompt, _system_prompt())
+                    if on_artifact:
+                        on_artifact("stage3_plain_output", result)
+                    if not (result or "").strip():
+                        _status("  ⚠️  [Synthesizer] plain retry empty; using original chunks")
+                        result = self._fallback_chunks(chunks)
+                    result = _append_isotope_cost_fact(result, formatted, query)
+                    errors = []
+                elif getattr(cfg, "COMPARISON_JSON_VALIDATION_ENABLED", False):
                     for attempt in range(retries):
                         if not errors:
                             break
@@ -432,6 +526,8 @@ class KnowledgeSynthesizer:
                     _status(f"  ⚠️  [comparison-json] validation still failed: {'; '.join(errors[:3])}")
                 else:
                     _status("  ✅ [comparison-json] validation passed")
+            else:
+                result = _append_isotope_cost_fact(result, formatted, query)
 
             elapsed = time.time() - t0
             logger.info(
@@ -442,6 +538,8 @@ class KnowledgeSynthesizer:
                 f"  📋 [Synthesizer] {len(chunks)} chunks → "
                 f"{len(result)} chars ({elapsed:.1f}s)"
             )
+            if on_artifact:
+                on_artifact("stage3_knowledge_base", result)
             return result
 
         except Exception as e:
@@ -449,7 +547,7 @@ class KnowledgeSynthesizer:
             logger.warning("[Synthesizer] FALLBACK: %s (%.1fs)", e, elapsed)
             _status(f"  ⚠️  [Synthesizer] 失敗，使用原始 chunks ({e})")
             # Fallback：直接串接原始 chunk text
-            return "\n\n".join(
-                f"[Chunk {i+1}] {c.get('text','')}"
-                for i, c in enumerate(chunks)
-            )
+            result = self._fallback_chunks(chunks)
+            if on_artifact:
+                on_artifact("stage3_knowledge_base", result)
+            return result

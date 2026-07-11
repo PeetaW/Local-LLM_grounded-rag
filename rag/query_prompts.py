@@ -66,6 +66,7 @@ COMPARISON SCAFFOLD:
 - For synthetic-route comparison questions, do not include background rows unless they directly compare synthesis of the target compound on the requested dimensions.
 - The scaffold is the only route map. Do not add exhaustive historical route variants or every yield/condition unless the user explicitly asks for full experimental conditions.
 - For high-level comparison questions, use reference-level qualitative summaries. Do not include exact temperatures, pH values, yields, cost multipliers, route family lists, patent names, reagent/catalyst/oxidant names, named intermediates, protecting groups, or detailed operational conditions unless the user explicitly asks for numeric/procedural details. Keep only broad route identifiers and dimension-bearing qualitative evidence.
+- If the facts mention high cost/expense of isotopically enriched 10B or boron material, preserve that point in the cost-effectiveness comparison and Central trade-off sentence.
 - Each bullet must name the source paper(s) that support that bullet. If a route comes from one paper, do not leave its source implicit.
 - After the scaffold, write exactly two short evidence bullets followed by one "Central trade-off:" sentence. One bullet should summarize the direct route evidence; one bullet should summarize the review/comparison source evidence. The Central trade-off sentence must preserve the named comparison dimensions from the question/evidence; if safety is present in the evidence/reference, the sentence must literally include "scalability, cost-effectiveness, and safety". Do not add separate sections or expand beyond the scaffold with route/reagent examples, route families, derivative/formulation context, safety reviews, or numeric/procedural details unless the user explicitly asks for them.
 """
@@ -83,6 +84,7 @@ def _comparison_query_scaffold_zh() -> str:
 - 若是合成路線比較題，不要列出 background rows，除非該來源直接比較目標化合物合成在問題指定面向上的差異。
 - 比較鷹架就是唯一的 route map。不要再輸出完整歷史路線變體清單，或每個產率/條件；除非使用者明確要求完整實驗條件。
 - 若是高層比較題，請使用 reference-level qualitative summaries。不要列出精確溫度、pH、產率、成本倍數、route family lists、專利名稱、試劑/催化劑/氧化劑名稱、具名中間體、保護基或詳細操作條件；除非使用者明確要求數值或實驗操作細節。只保留寬層級路線辨識與和比較面向直接相關的定性證據。
+- 若 facts 提到 high cost/expense of isotopically enriched 10B 或 boron material，必須保留在 cost-effectiveness 比較與 Central trade-off / 核心權衡句中。
 - 每個 bullet 都必須寫出支持該列的來源論文；若某路線只來自單一論文，不可省略來源。
 - 鷹架後只能寫兩個短 evidence bullets，接著寫一句「核心權衡：」。一個 bullet 摘要直接路線證據；一個 bullet 摘要 review/comparison source 證據。「核心權衡」句必須保留問題或 evidence 中出現的比較面向；若 evidence/reference 出現 safety，該句必須字面包含 "scalability, cost-effectiveness, and safety"。不要另開段落標題，也不要超出鷹架再展開 route/reagent examples、route families、derivative/formulation context、安全性綜述或數值/操作細節，除非使用者明確要求。
 """

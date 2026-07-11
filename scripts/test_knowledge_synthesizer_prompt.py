@@ -15,6 +15,7 @@ if "requests" not in sys.modules:
 import config as cfg
 from rag.knowledge_synthesizer import (
     _build_user_prompt,
+    _append_isotope_cost_fact,
     _comparison_json_validation_errors,
     KnowledgeSynthesizer,
     _normalize_comparison_json,
@@ -43,6 +44,7 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             self.assertIn("[dimension_evidence]", prompt)
             self.assertIn("- safety:", prompt)
             self.assertIn("scalability、cost-effectiveness、safety", prompt)
+            self.assertIn("high cost/expense", prompt)
             self.assertIn("FORMATTED_CHUNKS", prompt)
         finally:
             cfg.STAGE3_COMPARISON_SCHEMA_ENABLED = old
@@ -80,6 +82,7 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             self.assertIn("evidence_found=true", prompt)
             self.assertIn("not in direct_routes", prompt)
             self.assertIn("chymotrypsin-catalysed enzymatic hydrolysis", prompt)
+            self.assertIn("high cost/expense", prompt)
             self.assertNotIn("[source_roles]", prompt)
         finally:
             cfg.STAGE3_COMPARISON_SCHEMA_ENABLED = old_schema
@@ -152,6 +155,29 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         errors = _comparison_json_validation_errors(raw, "Compare routes for scalability.")
         self.assertTrue(any("Review/comparison source" in err for err in errors))
         self.assertTrue(any("central_tradeoff" in err for err in errors))
+
+    def test_validator_does_not_misread_chemical_derivative_as_background(self):
+        raw = """
+        {
+          "comparison_json": {
+            "source_roles": [{"source": "bbb0683", "role": "route"}],
+            "direct_routes": [{
+              "source": "bbb0683",
+              "route_phrase": "enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis",
+              "evidence": "alkylation with protected boronic acid derivative 2 followed by hydrolysis"
+            }],
+            "review_comparison_sources": [],
+            "dimensions": {},
+            "central_tradeoff": ""
+          }
+        }
+        """
+        errors = _comparison_json_validation_errors(raw, "Compare synthetic routes.")
+        self.assertFalse(any("Derivative/formulation" in err for err in errors))
+
+        background = raw.replace('"role": "route"', '"role": "background"')
+        errors = _comparison_json_validation_errors(background, "Compare synthetic routes.")
+        self.assertTrue(any("Derivative/formulation" in err for err in errors))
 
     def test_validator_rechecks_requested_dimensions_with_review_source(self):
         raw = """
@@ -226,6 +252,82 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             cfg.COMPARISON_JSON_ENABLED = old_enabled
             cfg.COMPARISON_JSON_VALIDATION_ENABLED = old_validation
             cfg.COMPARISON_JSON_REPAIR_RETRIES = old_retries
+
+    def test_synthesizer_falls_back_when_output_empty(self):
+        synth = KnowledgeSynthesizer()
+        synth._generate = MagicMock(return_value="")
+        statuses = []
+
+        result = synth.synthesize(
+            [{"text": "retrieved evidence", "source": "PaperA"}],
+            query="Compare routes for scalability.",
+            on_status=statuses.append,
+        )
+
+        self.assertIn("retrieved evidence", result)
+        self.assertTrue(any("empty output" in status for status in statuses))
+
+    def test_synthesizer_emits_debug_artifacts(self):
+        synth = KnowledgeSynthesizer()
+        synth._generate = MagicMock(return_value="[fact1] route comparison evidence (source: PaperA)")
+        artifacts = {}
+
+        result = synth.synthesize(
+            [{"text": "retrieved evidence", "source": "PaperA"}],
+            query="Compare routes for scalability.",
+            on_status=[].append,
+            on_artifact=artifacts.__setitem__,
+        )
+
+        self.assertIn("retrieved evidence", artifacts["stage3_prompt"])
+        self.assertIn("route comparison evidence", artifacts["stage3_raw_output"])
+        self.assertEqual(artifacts["stage3_knowledge_base"], result)
+
+    def test_synthesizer_falls_back_when_comparison_json_is_invalid(self):
+        old_enabled = cfg.COMPARISON_JSON_ENABLED
+        old_validation = cfg.COMPARISON_JSON_VALIDATION_ENABLED
+        old_retries = cfg.COMPARISON_JSON_REPAIR_RETRIES
+        try:
+            cfg.COMPARISON_JSON_ENABLED = True
+            cfg.COMPARISON_JSON_VALIDATION_ENABLED = True
+            cfg.COMPARISON_JSON_REPAIR_RETRIES = 1
+            synth = KnowledgeSynthesizer()
+            synth._generate = MagicMock(side_effect=[
+                '{"comparison_json":{"dimensions":{"scalability":',
+                "[fact1] route comparison evidence (source: PaperA)",
+            ])
+            statuses = []
+
+            result = synth.synthesize(
+                [{"text": "retrieved evidence", "source": "PaperA"}],
+                query="Compare routes for scalability.",
+                on_status=statuses.append,
+            )
+
+            self.assertEqual(synth._generate.call_count, 2)
+            self.assertIn("route comparison evidence", result)
+            self.assertTrue(any("invalid JSON" in status for status in statuses))
+        finally:
+            cfg.COMPARISON_JSON_ENABLED = old_enabled
+            cfg.COMPARISON_JSON_VALIDATION_ENABLED = old_validation
+            cfg.COMPARISON_JSON_REPAIR_RETRIES = old_retries
+
+    def test_appends_complete_isotope_cost_fact(self):
+        result = "[dimension_evidence]\n- cost-effectiveness: When preparing isotopically enriched compounds, the major"
+        evidence = (
+            "[Chunk 1] 來源：CMDC-20-e202500059\n"
+            "The review highlights the high cost of isotopically enriched 10B. "
+            "【CMDC-20-e202500059】 when preparing isotopically enriched compounds, "
+            "the major cost typically comes from the isotope starting material."
+        )
+        fixed = _append_isotope_cost_fact(
+            result,
+            evidence,
+            "Compare routes for isotopic enrichment, scalability, and cost-effectiveness.",
+        )
+        self.assertIn("high cost of isotopically enriched 10B", fixed)
+        self.assertIn("Source: CMDC-20-e202500059", fixed)
+        self.assertNotIn("the major\n-", fixed)
 
 
 if __name__ == "__main__":

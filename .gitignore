@@ -34,6 +34,14 @@ projects/*/papers_metadata.json
 
 # ── Eval result data (contains verbatim/derived paper content) ─
 eval/results/*.json
+# Per-run debug artifacts can contain long verbatim paper excerpts.
+eval/results/*/
+# Generated manual-model inputs/outputs are local; keep only the script and summary.
+eval/chatgpt_answers_*.jsonl
+eval/chatgpt_prompts_*.md
+eval/chatgpt_raw_*.txt
+# Invalid A/B: Stage 4 generated Chinese, so this was not the intended English-only probe.
+eval/results/eval_q08_comparison_json_validator_enonly.md
 
 # ── ChromaDB memory (personal session data) ───────────
 memory_db/

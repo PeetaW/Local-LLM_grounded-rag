@@ -12,7 +12,7 @@ Run:
 import sys
 import os
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, mock_open
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "eval"))
@@ -79,6 +79,7 @@ from rag.query_planning import (
 from rag.query_retrieval import (
     is_empty_result, extract_paper_name,
     build_subquery_tasks, run_subqueries_parallel, _nodes_to_evidence_block,
+    _clip_evidence_snippet,
 )
 from rag.query_grounding_flow import (
     _extract_direct_citation_section,
@@ -561,6 +562,21 @@ class TestRunSubqueriesParallel(unittest.TestCase):
             cfg.STAGE2_EVIDENCE_SNIPPETS_PER_TASK = old_base
             cfg.COMPARISON_EVIDENCE_SNIPPETS_PER_TASK = old_compare
 
+    def test_comparison_snippet_clips_around_dimension_terms(self):
+        text = (
+            "opening procedural background " * 80
+            + "The review highlights limitations regarding scalability, cost-effectiveness, "
+            + "and safety, especially considering the high cost of isotopically enriched 10B. "
+            + "trailing text " * 80
+        )
+        clipped = _clip_evidence_snippet(
+            text,
+            "Compare routes for isotopic enrichment, scalability, and cost-effectiveness.",
+            limit=260,
+        )
+        self.assertIn("cost-effectiveness", clipped)
+        self.assertIn("high cost of isotopically enriched 10B", clipped)
+
     @patch("rag.query_retrieval._generate_from_nodes", return_value="Generated answer")
     @patch("rag.query_retrieval._retrieve_nodes", return_value=["raw evidence"])
     @patch("rag.query_retrieval.prepare_query_text", return_value="clean query")
@@ -749,6 +765,7 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
             self.assertIn("patent names", prompt)
             self.assertIn("reagent/catalyst/oxidant names", prompt)
             self.assertIn("broad route identifiers", prompt)
+            self.assertIn("high cost/expense", prompt)
             self.assertIn("exactly two short evidence bullets", prompt)
             self.assertIn("followed by one \"Central trade-off:\" sentence", prompt)
             self.assertIn("must preserve the named comparison dimensions", prompt)
@@ -926,6 +943,80 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         finally:
             cfg.STAGE4_ANSWER_VALIDATION_ENABLED = old
 
+    def test_stage4_validator_flags_dense_background_comparison(self):
+        old = cfg.STAGE4_ANSWER_VALIDATION_ENABLED
+        try:
+            cfg.STAGE4_ANSWER_VALIDATION_ENABLED = True
+            kb = """
+            {"comparison_json":{
+              "source_roles":[
+                {"source":"bbb0683","role":"route"},
+                {"source":"CMDC-20-e202500059","role":"review/comparison source"},
+                {"source":"water-soluble-BPA-derivatives","role":"background"}
+              ],
+              "direct_routes":[{"source":"bbb0683","route_phrase":"enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis"}],
+              "review_comparison_sources":[{"source":"CMDC-20-e202500059"}],
+              "dimensions":{
+                "isotopic_enrichment":{"requested":true,"evidence_found":true},
+                "scalability":{"requested":true,"evidence_found":true},
+                "cost_effectiveness":{"requested":true,"evidence_found":true}
+              }
+            }}
+            """
+            answer = (
+                "Comparison scaffold: bbb0683 uses enantioselective alkylation followed by "
+                "chymotrypsin-catalysed enzymatic hydrolysis [bbb0683]. "
+                "The hybrid process uses a long route description and CMDC compares protecting groups "
+                "for scalability and cost-effectiveness [CMDC-20-e202500059], while 10B evidence appears "
+                "in water-soluble-BPA-derivatives [water-soluble-BPA-derivatives] with many details that make "
+                "this sentence deliberately long enough to be a dense multi-source claim rather than an atomic "
+                "source-backed comparison sentence. Central trade-off: optical purity versus scalability and cost."
+            )
+            issues = pipeline_module._stage4_answer_validation_issues(
+                answer,
+                kb,
+                "Compare routes for isotopic enrichment, scalability, and cost-effectiveness.",
+            )
+            self.assertIn("Background source cited", issues)
+            self.assertIn("Over-dense multi-source sentence", issues)
+            self.assertIn("Missing high-purity framing", issues)
+        finally:
+            cfg.STAGE4_ANSWER_VALIDATION_ENABLED = old
+
+    def test_stage4_empty_fallback_formats_comparison_json(self):
+        kb = """
+        {"comparison_json":{
+          "direct_routes":[{"source":"bbb0683","route_phrase":"enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis"}],
+          "review_comparison_sources":[{"source":"CMDC-20-e202500059","claim":"reviews scalability, cost-effectiveness, and safety"}],
+          "dimensions":{
+            "isotopic_enrichment":{"requested":true,"evidence_found":true,"text":"10B-enriched material is required.","sources":["CMDC-20-e202500059"]},
+            "scalability":{"requested":true,"evidence_found":true,"text":"Scalability is compared qualitatively.","sources":["CMDC-20-e202500059"]}
+          },
+          "central_tradeoff":"High-purity 10B material must be balanced against scalability and cost-effectiveness."
+        }}
+        """
+        answer = pipeline_module._stage4_empty_answer_fallback(kb)
+        self.assertIn("Comparison scaffold", answer)
+        self.assertIn("bbb0683", answer)
+        self.assertIn("chymotrypsin-catalysed enzymatic hydrolysis", answer)
+        self.assertIn("CMDC-20-e202500059", answer)
+        self.assertIn("Central trade-off", answer)
+
+    def test_stage4_appends_missing_isotope_cost_fact(self):
+        answer = "Central trade-off: purity and isotopic enrichment versus scalability and cost-effectiveness."
+        kb = (
+            "[dimension_evidence]\n"
+            "- cost-effectiveness: The review highlights the high cost of isotopically enriched 10B "
+            "(Source: CMDC-20-e202500059)."
+        )
+        fixed = pipeline_module._append_missing_isotope_cost_answer(
+            answer,
+            kb,
+            "Compare routes for isotopic enrichment, scalability, and cost-effectiveness.",
+        )
+        self.assertIn("high cost of isotopically enriched 10B", fixed)
+        self.assertIn("CMDC-20-e202500059", fixed)
+
     @patch("rag.query_pipeline.translate_to_traditional_chinese")
     @patch("rag.query_pipeline.run_grounding_check")
     @patch("rag.query_pipeline.run_subqueries_parallel")
@@ -954,6 +1045,35 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             "What is the synthesis?", {"paper_a": MagicMock()}
         )
         self.assertIn("Final synthesized answer text.", result)
+
+    @patch("rag.query_pipeline.translate_to_traditional_chinese")
+    @patch("rag.query_pipeline.run_grounding_check")
+    @patch("rag.query_pipeline.run_subqueries_parallel")
+    @patch("rag.query_pipeline.build_subquery_tasks")
+    @patch("rag.query_pipeline.plan_sub_questions")
+    @patch("rag.query_pipeline.detect_target_paper")
+    @patch("rag.query_pipeline.cfg")
+    @patch("rag.query_pipeline.Settings")
+    def test_empty_stage4_uses_stage3_facts(
+        self, mock_settings, mock_cfg,
+        mock_detect, mock_plan, mock_build, mock_run, *_
+    ):
+        _setup_cfg(mock_cfg)
+        mock_detect.return_value = "paper_a"
+        mock_plan.return_value = [{"paper": "paper_a", "sub_q": "Q?"}]
+        mock_build.return_value = ([], {})
+        mock_run.return_value = [(
+            "【paper_a】",
+            "retrieved evidence from PaperA",
+        )]
+        chunk = MagicMock()
+        chunk.delta = ""
+        mock_settings.llm.stream_complete.return_value = [chunk]
+
+        result = pipeline_module.execute_structured_query(
+            "What is the synthesis?", {"paper_a": MagicMock()}
+        )
+        self.assertIn("retrieved evidence from PaperA", result)
 
     @patch("rag.query_pipeline.translate_to_traditional_chinese")
     @patch("rag.query_pipeline.run_grounding_check")
@@ -1020,7 +1140,13 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             "question?", {"paper_a": MagicMock()}, on_artifact=artifacts.__setitem__,
         )
 
+        self.assertIn("Fe3O4", artifacts["stage2_evidence"])
         self.assertIn("Fe3O4", artifacts["knowledge_base"])
+        self.assertIn("Fe3O4", artifacts["stage4_prompt"])
+        self.assertEqual(artifacts["stage4_draft"], "English draft answer.")
+        self.assertEqual(artifacts["stage4_validated"], "English draft answer.")
+        self.assertEqual(artifacts["stage5_verified"], "English draft answer.")
+        self.assertEqual(artifacts["stage6_grounded_answer"], "English draft answer.")
         self.assertEqual(artifacts["answer_for_judge"], "English draft answer.")
         self.assertEqual(result, "繁中最終答案")
 
@@ -1117,6 +1243,36 @@ class TestRunEvalCorrectnessCandidate(unittest.TestCase):
         )
         self.assertEqual(candidate, "繁中最終答案")
         self.assertEqual(source, "answer")
+
+    def test_writes_debug_artifact_files(self):
+        old_enabled = cfg.EVAL_DEBUG_ARTIFACTS_ENABLED
+        try:
+            cfg.EVAL_DEBUG_ARTIFACTS_ENABLED = True
+            row = {
+                "answer_for_judge": "English draft answer",
+                "answer": "Final answer",
+                "correctness_detail": {"reason": "ok"},
+            }
+            m = mock_open()
+            with patch.object(eval_run, "RESULTS_DIR", "results"), \
+                    patch.object(eval_run.os, "makedirs") as makedirs, \
+                    patch("builtins.open", m):
+                out_dir = eval_run._write_debug_artifacts(
+                    "label with spaces",
+                    "Q08",
+                    "Question text?",
+                    {"stage2_evidence": "Evidence block", "stage4_draft": "Draft"},
+                    ["[planning] ok"],
+                    row,
+                )
+
+            self.assertEqual(out_dir, os.path.join("results", "label_with_spaces"))
+            makedirs.assert_called_once_with(out_dir, exist_ok=True)
+            opened_paths = [args[0] for args, _ in m.call_args_list]
+            self.assertIn(os.path.join(out_dir, "Q08_stage2_evidence.txt"), opened_paths)
+            self.assertIn(os.path.join(out_dir, "Q08_stage4_draft.txt"), opened_paths)
+        finally:
+            cfg.EVAL_DEBUG_ARTIFACTS_ENABLED = old_enabled
 
 
 class TestExecuteStructuredQueryStream(unittest.TestCase):

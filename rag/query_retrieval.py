@@ -119,6 +119,26 @@ def _is_comparison_query(query_text: str) -> bool:
     ))
 
 
+def _clip_evidence_snippet(text: str, query_text: str, limit: int = 900) -> str:
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    if not _is_comparison_query(query_text):
+        return text[:limit]
+
+    lower = text.lower()
+    terms = (
+        "high cost", "cost-effectiveness", "cost effectiveness", "isotopically enriched",
+        "10b", "scalability", "safety", "cost", "multiple routes",
+    )
+    positions = [lower.find(term) for term in terms if lower.find(term) >= 0]
+    if not positions:
+        return text[:limit]
+    pos = min(positions)
+    start = max(0, pos - limit // 3)
+    return text[start:start + limit]
+
+
 def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
     if nodes is None:
         return "No standalone retriever output was available."
@@ -140,7 +160,7 @@ def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
     for i, nws in enumerate(nodes[:snippet_count], 1):
         node = getattr(nws, "node", nws)
         text = node.get_content() if hasattr(node, "get_content") else str(node)
-        text = " ".join(text.split())[:900]
+        text = _clip_evidence_snippet(text, query_text)
         lines.append(f"[Snippet {i}] {text}")
     return "\n".join(lines)
 
