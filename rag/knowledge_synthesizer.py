@@ -114,25 +114,71 @@ def _normalize_comparison_json(text: str, query: str = "") -> str:
     comparison.setdefault("source_roles", [])
     comparison.setdefault("direct_routes", [])
     comparison.setdefault("review_comparison_sources", [])
-    dimensions = comparison.setdefault("dimensions", {})
+    source_roles = comparison["source_roles"] if isinstance(comparison["source_roles"], list) else []
+    review_sources = {
+        item.get("source") for item in source_roles
+        if isinstance(item, dict) and "review/comparison" in str(item.get("role", "")).lower()
+    }
+    background_sources = {
+        item.get("source") for item in source_roles
+        if isinstance(item, dict) and "background" in str(item.get("role", "")).lower()
+    }
+    for route in comparison["direct_routes"] if isinstance(comparison["direct_routes"], list) else []:
+        if isinstance(route, dict):
+            route.setdefault("outcome", "")
+    dimensions = comparison.get("dimensions")
+    if not isinstance(dimensions, dict):
+        dimensions = comparison["dimensions"] = {}
     query_dims = _query_dimension_keys(query)
     for key in ("isotopic_enrichment", "scalability", "cost_effectiveness", "safety"):
         item = dimensions.setdefault(key, {})
         item["requested"] = key in query_dims or bool(item.get("requested", False))
-        item["evidence_found"] = bool(item.get("evidence_found", item.get("present", False)))
-        item["present"] = item["evidence_found"]
         item.setdefault("text", "")
-        item.setdefault("sources", [])
-    review_sources = [
-        item.get("source") for item in comparison.get("source_roles", [])
-        if isinstance(item, dict) and "review/comparison" in str(item.get("role", ""))
-    ]
+        item["sources"] = item.get("sources") if isinstance(item.get("sources"), list) else []
+        raw_atomic = [
+            {"source": str(entry.get("source", "")).strip(), "claim": str(entry.get("claim", "")).strip()}
+            for entry in item.get("evidence", [])
+            if isinstance(entry, dict) and entry.get("source") and entry.get("claim")
+        ] if isinstance(item.get("evidence"), list) else []
+        if not raw_atomic and item["text"] and len(item["sources"]) == 1:
+            raw_atomic = [{"source": str(item["sources"][0]), "claim": str(item["text"])}]
+        atomic = [entry for entry in raw_atomic if entry["source"] not in background_sources]
+        dropped_background = len(atomic) != len(raw_atomic)
+        item["evidence"] = atomic
+        if atomic:
+            item["text"] = " ".join(entry["claim"] for entry in atomic)
+            item["sources"] = list(dict.fromkeys(entry["source"] for entry in atomic))
+        elif dropped_background:
+            item["text"] = ""
+            item["sources"] = []
+        item["evidence_found"] = False if dropped_background and not atomic else bool(
+            atomic or item.get("evidence_found", item.get("present", False))
+        )
+        item["present"] = item["evidence_found"]
     if review_sources:
         comparison["direct_routes"] = [
             route for route in comparison.get("direct_routes", [])
             if not isinstance(route, dict) or route.get("source") not in review_sources
         ]
-    comparison.setdefault("central_tradeoff", "")
+    tradeoff = comparison.get("central_tradeoff", "")
+    if isinstance(tradeoff, str):
+        sources = [
+            str(item.get("source", "")).strip()
+            for item in comparison.get("review_comparison_sources", [])
+            if isinstance(item, dict) and item.get("source")
+        ]
+        comparison["central_tradeoff"] = {
+            "claim": tradeoff.strip(),
+            "sources": list(dict.fromkeys(sources)),
+        }
+    elif isinstance(tradeoff, dict):
+        tradeoff["claim"] = str(tradeoff.get("claim", "")).strip()
+        sources = tradeoff.get("sources") if isinstance(tradeoff.get("sources"), list) else []
+        tradeoff["sources"] = list(dict.fromkeys(
+            str(source).strip() for source in sources if source
+        ))
+    else:
+        comparison["central_tradeoff"] = {"claim": "", "sources": []}
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
@@ -156,6 +202,28 @@ def _comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
 
     query_dims = _query_dimension_keys(query)
     has_review_source = _has_review_comparison_source(comparison)
+    atomic_required = getattr(cfg, "COMPARISON_JSON_DIRECT_RENDER_ENABLED", False)
+    source_roles = comparison.get("source_roles") if isinstance(comparison.get("source_roles"), list) else []
+    review_sources = {
+        item.get("source") for item in source_roles
+        if isinstance(item, dict) and "review/comparison" in str(item.get("role", "")).lower()
+    }
+    background_sources = {
+        item.get("source") for item in source_roles
+        if isinstance(item, dict) and "background" in str(item.get("role", "")).lower()
+    }
+    for key, item in dimensions.items():
+        if not isinstance(item, dict) or not isinstance(item.get("evidence"), list):
+            continue
+        invalid_sources = {
+            entry.get("source") for entry in item["evidence"]
+            if isinstance(entry, dict) and entry.get("source") in background_sources
+        }
+        if invalid_sources:
+            errors.append(
+                f"`dimensions.{key}.evidence` must not use background source(s): "
+                f"{', '.join(sorted(invalid_sources))}."
+            )
     for key in query_dims:
         item = dimensions.get(key)
         if not isinstance(item, dict):
@@ -163,8 +231,17 @@ def _comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
             continue
         if not item.get("requested"):
             errors.append(f"`dimensions.{key}.requested` must be true because the question asks for it.")
-        if item.get("evidence_found") and (not item.get("text") or not item.get("sources")):
-            errors.append(f"`dimensions.{key}` says evidence_found=true but lacks text or sources.")
+        atomic = item.get("evidence") if isinstance(item.get("evidence"), list) else []
+        valid_atomic = [
+            entry for entry in atomic
+            if isinstance(entry, dict) and entry.get("source") and entry.get("claim")
+        ]
+        if item.get("evidence_found") and atomic_required and not valid_atomic:
+            errors.append(
+                f"`dimensions.{key}` must contain source-bound atomic evidence entries."
+            )
+        elif item.get("evidence_found") and not valid_atomic and (not item.get("text") or not item.get("sources")):
+            errors.append(f"`dimensions.{key}` says evidence_found=true but lacks evidence.")
         if (
             key in ("scalability", "cost_effectiveness")
             and has_review_source
@@ -176,20 +253,13 @@ def _comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
                 "re-check qualitative review/comparison evidence before setting evidence_found=false."
             )
 
-    source_roles = comparison.get("source_roles") if isinstance(comparison.get("source_roles"), list) else []
-    review_sources = {
-        item.get("source") for item in source_roles
-        if isinstance(item, dict) and "review/comparison" in str(item.get("role", ""))
-    }
-    background_sources = {
-        item.get("source") for item in source_roles
-        if isinstance(item, dict) and "background" in str(item.get("role", "")).lower()
-    }
     for route in comparison.get("direct_routes", []) if isinstance(comparison.get("direct_routes"), list) else []:
         if not isinstance(route, dict):
             continue
         if route.get("source") in review_sources:
             errors.append(f"Review/comparison source `{route.get('source')}` must not appear in direct_routes.")
+        if atomic_required and not str(route.get("outcome", "")).strip():
+            errors.append(f"Direct route `{route.get('source')}` must preserve its reported outcome.")
         source = str(route.get("source", ""))
         if route.get("source") in background_sources or any(
             term in source.lower()
@@ -197,9 +267,31 @@ def _comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
         ):
             errors.append("Derivative/formulation/solubility/biological-property source must not be a direct target-compound route.")
 
-    tradeoff = str(comparison.get("central_tradeoff", "")).lower()
+    tradeoff_value = comparison.get("central_tradeoff", "")
+    tradeoff = str(
+        tradeoff_value.get("claim", "") if isinstance(tradeoff_value, dict) else tradeoff_value
+    ).lower()
     if _has_absence_claim(tradeoff) and query_dims:
         errors.append("central_tradeoff contains an absence claim for requested comparison dimensions.")
+    route_outcomes = " ".join(
+        str(route.get("outcome", ""))
+        for route in comparison.get("direct_routes", [])
+        if isinstance(route, dict)
+    ).lower()
+    if (
+        "isotopic_enrichment" in query_dims
+        and any(term in route_outcomes for term in ("optically pure", "optical purity", "e.e.", " ee", "enantiopur"))
+        and "high-purity" not in tradeoff
+    ):
+        errors.append(
+            "central_tradeoff must explicitly frame high-purity/isotopically enriched material."
+        )
+    if atomic_required and query_dims and (
+        not isinstance(tradeoff_value, dict)
+        or not tradeoff_value.get("claim")
+        or not tradeoff_value.get("sources")
+    ):
+        errors.append("central_tradeoff must contain a source-bound claim.")
     return errors
 
 
@@ -214,7 +306,12 @@ Rules:
 - Keep the same schema.
 - Use only evidence from the original prompt below.
 - Set `requested=true` for dimensions asked by the question.
-- Set `evidence_found=true` only when the retrieved evidence supports that dimension; otherwise set it false and explain the missing evidence in `text`.
+- Set `evidence_found=true` only when the retrieved evidence supports that dimension; otherwise set it false and leave `evidence` empty.
+- Every dimension evidence item must contain exactly one source and one atomic claim. Split claims from different sources into separate items.
+- Background sources must not provide core comparison-dimension evidence; use route or review/comparison sources.
+- Every direct route must preserve its reported outcome, including optical purity, e.e., yield, or other comparison-relevant result when present.
+- central_tradeoff must contain one claim and only the source paper(s) that directly support it; prefer a review/comparison source when available.
+- When isotopic enrichment is requested and a route outcome reports optical purity/e.e., central_tradeoff.claim must explicitly say high-purity/isotopically enriched material.
 - For scalability/cost-effectiveness, qualitative review evidence about route efficiency, shorter routes, fewer protecting groups, practical synthesis, or lower process burden counts as evidence. Do not require quantitative scale-up metrics or reagent prices.
 - Do not put review/comparison sources in `direct_routes`.
 - Do not use absence claims in `central_tradeoff` for dimensions the question asks to compare; use a qualitative trade-off when evidence exists.
@@ -246,18 +343,18 @@ Use this schema:
       {"source": "", "role": "route | review/comparison source | background", "claim": "", "evidence": ""}
     ],
     "direct_routes": [
-      {"source": "", "route_phrase": "", "produces_target": true, "evidence": ""}
+      {"source": "", "route_phrase": "", "outcome": "", "produces_target": true, "evidence": ""}
     ],
     "review_comparison_sources": [
       {"source": "", "claim": "", "dimensions": [], "evidence": ""}
     ],
     "dimensions": {
-      "isotopic_enrichment": {"requested": false, "evidence_found": false, "text": "", "sources": []},
-      "scalability": {"requested": false, "evidence_found": false, "text": "", "sources": []},
-      "cost_effectiveness": {"requested": false, "evidence_found": false, "text": "", "sources": []},
-      "safety": {"requested": false, "evidence_found": false, "text": "", "sources": []}
+      "isotopic_enrichment": {"requested": false, "evidence_found": false, "evidence": [{"source": "", "claim": ""}]},
+      "scalability": {"requested": false, "evidence_found": false, "evidence": [{"source": "", "claim": ""}]},
+      "cost_effectiveness": {"requested": false, "evidence_found": false, "evidence": [{"source": "", "claim": ""}]},
+      "safety": {"requested": false, "evidence_found": false, "evidence": [{"source": "", "claim": ""}]}
     },
-    "central_tradeoff": ""
+    "central_tradeoff": {"claim": "", "sources": []}
   }
 }
 Rules:
@@ -267,16 +364,20 @@ Rules:
 - If a review/comparison source describes example routes, summarize them in review_comparison_sources, not in direct_routes.
 - Derivative/formulation/solubility/biological-property papers are background unless they directly synthesize the exact target compound.
 - Preserve exact route-defining phrases from the source. For the L-BPA hybrid route, use "enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis".
+- Preserve each direct route's comparison-relevant outcome separately. If the evidence reports e.e. or optical purity, keep it in outcome; for the L-BPA hybrid route preserve the reported 74% e.e. alkylation outcome and optically pure final L-BPA when retrieved.
+- Each dimensions.*.evidence item must bind exactly one atomic claim to exactly one source. Never place two papers' claims in one item and never use a separate multi-source list.
+- Core dimension evidence must come from a route or review/comparison source, never from a source classified as background.
 - Fill every dimension that appears in the question or source evidence.
 - Set requested=true for every dimension named in the question.
 - Set evidence_found=true when retrieved paper evidence supports that dimension, even if the evidence is qualitative rather than numeric.
 - For scalability/cost-effectiveness, qualitative review evidence about route efficiency, shorter routes, fewer protecting groups, practical synthesis, or lower process burden counts as evidence. Do not require quantitative scale-up metrics or reagent prices.
-- If requested=true but evidence_found=false, explain the missing retrieved evidence in text; do not silently omit the dimension.
+- If requested=true but evidence_found=false, leave evidence empty; do not silently omit the dimension from the schema.
 - If scalability, cost-effectiveness, and safety appear together in the source, keep all three.
 - If isotopic enrichment or 10B appears, set dimensions.isotopic_enrichment.evidence_found=true.
-- If evidence mentions high cost/expense of isotopically enriched 10B or boron material, preserve that wording under dimensions.cost_effectiveness.text and central_tradeoff.
+- If evidence mentions high cost/expense of isotopically enriched 10B or boron material, preserve that wording in an atomic cost_effectiveness evidence item and central_tradeoff.claim.
 - Do not write absence claims such as "does not explicitly provide scalability/cost-effectiveness" when a review/comparison source is selected for those dimensions.
-- central_tradeoff must mention every evidence_found=true dimension and stay qualitative unless the source explicitly provides values.
+- central_tradeoff.claim must mention every evidence_found=true dimension, stay qualitative unless the source explicitly provides values, and list only supporting paper(s) in central_tradeoff.sources.
+- When isotopic enrichment is requested and a direct route outcome reports optical purity/e.e., central_tradeoff.claim must explicitly frame high-purity/isotopically enriched material against scalability/cost-effectiveness.
 """.strip()
     return """
 【比較題蒸餾格式】

@@ -60,6 +60,7 @@ from rag.citation_grounding import (
     decompose_and_verify,
     joint_verify,
     compute_grounding_score,
+    _preprocess_for_nli,
 )
 from rag.task_state import ResearchPlan, SubTask, TaskStatus
 from rag.plan_executor import PlanExecutor
@@ -84,6 +85,19 @@ def _nli_entailment(e=0.8, n=0.15, c=0.05):
 # ══════════════════════════════════════════════════════════════════
 #  1. 矛盾偵測（check_citation_grounding + NLI_CONTRADICTION_ENABLED）
 # ══════════════════════════════════════════════════════════════════
+class TestNliPreprocessing(TestCase):
+    def test_removes_renderer_label_and_known_paper_citation(self):
+        sentence = (
+            "- Scalability: The present synthetic method for optically pure L-BPA has an advantage "
+            "over the reported method in its ease of performance and workup, and few reaction steps "
+            "[bbb0683]."
+        )
+        self.assertEqual(
+            _preprocess_for_nli(sentence, {"bbb0683"}),
+            "The present synthetic method for optically pure L-BPA has an advantage over the "
+            "reported method in its ease of performance and workup, and few reaction steps.",
+        )
+
 
 class TestContradictionDetection(TestCase):
 

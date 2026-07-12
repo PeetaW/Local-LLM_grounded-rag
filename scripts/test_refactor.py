@@ -63,6 +63,9 @@ for _mod in _STUBS:
 sys.modules["rag.knowledge_synthesizer"].KnowledgeSynthesizer = MagicMock(
     return_value=MagicMock()
 )
+sys.modules["rag.knowledge_synthesizer"]._comparison_json_validation_errors = MagicMock(
+    return_value=[]
+)
 sys.modules["rag.answer_verifier"].AnswerVerifier = MagicMock(
     return_value=MagicMock()
 )
@@ -577,6 +580,39 @@ class TestRunSubqueriesParallel(unittest.TestCase):
         self.assertIn("cost-effectiveness", clipped)
         self.assertIn("high cost of isotopically enriched 10B", clipped)
 
+    def test_atomic_comparison_snippets_keep_top_two_and_dimension_overview(self):
+        old = cfg.COMPARISON_JSON_DIRECT_RENDER_ENABLED
+        try:
+            cfg.COMPARISON_JSON_DIRECT_RENDER_ENABLED = True
+
+            def nws(text, source_type="pdf_text"):
+                node = MagicMock()
+                node.metadata = {"source_type": source_type}
+                node.get_content.return_value = text
+                return MagicMock(node=node)
+
+            nodes = [
+                nws("top route evidence"),
+                nws("top isotope cost evidence"),
+                nws("generic rank three"),
+                nws("generic rank four"),
+                nws("overview: isotopically enriched material, scalability, cost-effectiveness, and safety"),
+                nws("image safety noise", "image_description"),
+            ]
+            block = _nodes_to_evidence_block(
+                nodes,
+                "Compare routes for isotopic enrichment, scalability, and cost-effectiveness.",
+                "【ReviewA】",
+            )
+
+            self.assertIn("top route evidence", block)
+            self.assertIn("top isotope cost evidence", block)
+            self.assertIn("overview: isotopically enriched material", block)
+            self.assertNotIn("generic rank four", block)
+            self.assertNotIn("image safety noise", block)
+        finally:
+            cfg.COMPARISON_JSON_DIRECT_RENDER_ENABLED = old
+
     @patch("rag.query_retrieval._generate_from_nodes", return_value="Generated answer")
     @patch("rag.query_retrieval._retrieve_nodes", return_value=["raw evidence"])
     @patch("rag.query_retrieval.prepare_query_text", return_value="clean query")
@@ -651,7 +687,7 @@ class TestPartitionResultsBySection(unittest.TestCase):
             {"sentence": "Fact one.", "supported": True, "confidence": 0.9},
             {"sentence": "Inference one.", "supported": False, "confidence": 0.3},
         ]
-        with patch("rag.citation_grounding.split_into_sentences", side_effect=self._split):
+        with patch("rag.query_grounding_flow.split_into_sentences", side_effect=self._split):
             result = _partition_results_by_section(citation_results, text)
 
         self.assertIn("direct", result)
@@ -664,7 +700,7 @@ class TestPartitionResultsBySection(unittest.TestCase):
         citation_results = [
             {"sentence": "Only direct content.", "supported": True, "confidence": 0.95}
         ]
-        with patch("rag.citation_grounding.split_into_sentences", side_effect=self._split):
+        with patch("rag.query_grounding_flow.split_into_sentences", side_effect=self._split):
             result = _partition_results_by_section(citation_results, text)
 
         self.assertIn("direct", result)
@@ -910,6 +946,7 @@ def _setup_cfg(cfg_mock):
     cfg_mock.ANSWERABILITY_GATE_ENABLED = False
     cfg_mock.STAGE4_ANSWER_VALIDATION_ENABLED = False
     cfg_mock.STAGE4_ANSWER_REWRITE_RETRIES = 1
+    cfg_mock.COMPARISON_JSON_DIRECT_RENDER_ENABLED = False
     cfg_mock.EN_DRAFT_PIPELINE = False
     cfg_mock.FINAL_TRANSLATION_ENABLED = True
     cfg_mock.REASONING_MODE = "strict"
@@ -986,21 +1023,97 @@ class TestExecuteStructuredQuery(unittest.TestCase):
     def test_stage4_empty_fallback_formats_comparison_json(self):
         kb = """
         {"comparison_json":{
-          "direct_routes":[{"source":"bbb0683","route_phrase":"enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis"}],
+          "source_roles":[
+            {"source":"bbb0683","role":"route"},
+            {"source":"CMDC-20-e202500059","role":"review/comparison source"},
+            {"source":"FormulationA","role":"background"}
+          ],
+          "direct_routes":[{"source":"bbb0683","route_phrase":"enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis","outcome":"optically pure L-BPA at high e.e."}],
           "review_comparison_sources":[{"source":"CMDC-20-e202500059","claim":"reviews scalability, cost-effectiveness, and safety"}],
           "dimensions":{
-            "isotopic_enrichment":{"requested":true,"evidence_found":true,"text":"10B-enriched material is required.","sources":["CMDC-20-e202500059"]},
-            "scalability":{"requested":true,"evidence_found":true,"text":"Scalability is compared qualitatively.","sources":["CMDC-20-e202500059"]}
+            "isotopic_enrichment":{"requested":true,"evidence_found":true,"evidence":[{"source":"CMDC-20-e202500059","claim":"10B-enriched material is required."}]},
+            "scalability":{"requested":true,"evidence_found":true,"evidence":[
+              {"source":"CMDC-20-e202500059","claim":"Gram-scale deprotection can leave ester residue."},
+              {"source":"bbb0683","claim":"The hybrid route uses few reaction steps."}
+            ]},
+            "safety":{"requested":false,"evidence_found":true,"evidence":[
+              {"source":"CMDC-20-e202500059","claim":"The review compares route safety."},
+              {"source":"FormulationA","claim":"The formulation is safe."}
+            ]}
           },
-          "central_tradeoff":"High-purity 10B material must be balanced against scalability and cost-effectiveness."
+          "central_tradeoff":{"claim":"High-purity 10B material must be balanced against scalability and cost-effectiveness.","sources":["CMDC-20-e202500059"]}
         }}
         """
-        answer = pipeline_module._stage4_empty_answer_fallback(kb)
+        answer = pipeline_module._stage4_empty_answer_fallback(kb, atomic_only=True)
         self.assertIn("Comparison scaffold", answer)
         self.assertIn("bbb0683", answer)
         self.assertIn("chymotrypsin-catalysed enzymatic hydrolysis", answer)
+        self.assertIn("optically pure L-BPA at high e.e.", answer)
         self.assertIn("CMDC-20-e202500059", answer)
+        self.assertIn("Gram-scale deprotection", answer)
+        self.assertIn("The hybrid route uses few reaction steps", answer)
+        self.assertIn("The review compares route safety", answer)
+        self.assertNotIn("FormulationA", answer)
+        self.assertNotIn("[CMDC-20-e202500059, bbb0683]", answer)
         self.assertIn("Central trade-off", answer)
+        self.assertIn("High-purity/isotopic enrichment", answer)
+        self.assertNotIn("must be balanced against", answer)
+        self.assertTrue(all(line.count("[") <= 1 for line in answer.splitlines()))
+
+        old = cfg.STAGE4_ANSWER_VALIDATION_ENABLED
+        try:
+            cfg.STAGE4_ANSWER_VALIDATION_ENABLED = True
+            self.assertEqual(
+                pipeline_module._stage4_answer_validation_issues(
+                    answer,
+                    kb,
+                    "Compare routes for isotopic enrichment and scalability.",
+                ),
+                "",
+            )
+        finally:
+            cfg.STAGE4_ANSWER_VALIDATION_ENABLED = old
+
+    @patch("rag.query_pipeline.translate_to_traditional_chinese")
+    @patch("rag.query_pipeline.run_grounding_check")
+    @patch("rag.query_pipeline.run_subqueries_parallel")
+    @patch("rag.query_pipeline.build_subquery_tasks")
+    @patch("rag.query_pipeline.plan_sub_questions")
+    @patch("rag.query_pipeline.detect_target_paper")
+    @patch("rag.query_pipeline.cfg")
+    @patch("rag.query_pipeline.Settings")
+    def test_atomic_comparison_skips_stage4_llm(
+        self, mock_settings, mock_cfg,
+        mock_detect, mock_plan, mock_build, mock_run,
+        mock_grounding, mock_translate,
+    ):
+        _setup_cfg(mock_cfg)
+        mock_cfg.COMPARISON_JSON_DIRECT_RENDER_ENABLED = True
+        mock_cfg.EN_DRAFT_PIPELINE = True
+        mock_cfg.FINAL_TRANSLATION_ENABLED = False
+        mock_detect.return_value = "paper_a"
+        mock_plan.return_value = [{"paper": "paper_a", "sub_q": "Q?"}]
+        mock_build.return_value = ([], {})
+        kb = """
+        {"comparison_json":{
+          "direct_routes":[{"source":"RouteA","route_phrase":"route A","outcome":"high-purity product at high e.e."}],
+          "review_comparison_sources":[{"source":"ReviewA","claim":"compares route scalability"}],
+          "dimensions":{"scalability":{"requested":true,"evidence_found":true,
+            "evidence":[{"source":"ReviewA","claim":"Route A is practical at scale."}]}},
+          "central_tradeoff":{"claim":"High purity must be balanced with scalability.","sources":["ReviewA"]}
+        }}
+        """
+        mock_run.return_value = [("【paper_a】", kb)]
+
+        result = pipeline_module.execute_structured_query(
+            "Compare routes for scalability.", {"paper_a": MagicMock()}
+        )
+
+        self.assertIn("high-purity product at high e.e.", result)
+        self.assertIn("Route A is practical at scale", result)
+        pipeline_module._comparison_json_validation_errors.assert_called()
+        mock_settings.llm.stream_complete.assert_not_called()
+        mock_translate.assert_not_called()
 
     def test_stage4_appends_missing_isotope_cost_fact(self):
         answer = "Central trade-off: purity and isotopic enrichment versus scalability and cost-effectiveness."

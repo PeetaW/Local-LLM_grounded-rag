@@ -7,17 +7,16 @@
 #   execute_structured_query_stream(...) → Generator[str, None, None]
 
 import json
-import re
 import time
 
 from llama_index.core import Settings
 
 import config as cfg
-from rag.knowledge_synthesizer import KnowledgeSynthesizer
+from rag.knowledge_synthesizer import KnowledgeSynthesizer, _comparison_json_validation_errors
 from rag.answer_verifier import AnswerVerifier
 from rag.query_planning import detect_target_paper, _keyword_prefilter, select_relevant_papers, plan_sub_questions
 from rag.query_retrieval import build_subquery_tasks, run_subqueries_parallel, is_empty_result, extract_paper_name
-from rag.query_grounding_flow import run_grounding_check
+from rag.query_grounding_flow import run_grounding_check, split_into_sentences
 from rag.query_translation import translate_to_traditional_chinese
 from rag.query_prompts import build_synthesis_prompt, build_fallback_prompt
 
@@ -90,8 +89,8 @@ def _stage4_answer_validation_issues(answer: str, knowledge_base: str, question:
                 f"Stage4Validation | Background source cited in core comparison | Remove {source} from the final route comparison; use only direct route and review/comparison sources."
             )
 
-    for sentence in re.split(r"(?<=[.!?])\s+", answer or ""):
-        if len(sentence) > 320 and sentence.count("[") >= 2:
+    for sentence in split_into_sentences(answer or ""):
+        if sentence.count("[") >= 2:
             issues.append(
                 "Stage4Validation | Over-dense multi-source sentence | Split this into short separate sentences or bullets, each with one source-backed claim."
             )
@@ -128,41 +127,94 @@ def _stage4_answer_validation_issues(answer: str, knowledge_base: str, question:
     return "VERIFY_FAIL\n" + "\n".join(f"- {issue}" for issue in issues) if issues else ""
 
 
-def _stage4_empty_answer_fallback(knowledge_base: str) -> str:
+def _stage4_empty_answer_fallback(knowledge_base: str, atomic_only: bool = False) -> str:
     comparison = _comparison_json_from_knowledge_base(knowledge_base)
     if not comparison:
-        return (knowledge_base or "").strip()
+        return "" if atomic_only else (knowledge_base or "").strip()
+
+    source_roles = comparison.get("source_roles") if isinstance(comparison.get("source_roles"), list) else []
+    background_sources = {
+        str(item.get("source", "")).strip()
+        for item in source_roles
+        if isinstance(item, dict) and str(item.get("role", "")).lower() == "background"
+    }
+    tradeoff_value = comparison.get("central_tradeoff", "")
+    if isinstance(tradeoff_value, dict):
+        tradeoff = str(tradeoff_value.get("claim", "")).strip()
+        tradeoff_sources = [
+            str(source).strip() for source in tradeoff_value.get("sources", []) if source
+        ] if isinstance(tradeoff_value.get("sources"), list) else []
+    else:
+        tradeoff, tradeoff_sources = str(tradeoff_value).strip(), []
+    if atomic_only and (not tradeoff or not tradeoff_sources):
+        return ""
 
     lines = ["Comparison scaffold:"]
     for route in comparison.get("direct_routes", []):
         if not isinstance(route, dict):
             continue
         source = str(route.get("source", "")).strip()
-        phrase = str(route.get("route_phrase", "")).strip()
-        if source and phrase:
-            lines.append(f"- Route: `{source}` reports {phrase} [{source}].")
+        phrase = str(route.get("route_phrase", "")).strip().rstrip(".")
+        outcome = str(route.get("outcome", "")).strip()
+        if atomic_only and (not source or not phrase or not outcome):
+            return ""
+        if source and phrase and source not in background_sources:
+            result = f", yielding {outcome}" if outcome else ""
+            lines.append(f"- Route: `{source}` reports {phrase}{result} [{source}].")
 
     for review in comparison.get("review_comparison_sources", []):
         if not isinstance(review, dict):
             continue
         source = str(review.get("source", "")).strip()
-        claim = str(review.get("claim", "")).strip() or "reviews and compares synthetic routes"
-        if source:
+        claim = str(review.get("claim", "")).strip().rstrip(".") or "reviews and compares synthetic routes"
+        if source and source not in background_sources:
             lines.append(f"- Review/comparison source: `{source}` {claim} [{source}].")
 
     dimensions = comparison.get("dimensions") if isinstance(comparison.get("dimensions"), dict) else {}
+    labels = {
+        "isotopic_enrichment": (
+            "High-purity/isotopic enrichment"
+            if "high-purity" in tradeoff.lower()
+            else "Isotopic enrichment"
+        ),
+        "scalability": "Scalability",
+        "cost_effectiveness": "Cost-effectiveness",
+        "safety": "Safety",
+    }
+    dimension_lines = []
     for key in ("isotopic_enrichment", "scalability", "cost_effectiveness", "safety"):
         item = dimensions.get(key)
-        if not isinstance(item, dict) or not item.get("requested") or not item.get("evidence_found"):
+        if not isinstance(item, dict) or not item.get("evidence_found"):
+            continue
+        evidence = [
+            entry for entry in item.get("evidence", [])
+            if (
+                isinstance(entry, dict)
+                and entry.get("source")
+                and entry.get("claim")
+                and str(entry.get("source")).strip() not in background_sources
+            )
+        ] if isinstance(item.get("evidence"), list) else []
+        if atomic_only and not evidence:
+            return ""
+        for entry in evidence:
+            source = str(entry["source"]).strip()
+            claim = str(entry["claim"]).strip()
+            dimension_lines.append(f"- {labels[key]}: {claim} [{source}].")
+        if evidence:
             continue
         text = str(item.get("text", "")).strip()
-        sources = ", ".join(str(s) for s in item.get("sources", []) if s)
+        sources = ", ".join(
+            str(source) for source in item.get("sources", [])
+            if source and str(source).strip() not in background_sources
+        )
         if text:
-            lines.append(f"- {key}: {text}" + (f" [{sources}]." if sources else "."))
+            dimension_lines.append(f"- {labels[key]}: {text}" + (f" [{sources}]." if sources else "."))
 
-    tradeoff = str(comparison.get("central_tradeoff", "")).strip()
-    if tradeoff:
-        lines.append(f"Central trade-off: {tradeoff}")
+    if dimension_lines:
+        lines.extend(("", "Central trade-off:", *dimension_lines))
+    if atomic_only and len(lines) == 1:
+        return ""
     return "\n".join(lines).strip()
 
 
@@ -312,41 +364,57 @@ def execute_structured_query(
     # ── Stage 4: LLM synthesis ───────────────────────────────────────
     t3 = time.perf_counter()
     synthesis_prompt = ""
+    stage4_direct_rendered = False
     if gate_abstain:
         _status("  🚪 [answerability] NOT_ANSWERABLE → 誠實棄答，跳過生成")
         full_text = gate_notice
     else:
-        if not rag_found_anything:
-            _status("  ℹ️  RAG 資料庫未找到相關內容，切換至模型推理模式...")
-            fallback_notice = _FALLBACK_NOTICE
-            synthesis_prompt = build_fallback_prompt(
-                question, _build_memory_section(memory_context, is_fallback=True)
-            )
+        direct_answer = ""
+        if (
+            rag_found_anything
+            and cfg.EN_DRAFT_PIPELINE
+            and getattr(cfg, "COMPARISON_JSON_DIRECT_RENDER_ENABLED", False)
+            and not _comparison_json_validation_errors(knowledge_base, question)
+        ):
+            direct_answer = _stage4_empty_answer_fallback(knowledge_base, atomic_only=True)
+        if direct_answer:
+            stage4_direct_rendered = True
+            synthesis_prompt = "[deterministic comparison_json renderer]"
+            full_text = direct_answer
+            _status("  🧱 [synthesis-llm] validated atomic comparison_json → deterministic render")
         else:
-            fallback_notice = ""  # 軟警告橫幅在翻譯後才加（見 Stage 7 後），避免中文橫幅被送進翻譯
-            lang = "en" if cfg.EN_DRAFT_PIPELINE else "zh"
-            final_translation_enabled = getattr(cfg, "FINAL_TRANSLATION_ENABLED", True)
-            print(f"  {'🧠 推理' if cfg.REASONING_MODE == 'reasoning' else '📋 嚴格'}模式"
-                  f"（{cfg.REASONING_MODE}）  target_paper_detected={bool(detected)}"
-                  f"  streaming_mode=False"
-                  f"  translation_applied={cfg.EN_DRAFT_PIPELINE and final_translation_enabled}")
-            synthesis_prompt = build_synthesis_prompt(
-                knowledge_base, question,
-                _build_memory_section(memory_context, is_fallback=False),
-                cfg.REASONING_MODE, lang,
-            )
+            if not rag_found_anything:
+                _status("  ℹ️  RAG 資料庫未找到相關內容，切換至模型推理模式...")
+                fallback_notice = _FALLBACK_NOTICE
+                synthesis_prompt = build_fallback_prompt(
+                    question, _build_memory_section(memory_context, is_fallback=True)
+                )
+            else:
+                fallback_notice = ""  # 軟警告橫幅在翻譯後才加（見 Stage 7 後），避免中文橫幅被送進翻譯
+                lang = "en" if cfg.EN_DRAFT_PIPELINE else "zh"
+                final_translation_enabled = getattr(cfg, "FINAL_TRANSLATION_ENABLED", True)
+                print(f"  {'🧠 推理' if cfg.REASONING_MODE == 'reasoning' else '📋 嚴格'}模式"
+                      f"（{cfg.REASONING_MODE}）  target_paper_detected={bool(detected)}"
+                      f"  streaming_mode=False"
+                      f"  translation_applied={cfg.EN_DRAFT_PIPELINE and final_translation_enabled}")
+                synthesis_prompt = build_synthesis_prompt(
+                    knowledge_base, question,
+                    _build_memory_section(memory_context, is_fallback=False),
+                    cfg.REASONING_MODE, lang,
+                )
         if on_artifact:
             on_artifact("stage4_prompt", synthesis_prompt)
 
-        print("\n 最終綜合回答（Stage 4 初稿）：")
-        full_text = fallback_notice
-        for chunk in Settings.llm.stream_complete(synthesis_prompt):
-            print(chunk.delta, end="", flush=True)
-            full_text += chunk.delta
-        print("\n")
-        if rag_found_anything and not full_text.strip():
-            _status("  ⚠️  [synthesis-llm] empty answer; using Stage 3 facts fallback")
-            full_text = _stage4_empty_answer_fallback(knowledge_base)
+        if not stage4_direct_rendered:
+            print("\n 最終綜合回答（Stage 4 初稿）：")
+            full_text = fallback_notice
+            for chunk in Settings.llm.stream_complete(synthesis_prompt):
+                print(chunk.delta, end="", flush=True)
+                full_text += chunk.delta
+            print("\n")
+            if rag_found_anything and not full_text.strip():
+                _status("  ⚠️  [synthesis-llm] empty answer; using Stage 3 facts fallback")
+                full_text = _stage4_empty_answer_fallback(knowledge_base)
     if on_artifact:
         on_artifact("stage4_draft", full_text)
     _status(f"[synthesis-llm] 完成 elapsed_ms={int((time.perf_counter()-t3)*1000)}")

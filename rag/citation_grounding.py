@@ -12,6 +12,7 @@ import re
 import time
 import torch
 import config as cfg
+from rag.query_grounding_flow import split_into_sentences
 
 # ── grounding 階段計時拆解（NLI vs LLM）──────────────────
 # 讓 NLI device A/B 能區分「CPU NLI 變慢」與「gemma4 因 VRAM 紓解變快」。
@@ -238,7 +239,7 @@ def _latex_to_plain(text: str) -> str:
     return text
 
 
-def _preprocess_for_nli(text: str) -> str:
+def _preprocess_for_nli(text: str, citation_sources=()) -> str:
     """
     送入 NLI 前移除格式噪音並轉換 LaTeX：
     - 引用標籤 （見 [事實N]）、（原文：「...」）會讓 NLI 誤判為 contradiction
@@ -265,13 +266,33 @@ def _preprocess_for_nli(text: str) -> str:
     text = re.sub(r'\[待確認\]|\[資訊不足\]', '', text)
     # EN 模式：移除論文 citation ID，如 [1-s2.0-S2214714425005100-main]
     text = re.sub(r'\[\d+-s[\d.]+-[A-Za-z0-9\-_]+\]', '', text)
+    sources = sorted(
+        (re.escape(str(source)) for source in citation_sources if source),
+        key=len,
+        reverse=True,
+    )
+    if sources:
+        source = "(?:" + "|".join(sources) + ")"
+        text = re.sub(
+            rf'\s*\[(?:Source:\s*)?{source}(?:\s*,\s*{source})*\](?=\s*[.!?]?\s*$)',
+            '',
+            text,
+            flags=re.IGNORECASE,
+        )
     # 移除 EN 狀態標記
     text = re.sub(r'\[Unverified\]|\[Insufficient Evidence\]|\[Fact \d+\]', '', text)
     # 移除 markdown 格式
-    text = re.sub(r'^\s*\*+\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*(?:[-+*]|\d+\.)\s+', '', text, flags=re.MULTILINE)
     text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
     # LaTeX → 可讀科學表達式（保留化學式語義）
     text = _latex_to_plain(text)
+    text = re.sub(
+        r'^(?:Route|Review/comparison source|High-purity/isotopic enrichment|'
+        r'Isotopic enrichment|Scalability|Cost-effectiveness|Safety)\s*:\s*',
+        '',
+        text,
+        flags=re.IGNORECASE,
+    )
     # 移除 LLM 結構化子標題前綴（如「試劑與比例：」「操作條件：」「後處理：」等）
     # 判斷標準：句子開頭到第一個全形/半形冒號之間 ≤12 字元，且前綴不含句子標點
     # 這些是 LLM 生成的格式標籤，raw PDF chunk 原文不含這類前綴
@@ -286,53 +307,6 @@ def _preprocess_for_nli(text: str) -> str:
     if len(text) < 15:
         return ""
     return text
-
-
-def split_into_sentences(text: str) -> list:
-    # Step 1：合併 word-wrap 換行（LLM 長句跨行時，continuation line 接在前一行後面）
-    # continuation line 判斷：不以 *、-、#、數字列表、[ 開頭的非空行
-    lines = text.split('\n')
-    joined_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            joined_lines.append('')
-            continue
-        is_new_item = bool(re.match(r'^(\*+\s|-\s|\d+\.\s|\#{1,6}\s|\[)', stripped))
-        if joined_lines and not is_new_item and joined_lines[-1]:
-            joined_lines[-1] = joined_lines[-1] + ' ' + stripped
-        else:
-            joined_lines.append(stripped)
-    text = '\n'.join(joined_lines)
-
-    # Step 2：移除 markdown 粗體與標題符號，保留內容
-    text = re.sub(r'\*\*|##|###|【.*?】', '', text)
-
-    # Step 3：只在中文句號／問號／驚嘆號及英文 !? 後切分；
-    # 不使用 \. 以避免在「0.6」「1.5:1」等數值的小數點處誤切
-    sentences = re.split(r'(?<=[。！？\!\?])\s*|\n+', text)
-
-    # 最小長度 20 字元，過濾截斷片段與純標點符號行
-    sentences = [s.strip() for s in sentences if len(s.strip()) >= 20]
-
-    # Step 4：過濾非命題行（不送 NLI）
-    def _is_non_proposition(s: str) -> bool:
-        # 純括號標籤行：[Direct Paper Evidence]、[Cross-Literature Inference] 等
-        if re.match(r'^\[.*\]\s*$', s):
-            return True
-        # 只是子標題標籤（無句末標點且結尾是冒號）
-        if re.search(r'[：:]\s*$', s) and not re.search(r'[。！？!?]', s):
-            return True
-        # 數字編號標題（無句末標點）
-        if re.match(r'^\d+[\.\s]\s*\S', s) and not re.search(r'[。！？!?]', s):
-            return True
-        # Bullet 中文階段標題（無句末標點）
-        if re.match(r'^\*\s+第[一二三四五六七八九十百千\d]+[階段步品]', s):
-            return True
-        return False
-
-    sentences = [s for s in sentences if not _is_non_proposition(s)]
-    return sentences
 
 
 def _batch_translate_to_en(hypotheses: list[str]) -> list[str]:
@@ -426,8 +400,13 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
     valid_pairs: list[tuple[str, str]] = []   # (原始句子, 預處理後 hypothesis)
     skipped_sentences: set[int] = set()       # 原始 sentences 中被跳過的 index
 
+    citation_sources = {
+        str(chunk.get("source", "")).strip()
+        for chunk in chunks
+        if chunk.get("source")
+    }
     for idx, sentence in enumerate(sentences):
-        hypothesis = _preprocess_for_nli(sentence)
+        hypothesis = _preprocess_for_nli(sentence, citation_sources)
         if not hypothesis:
             skipped_sentences.add(idx)
             continue

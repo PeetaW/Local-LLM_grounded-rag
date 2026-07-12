@@ -78,6 +78,9 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             self.assertIn('"isotopic_enrichment"', prompt)
             self.assertIn('"cost_effectiveness"', prompt)
             self.assertIn('"safety"', prompt)
+            self.assertIn('"outcome"', prompt)
+            self.assertIn('"evidence": [{"source": "", "claim": ""}]', prompt)
+            self.assertIn('"central_tradeoff": {"claim": "", "sources": []}', prompt)
             self.assertIn("requested=true", prompt)
             self.assertIn("evidence_found=true", prompt)
             self.assertIn("not in direct_routes", prompt)
@@ -137,6 +140,7 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         self.assertFalse(comparison["dimensions"]["scalability"]["evidence_found"])
         self.assertTrue(comparison["dimensions"]["cost_effectiveness"]["requested"])
         self.assertTrue(comparison["dimensions"]["isotopic_enrichment"]["requested"])
+        self.assertIsInstance(comparison["central_tradeoff"], dict)
 
     def test_comparison_json_validator_flags_repairable_errors(self):
         raw = """
@@ -179,6 +183,41 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         errors = _comparison_json_validation_errors(background, "Compare synthetic routes.")
         self.assertTrue(any("Derivative/formulation" in err for err in errors))
 
+    def test_background_dimension_evidence_is_rejected_and_filtered(self):
+        raw = """
+        {
+          "comparison_json": {
+            "source_roles": [
+              {"source": "ReviewA", "role": "review/comparison source"},
+              {"source": "FormulationA", "role": "background"}
+            ],
+            "direct_routes": [],
+            "review_comparison_sources": [{"source": "ReviewA", "claim": "compares safety"}],
+            "dimensions": {
+              "safety": {
+                "requested": false,
+                "evidence_found": true,
+                "evidence": [
+                  {"source": "FormulationA", "claim": "The formulation is safe."},
+                  {"source": "ReviewA", "claim": "The review compares route safety."}
+                ]
+              }
+            },
+            "central_tradeoff": {"claim": "Route safety differs.", "sources": ["ReviewA"]}
+          }
+        }
+        """
+        errors = _comparison_json_validation_errors(raw, "Compare synthetic routes.")
+        self.assertTrue(any("must not use background" in err for err in errors))
+
+        normalized = __import__("json").loads(_normalize_comparison_json(raw))
+        safety = normalized["comparison_json"]["dimensions"]["safety"]
+        self.assertEqual(
+            safety["evidence"],
+            [{"source": "ReviewA", "claim": "The review compares route safety."}],
+        )
+        self.assertTrue(safety["evidence_found"])
+
     def test_validator_rechecks_requested_dimensions_with_review_source(self):
         raw = """
         {
@@ -213,6 +252,28 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         self.assertTrue(any("dimensions.scalability" in err for err in errors))
         self.assertTrue(any("dimensions.cost_effectiveness" in err for err in errors))
 
+    def test_validator_rejects_flattened_multi_source_evidence(self):
+        raw = """
+        {
+          "comparison_json": {
+            "source_roles": [],
+            "direct_routes": [],
+            "review_comparison_sources": [],
+            "dimensions": {
+              "scalability": {
+                "requested": true,
+                "evidence_found": true,
+                "text": "PaperA claim. PaperB claim.",
+                "sources": ["PaperA", "PaperB"]
+              }
+            },
+            "central_tradeoff": {"claim": "Scalability differs across routes.", "sources": ["PaperA"]}
+          }
+        }
+        """
+        errors = _comparison_json_validation_errors(raw, "Compare routes for scalability.")
+        self.assertTrue(any("source-bound atomic evidence" in err for err in errors))
+
     def test_synthesizer_repairs_invalid_comparison_json_once(self):
         old_enabled = cfg.COMPARISON_JSON_ENABLED
         old_validation = cfg.COMPARISON_JSON_VALIDATION_ENABLED
@@ -229,10 +290,11 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             """
             good = """
             {"comparison_json":{"source_roles":[{"source":"RouteA","role":"route"}],
-            "direct_routes":[{"source":"RouteA","route_phrase":"route","produces_target":true,"evidence":"e"}],
+            "direct_routes":[{"source":"RouteA","route_phrase":"route","outcome":"target product","produces_target":true,"evidence":"e"}],
             "review_comparison_sources":[],
-            "dimensions":{"scalability":{"requested":true,"evidence_found":true,"text":"scalable route evidence","sources":["RouteA"]}},
-            "central_tradeoff":"Scalability is compared qualitatively."}}
+            "dimensions":{"scalability":{"requested":true,"evidence_found":true,
+            "evidence":[{"source":"RouteA","claim":"scalable route evidence"}]}},
+            "central_tradeoff":{"claim":"Scalability is compared qualitatively.","sources":["RouteA"]}}}
             """
             synth = KnowledgeSynthesizer()
             synth._generate = MagicMock(side_effect=[bad, good])

@@ -7,6 +7,36 @@ import re
 import config as cfg
 
 
+def split_into_sentences(text: str) -> list:
+    lines = text.split("\n")
+    joined_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            joined_lines.append("")
+            continue
+        is_new_item = bool(re.match(r"^(\*+\s|-\s|\d+\.\s|\#{1,6}\s|\[)", stripped))
+        if joined_lines and not is_new_item and joined_lines[-1]:
+            joined_lines[-1] += " " + stripped
+        else:
+            joined_lines.append(stripped)
+    text = "\n".join(joined_lines)
+    text = re.sub(r"\*\*|##|###|【.*?】", "", text)
+    sentences = re.split(r"(?<=[。！？\!\?])\s*|\n+", text)
+    sentences = [s.strip() for s in sentences if len(s.strip()) >= 20]
+
+    def _is_non_proposition(sentence: str) -> bool:
+        if re.match(r"^\[.*\]\s*$", sentence):
+            return True
+        if re.search(r"[：:]\s*$", sentence) and not re.search(r"[。！？!?]", sentence):
+            return True
+        if re.match(r"^\d+[\.\s]\s*\S", sentence) and not re.search(r"[。！？!?]", sentence):
+            return True
+        return bool(re.match(r"^\*\s+第[一二三四五六七八九十百千\d]+[階段步品]", sentence))
+
+    return [sentence for sentence in sentences if not _is_non_proposition(sentence)]
+
+
 def _extract_direct_citation_section(text: str) -> str:
     """
     Extract only the 【論文直接依據】 section from an answer.
@@ -27,8 +57,6 @@ def _partition_results_by_section(citation_results: list, full_text: str) -> dic
     Returns {"direct": [...], "inference": [...], "speculation": [...]}
     Only includes keys where the section exists and has at least one sentence.
     """
-    from rag.citation_grounding import split_into_sentences
-
     _SECTION_PATTERNS = {
         "direct":      r'(##[^\n]*(?:論文直接依據|直接依據|Direct.*Evidence)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
         "inference":   r'(##[^\n]*(?:跨文獻推論|Cross.*Literature.*Inference)[^\n]*\n[\s\S]*?)(?=\n##|\Z)',
@@ -195,7 +223,6 @@ def run_grounding_check(
     on_status is called with progress messages; falls back to print() if None.
     """
     from rag.citation_grounding import (
-        split_into_sentences,
         check_citation_grounding,
         format_grounding_report,
         compute_grounding_score,

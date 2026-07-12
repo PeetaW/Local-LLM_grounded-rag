@@ -157,7 +157,39 @@ def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
         if _is_comparison_query(query_text)
         else getattr(cfg, "STAGE2_EVIDENCE_SNIPPETS_PER_TASK", 2)
     )
-    for i, nws in enumerate(nodes[:snippet_count], 1):
+
+    selected_nodes = nodes[:snippet_count]
+    if (
+        _is_comparison_query(query_text)
+        and getattr(cfg, "COMPARISON_JSON_DIRECT_RENDER_ENABLED", False)
+    ):
+        def _node(nws):
+            return getattr(nws, "node", nws)
+
+        text_nodes = [
+            nws for nws in nodes
+            if getattr(_node(nws), "metadata", {}).get("source_type") != "image_description"
+        ]
+        candidates = text_nodes if len(text_nodes) >= snippet_count else list(nodes)
+        selected_nodes = candidates[:min(2, snippet_count)]
+        dimension_terms = (
+            ("isotopically enriched", "isotopic enrichment", "10b"),
+            ("scalability", "scale-up", "gram-scale", "few steps", "reaction steps", "workup"),
+            ("cost-effectiveness", "cost effectiveness", "high cost", "major cost"),
+            ("safety", "safe", "toxicity", "risk"),
+        )
+
+        def _coverage(nws):
+            node = _node(nws)
+            text = node.get_content() if hasattr(node, "get_content") else str(node)
+            lower = text.lower()
+            return sum(any(term in lower for term in group) for group in dimension_terms)
+
+        remaining = candidates[len(selected_nodes):]
+        remaining = sorted(enumerate(remaining), key=lambda pair: (-_coverage(pair[1]), pair[0]))
+        selected_nodes += [nws for _, nws in remaining[:snippet_count - len(selected_nodes)]]
+
+    for i, nws in enumerate(selected_nodes, 1):
         node = getattr(nws, "node", nws)
         text = node.get_content() if hasattr(node, "get_content") else str(node)
         text = _clip_evidence_snippet(text, query_text)
