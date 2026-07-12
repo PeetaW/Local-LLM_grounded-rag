@@ -210,6 +210,19 @@ def plan_sub_questions(question: str, paper_names: list) -> list:
             raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
             raw = raw.replace("```json", "").replace("```", "").strip()
             sub_questions = json.loads(raw)
+
+            deduped = []
+            seen = set()
+            for sq in sub_questions:
+                key = (sq.get("paper", "ALL"), sq.get("sub_q", "").strip())
+                if key not in seen:
+                    seen.add(key)
+                    deduped.append(sq)
+            specific_papers = {sq.get("paper") for sq in deduped if sq.get("paper") != "ALL"}
+            if set(paper_names).issubset(specific_papers):
+                deduped = [sq for sq in deduped if sq.get("paper") != "ALL"]
+            sub_questions = deduped
+
             print(f"  → 子問題內容：{[sq.get('sub_q', '')[:200] for sq in sub_questions]}")
             return sub_questions
         except json.JSONDecodeError:

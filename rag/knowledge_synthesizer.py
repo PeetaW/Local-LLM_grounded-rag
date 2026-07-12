@@ -472,7 +472,12 @@ class KnowledgeSynthesizer:
         self.base_url = ollama_base_url or cfg.OLLAMA_BASE_URL
         self.timeout = timeout
 
-    def _generate(self, prompt: str, system_prompt: str) -> str:
+    def _generate(self, prompt: str, system_prompt: str, metadata: dict | None = None) -> str:
+        options = {
+            "temperature": 0.1,
+            "num_predict": 8192,
+            "num_ctx": cfg.STAGE3_NUM_CTX,
+        }
         resp = requests.post(
             f"{self.base_url}/api/generate",
             json={
@@ -480,11 +485,7 @@ class KnowledgeSynthesizer:
                 "system": system_prompt,
                 "prompt": prompt,
                 "stream": True,
-                "options": {
-                    "temperature": 0.1,
-                    "num_predict": 8192,
-                    "num_ctx": cfg.STAGE3_NUM_CTX,
-                }
+                "options": options,
             },
             timeout=self.timeout,
             stream=True,
@@ -504,9 +505,27 @@ class KnowledgeSynthesizer:
                 print(token, end="", flush=True)
                 chunks_out.append(token)
             if chunk.get("done"):
+                if metadata is not None:
+                    metadata.update({
+                        key: chunk.get(key)
+                        for key in (
+                            "done_reason", "prompt_eval_count", "eval_count",
+                            "total_duration", "load_duration",
+                            "prompt_eval_duration", "eval_duration",
+                        )
+                    })
                 break
         print()
-        return "".join(chunks_out).strip()
+        output = "".join(chunks_out).strip()
+        if metadata is not None:
+            metadata.update({
+                "model": self.model,
+                "requested_num_ctx": options["num_ctx"],
+                "requested_num_predict": options["num_predict"],
+                "prompt_chars": len(prompt),
+                "output_chars": len(output),
+            })
+        return output
 
     def _format_chunks(self, chunks: list[dict]) -> str:
         """
@@ -570,20 +589,38 @@ class KnowledgeSynthesizer:
             else:
                 print(msg)
 
+        generation_meta = []
+
+        def _generate_attempt(prompt: str, attempt: str) -> str:
+            meta = {"attempt": attempt}
+            output = self._generate(prompt, _system_prompt(), metadata=meta)
+            generation_meta.append(meta)
+            if on_artifact:
+                on_artifact("stage3_generation_meta", generation_meta)
+            if len(meta) > 1:
+                marker = "⚠️ " if meta.get("done_reason") == "length" else "ℹ️ "
+                _status(
+                    f"  {marker} [ollama] {attempt}: done_reason={meta.get('done_reason') or 'unknown'} "
+                    f"prompt_tokens={meta.get('prompt_eval_count')} output_tokens={meta.get('eval_count')}"
+                )
+            return output
+
         logger.info(
             "[Synthesizer] Starting: %d chunks (%d chars), query=\"%s\"",
             len(chunks), total_chars, query[:50]
         )
         t0 = time.time()
+        comparison_json_mode = getattr(cfg, "COMPARISON_JSON_ENABLED", False) and _is_comparison_query(query)
 
         try:
-            result = self._generate(user_prompt, _system_prompt())
+            result = _generate_attempt(
+                user_prompt, "comparison_json" if comparison_json_mode else "fact_list"
+            )
             if on_artifact:
                 on_artifact("stage3_raw_output", result)
             if not (result or "").strip():
                 _status("  ⚠️  [Synthesizer] empty output; using original chunks")
                 result = self._fallback_chunks(chunks)
-            comparison_json_mode = getattr(cfg, "COMPARISON_JSON_ENABLED", False) and _is_comparison_query(query)
             if comparison_json_mode and '"comparison_json"' in result:
                 result = _normalize_comparison_json(result, query)
                 errors = _comparison_json_validation_errors(result, query)
@@ -595,7 +632,7 @@ class KnowledgeSynthesizer:
                     )
                     if on_artifact:
                         on_artifact("stage3_plain_prompt", plain_prompt)
-                    result = self._generate(plain_prompt, _system_prompt())
+                    result = _generate_attempt(plain_prompt, "plain_fallback")
                     if on_artifact:
                         on_artifact("stage3_plain_output", result)
                     if not (result or "").strip():
@@ -612,7 +649,7 @@ class KnowledgeSynthesizer:
                             f"repair {attempt + 1}/{retries}: {'; '.join(errors[:3])}"
                         )
                         repair_prompt = _comparison_json_repair_prompt(user_prompt, result, errors)
-                        candidate = self._generate(repair_prompt, _system_prompt())
+                        candidate = _generate_attempt(repair_prompt, f"json_repair_{attempt + 1}")
                         candidate = _normalize_comparison_json(candidate, query)
                         if not isinstance(_comparison_json_payload(candidate), dict):
                             _status("  ⚠️  [comparison-json] repair output invalid; keeping previous JSON")

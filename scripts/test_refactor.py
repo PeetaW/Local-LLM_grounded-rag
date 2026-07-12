@@ -11,6 +11,7 @@ Run:
 """
 import sys
 import os
+import json
 import unittest
 from unittest.mock import MagicMock, patch, mock_open
 
@@ -399,6 +400,24 @@ class TestPlanSubQuestions(unittest.TestCase):
         self.assertIn("reports, reviews, or compares high-level synthetic approaches", prompt)
         self.assertIn("isotopic enrichment, scalability, cost-effectiveness, safety", prompt)
         self.assertIn("不要詢問 exhaustive procedural details", prompt)
+
+    def test_dedupes_tasks_and_drops_all_when_every_paper_is_covered(self):
+        papers = ["paper_a", "paper_b"]
+        raw = json.dumps([
+            {"paper": "paper_a", "sub_q": "Question A?"},
+            {"paper": "paper_a", "sub_q": "Question A?"},
+            {"paper": "paper_b", "sub_q": "Question B?"},
+            {"paper": "ALL", "sub_q": "Compare A and B?"},
+        ])
+        meta = {paper: {"short_desc": "desc", "main_topic": "topic"} for paper in papers}
+
+        with patch("rag.metadata_manager.load_metadata", return_value=meta):
+            with patch("rag.llm_client.planning_llm") as mock_llm:
+                mock_llm.model = "planner"
+                mock_llm.complete.return_value = self._llm_resp(raw)
+                result = plan_sub_questions("Compare the papers.", papers)
+
+        self.assertEqual([sq["paper"] for sq in result], papers)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1374,7 +1393,11 @@ class TestRunEvalCorrectnessCandidate(unittest.TestCase):
                     "label with spaces",
                     "Q08",
                     "Question text?",
-                    {"stage2_evidence": "Evidence block", "stage4_draft": "Draft"},
+                    {
+                        "stage2_evidence": "Evidence block",
+                        "stage3_generation_meta": [{"done_reason": "stop"}],
+                        "stage4_draft": "Draft",
+                    },
                     ["[planning] ok"],
                     row,
                 )
@@ -1383,6 +1406,7 @@ class TestRunEvalCorrectnessCandidate(unittest.TestCase):
             makedirs.assert_called_once_with(out_dir, exist_ok=True)
             opened_paths = [args[0] for args, _ in m.call_args_list]
             self.assertIn(os.path.join(out_dir, "Q08_stage2_evidence.txt"), opened_paths)
+            self.assertIn(os.path.join(out_dir, "Q08_stage3_generation_meta.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage4_draft.txt"), opened_paths)
         finally:
             cfg.EVAL_DEBUG_ARTIFACTS_ENABLED = old_enabled

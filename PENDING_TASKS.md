@@ -1,7 +1,7 @@
 # 待實作任務看板（PENDING TASKS）
 
 > 用途：跟 spec 雙邊對照，確保任務推進。完成的 spec 已移至 `archive/specs/`（見該處 STATUS.md）。
-> 最後盤點：2026-06-22（對照 code 逐一驗證）。
+> 最後盤點：2026-07-12（對照 code、git history 與最新 eval artifacts 驗證）。
 
 ## 已完成（歸檔，僅供回顧）
 - ✅ pipeline_v2（Stage 3/4/5）
@@ -9,25 +9,33 @@
 - ✅ query-engine-refactor（拆模組、stream/non-stream 共用、死碼 query_engine.py 已刪）
 → 細節見 `archive/specs/STATUS.md`
 
+## 目前 checkpoint（2026-07-12）
+
+- **Q08 跨文獻比較架構已得到單輪完整通過**：`q08_atomic_evidence_render_r3_dedup` 達 correctness `1.0`、grounding `1.0`、selection/coverage `100%`、`C0/U0`。
+- 成功路徑：5 個去重後的逐篇 retrieval tasks → source-bound atomic comparison JSON → validator → deterministic render；Stage 4 LLM 為 `0.0s`。
+- 尚未宣稱穩定：Stage 3 仍觸發一次 central-tradeoff repair，Stage 3 共 `375.2s`，總延遲 `418.2s`。先做同設定複跑，再做 Q02/Q08 與完整題組回歸。
+- 目前 `ANSWERABILITY_GATE_ENABLED=False`、`FINAL_TRANSLATION_ENABLED=False` 是 Q08 隔離測試狀態，不代表已撤回產品設計；完整回歸前需恢復並驗證。
+
 ---
 
 ## 待實作（有詳細 spec）
 
 ### 1. pipeline_v4 — 分階段索引（`pipeline_v4_task_spec.md`）
-**狀態：未開始。** 現況：索引一條龍同步跑 VL（indexer.py:39-42），VL 失敗會卡住建索引。
+**狀態：未開始（2026-07-12 複核）。** 現況：索引一條龍同步跑 VL（indexer.py:39-42），VL 失敗會卡住建索引。
 目標：拆成 fast base-index（先可搜尋）+ 非阻塞 VL/摘要增量豐富化 + per-paper 狀態追蹤
 （`text_index_ready`/`vl_pending`/`vl_partial`/`summary_ready`/`last_successful_build`）+ 安全增量重建。
-**重要：這是下方「匯入健檢」的地基**——per-paper 狀態 + 分階段索引正好支撐「論文匯入後確認索引健康」。
+**重要：這是下方「匯入健檢 Phase 2」的地基**——MVP 已可做 corpus health/dedup，但 per-paper 狀態仍需分階段索引支撐。
 
 ### 2. memory_redesign — 記憶模組重設計（`memory_redesign_spec.md`）
-**狀態：未開始。** 研究知識管理層（非問答 log）。三類 episodic/preference/work_state、
+**狀態：未開始（2026-07-12 複核）。** 研究知識管理層（非問答 log）。三類 episodic/preference/work_state、
 狀態生命週期、原子結論句、三機制（C 衝突守衛→A 快速觸發→B session 整合）。
 屬 Tier 2；前置條件「穩定量尺」已於 2026-06 備齊（量尺三軸：檢索/忠實度/正確性）。
 
 ### 3. api-refactor — API 分層（`api-refactor-spec.md`）
-**狀態：未開始。** api.py（474 行）仍把 routes/schemas/session/injection/memory/orchestration 全混一檔，
+**狀態：未開始（2026-07-12 複核）。** `api.py` 仍把 routes/schemas/session/injection/memory/orchestration 混在同一檔，
 import 時還連帶觸發 main.py 全域初始化。目標：拆成薄 transport 層 + 清楚服務邊界 + 安全啟動。
-（優先序最低——目前不是瓶頸。）
+2026-04 的 `api-refractor` PR 是較早的 status streaming/query pipeline 整理；目前這份 spec 在該 PR 之後建立，完成條件尚未達成。
+（優先序最低——目前不是品質或延遲瓶頸。）
 
 ---
 
@@ -63,7 +71,7 @@ import 時還連帶觸發 main.py 全域初始化。目標：拆成薄 transport
 **gate 全題組**:8 ANSWERABLE（Q01-06,09,10 正常）/ 2 PARTIAL（Q07,Q08 軟警告+作答）/ 1 硬棄答（Q12 corr 1.0）/ 1 None（Q11 rag_found=False 走既有 fallback）。
 **三驗收全過**:① **零誤殺硬棄答**（11 in-corpus 無一被錯誤棄答，只 Q12 真假前提棄答）;② **PARTIAL 校準大勝**——Q07(corr 0.25)、Q08(corr 0.5) 正是全題組最弱兩題，gate 精準命中（Q07 理由「KB 沒解釋動態共價鍵如何作用於氟離子結合」屬實，figure_dependent）;③ Q12 硬棄答穩定 corr 1.0。
 **意外好處＝gate 誠實訊號與真實正確性正相關**（PARTIAL 抓到最弱答案），順便當「低品質答案偵測器」。
-**決定:gate 預設開**（config `ANSWERABILITY_GATE_ENABLED=True`）。**0.833 = 新 judge 基準線**，未來與此比，≤v4 是舊 judge 不可跨比。
+**決定：gate 作為產品候選預設開。** baseline_v5 驗證時為 `ANSWERABILITY_GATE_ENABLED=True`；目前 config 在 Q08 隔離 A/B 期間暫時設為 `False`，完整回歸前需恢復。**0.833 = 新 judge 基準線**，未來與此比，≤v4 是舊 judge 不可跨比。
 **順帶暴露 robustness 標的**:Q07 corr 0.25（figure_dependent，KB 缺動態共價鍵機制——可能圖/scheme 內容沒抽到）= 真實答不好的題，接下來 robustness 工作的具體入口之一。
 
 ### B. 匯入健檢（ingestion sanity check）
@@ -78,8 +86,10 @@ import 時還連帶觸發 main.py 全域初始化。目標：拆成薄 transport
 **驗證（2026-06-26，eval_dedup_check，Q07/Q10，dedup 生效後）**:Q10 citation 完全收斂（`s41467-024-45464-z` 提及 0、全 32 次指向單一正規名）= 同篇當兩篇徹底修好;corr 0.75→1.0。**意外加碼**:dedup 騰出的選擇槽被真正不同的相關論文補上——Q07 從 `[45464, s41467...(1)]`（同篇佔兩槽）變 `[45464, Chemistry…Ono boroxine]`，corr 0.25→0.5。零回歸（兩題皆升）。確認 dedup 兩益:① citation 不分裂（確定性）② 騰槽讓相關論文進得來。
 **Phase 2**:SI→主文出處綁定、自我查詢可答性（LLM/篇）、`--fix` 自動刪檔、health 寫入 metadata（pipeline_v4 地基）。皆未做（YAGNI/風險）。
 
-### C. 延遲：retrieval 327s 拆解
-baseline 後 retrieval 是最大階段，待拆（檢索本身 vs Ollama model swap）。
+### C. 延遲拆解 — retrieval 已改善，瓶頸轉到 Stage 3
+**狀態：核心拆解與主要修正已完成。** Retrieval timing 已拆成 Phase A（embed/vector/BM25）與 Phase B（子答案生成）；`STAGE2_LLM_SUBANSWERS_ENABLED=False` 後直接打包 evidence blocks，移除昂貴的逐題子答案 LLM。
+
+最新 `q08_atomic_evidence_render_r3_dedup`：retrieval `7.4s`、Phase A `7.4s`、Phase B `0.0s`。目前主要延遲是 Stage 3 `375.2s`，其中一次 JSON repair 約 `180.8s`。下一個速度槓桿是避免不必要 repair，不是再壓 retrieval。
 
 ### D. Agentic RAG loop — 自我迭代檢索（Tier 2 核心）
 **概念**：系統自評「這次答得好不好」，不夠好就換問法/換論文重檢索，直到夠好或撞迭代上限。
@@ -152,20 +162,23 @@ citation 修正全題組站得住（無 bullet 掛 4–5 篇）＝結構性勝�
 **已知邊界**:捏造偵測現完全靠 grounding——若某句捏造既不在 reference、grounding 又沒抓到，correctness judge 不再兜底（可接受:reference 無法裁決超綱內容）。
 → **未來重跑 baseline 用新 judge 當基準**；舊分數（≤baseline_v4）是舊 judge，不可直接跨版本比 correctness。
 
+#### Q08 atomic comparison milestone（2026-07-12）— 單輪通過，待穩定性驗收
+
+多輪 A/B 已把根因從 prompt 約束收斂成資料結構問題。現行比較題路徑使用 source-bound atomic evidence、獨立 comparison JSON validator 與 deterministic renderer，避免 Stage 4 把多篇來源壓成同一個句子。Planner 也會在所有入選論文已有 specific task 時移除冗餘 `ALL`，避免 evidence/prompt 翻倍造成 JSON 截斷。
+
+`q08_atomic_evidence_render_r3_dedup` 結果：correctness `1.0`、grounding `1.0`、selection/coverage `100%`、Stage 4 LLM `0.0s`。Ollama metadata 證實兩次 Stage 3 generation 都是 `done_reason=stop`，不是 context 截斷。剩餘問題是首次 JSON 少了 validator 要求的 high-purity/isotopic-enrichment trade-off framing，因此多跑一次 repair；品質已通過，但速度仍可改善。
+
 ---
 
-## 建議推進序（2026-06-23 更新：Phase 0 已完成，重排）
-1. ✅ baseline_v3、✅ agentic loop Phase 0、✅ 生成修正 loop Phase 1（負結果：fix=0）
-2. **無中生有→刪除**（E：把 selfcorrect 的 UNVERIFIED 改成刪除幻覺句）— 最高信心起手，Q06 測
-3. ✅ 可答性 gate（A）— Phase 1+2 完成（三分路由、硬棄答 Q12 驗證 correctness 1.0）；預設關待 baseline_v5 才開
-4. 多講/漏講修正（E）— 生成 prompt 答題勿轉錄 + 數值完整性比對；prompt 易翻車，獨立 A/B
-5. pipeline_v4 分階段索引（1）→ 順帶解鎖匯入健檢（B）
-6. memory_redesign（2）
-7. retrieval 拆解（C）、api-refactor（3）視情況
+## 建議推進序（2026-07-12）
 
-### ⭐ 方向決定（2026-06-23，Peter）：v5 之後選「robustness/品質」非「速度」
-Peter 明確:下一個槓桿走「對真實使用者更穩、答得更準」，**不是速度**。→ retrieval（C，~400s 最大延遲）**延後不放棄**——肯定得拆，只是順位往後。**起手很便宜**:profile 切成 檢索compute / 子問題 LLM 推論 / 模型 swap 三塊（本專案「慢」多是 swap）；可當「別的長 run 在跑時順手做的填空題」，不必排專門回合。
-**v5 之後候選（依此方向重排，待 v5 數據定案）**:
-- **B 匯入健檢 / 資料衛生**:接今天揪到的**重複入庫**（45464 同篇兩份、ChemComm 正文 vs SI）。真實使用者匯入場景的實 bug，gate 已讓「匯入後答不出」可偵測。
-- **Stage 3 蒸餾穩定性**:接今天發現的 KB 變異（Q08 有時 5737 字 rich、有時壓成高層摘要）。同時傷品質與 gate 可靠度（薄 KB→生成也差），槓桿比 retrieval 大、直接動正確性。
-兩者擇一起手，v5 跑完看數據（PARTIAL 出現率、有無誤殺、蒸餾穩定度）再定。
+1. **Q08 同設定穩定性複跑**：不改 code/config，執行 `python eval\run_eval.py --run --label q08_atomic_evidence_render_r4_stability --ids Q08`。驗收：correctness/grounding `1.0`、5 tasks、atomic JSON valid、Stage 4 LLM `0s`。
+2. **Q02/Q08 小回歸**：若複跑通過，執行 `python eval\run_eval.py --run --label q02_q08_atomic_render_regression --ids Q02,Q08`，確認比較題特化沒有傷到方法題。
+3. **恢復產品開關後跑完整 baseline**：將 answerability gate 與最終中文翻譯恢復產品狀態，再跑全題組；英文 correctness 仍使用 pre-translation `answer_for_judge`。
+4. **通過後才 promote/commit comparison direct-render 路徑**。若 Q08 複跑失敗，先比較 Stage 3 JSON/artifact，不再盲目加 prompt。
+5. **速度第二順位**：穩定後再處理 central-tradeoff repair；優先讓 deterministic normalizer/validator 對齊，目標省掉約 `181s` 的第二次 Stage 3 generation，不提高 `num_ctx`。
+6. **產品化長線**：pipeline_v4 分階段索引 → ingestion health Phase 2 → memory redesign。API refactor 仍在，但目前順位最低。
+
+### 方向決定
+
+維持 robustness/品質優先。Retrieval 已不是瓶頸；近期焦點是證明 atomic cross-paper comparison 可重現並通過其他題型回歸。只有在這三道驗收完成後，才把單輪 `1.0/1.0` 視為可推進的主流程候選。

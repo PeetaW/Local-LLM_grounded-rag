@@ -19,6 +19,7 @@ rather than a black-box AI that changes without notice.
 
 - [English](#english)
   - [Features](#features)
+  - [Development Status](#development-status)
   - [System Architecture](#system-architecture)
   - [Requirements](#requirements)
   - [Installation](#installation)
@@ -27,6 +28,7 @@ rather than a black-box AI that changes without notice.
   - [Configuration](#configuration)
 - [繁體中文](#繁體中文)
   - [功能特色](#功能特色)
+  - [開發狀態](#開發狀態)
   - [系統架構](#系統架構)
   - [環境需求](#環境需求)
   - [安裝步驟](#安裝步驟)
@@ -40,20 +42,30 @@ rather than a black-box AI that changes without notice.
 
 ## Features
 
-- **7-Stage Pipeline**: Paper pre-filter → ① Sub-question planning → ② Hybrid retrieval → ③ Knowledge distillation → ④ Three-tier answer generation → ⑤ Verification & correction → ⑥ NLI citation grounding → ⑦ Traditional Chinese translation
-- **Hybrid Retrieval**: BM25 sparse + vector dense search → cross-encoder reranking (retrieve 24 candidates, rerank down to 8)
+- **7-Stage Pipeline**: Paper pre-filter → ① Sub-question planning → ② Hybrid retrieval → ③ Knowledge distillation → ④ answer rendering/generation → ⑤ Verification & correction → ⑥ NLI citation grounding → ⑦ optional Traditional Chinese translation
+- **Hybrid Retrieval**: BM25 sparse + vector dense search, with optional cross-encoder reranking
 - **Three-Tier Answers**: Every answer separates `[Direct Paper Evidence]` / `[Cross-Literature Inference]` / `[Knowledge Extension & Speculation]`, each with its own grounding score — epistemic honesty over completeness
-- **Knowledge Distillation (Stage 3)**: LLM distills retrieved chunks into a structured fact list before answer generation
+- **Knowledge Distillation (Stage 3)**: LLM distills source-bound evidence blocks into a structured fact list or validated comparison JSON
+- **Deterministic cross-paper comparison**: Valid atomic comparison JSON is rendered directly into one-source claims, avoiding a second stochastic Stage 4 rewrite
 - **Answer Verification (Stage 5)**: A reasoning model verifies logical leaps and unsupported inferences; a corrector LLM rewrites the answer if issues are found
-- **NLI Citation Grounding (Stage 6)**: mDeBERTa multilingual NLI checks each sentence against the **raw PDF chunks** (not LLM summaries); low-evidence statements are sent back for re-citation; includes contradiction detection
-- **English-first pipeline**: Reasoning, verification and NLI run in English (monolingual NLI is far more accurate), then the final answer is translated to Traditional Chinese
+- **NLI Citation Grounding (Stage 6)**: mDeBERTa multilingual NLI checks each sentence against the **raw PDF chunks** (not LLM summaries) and reports unsupported or contradictory claims
+- **Answerability gate**: Optional three-way routing distinguishes answerable, partial, and genuinely unanswerable questions before final generation
+- **English-first pipeline**: Reasoning, verification and NLI run in English; final Traditional Chinese translation can be enabled separately
 - **Contextual chunk summarization**: Each chunk gets an LLM-generated summary header before embedding (Anthropic Contextual-Retrieval style)
 - **Vision-Language support**: Extracts and describes figures from PDFs using a VL model — with smart rasterization for fragmented images and vector drawings
 - **Multi-project support**: Manage multiple paper collections (e.g., `zvi`, `boron_bnct`) by switching `ACTIVE_PROJECT` in `config.py`
 - **Cross-session memory**: ChromaDB stores episodic reasoning results and user preferences across sessions
-- **Evaluation harness**: `eval/run_eval.py` runs a labeled question set and reports paper-selection recall, retrieval coverage, grounding score and per-stage latency — for data-driven regression testing
+- **Evaluation harness**: `eval/run_eval.py` reports correctness, paper-selection recall, retrieval coverage, grounding and per-stage latency for labeled A/B regression tests
 - **OpenAI-compatible API**: Connect directly to Open WebUI as a custom model — no tool-call needed
 - **Streaming output**: Real-time pipeline progress streamed to Open WebUI as blockquote status messages
+
+## Development Status
+
+As of **2026-07-12**, the Q08 cross-paper comparison A/B reached **1.0 correctness**, **1.0 grounding**, **100% paper-selection recall**, and **100% retrieval coverage**. The successful path used five deduplicated paper-specific retrieval tasks, validated atomic comparison JSON, and deterministic rendering with no Stage 4 LLM generation.
+
+This is a strong architecture result, not yet a stability claim. The next gates are one same-config repeat, a Q02/Q08 regression, and then the full eval set. Stage 3 remains the latency bottleneck (`375.2s` in the successful run), including one JSON repair; optimize that only after the result repeats.
+
+The active sequence and longer-term roadmap are tracked in [PENDING_TASKS.md](PENDING_TASKS.md).
 
 ## System Architecture
 
@@ -78,21 +90,21 @@ rather than a black-box AI that changes without notice.
                           ┌────────────▼────────────┐
                           │  Stage 2 · Retrieval     │
                           │  BM25 + Vector Search    │
-                          │  → Cross-encoder Rerank  │
+                          │  → evidence blocks       │
                           └────────────┬────────────┘
                                        │
                           ┌────────────▼────────────┐
                           │  Stage 3 · Synthesis     │  ← gemma4:31b
-                          │  Distills sub-answers    │
-                          │  into structured fact    │
-                          │  list [Fact 1][Fact 2]…  │
+                          │  Distills evidence into  │
+                          │  facts or validated      │
+                          │  comparison JSON         │
                           └────────────┬────────────┘
                                        │
                           ┌────────────▼────────────┐
-                          │  Stage 4 · Generation    │  ← gemma4:31b
-                          │  LLM writes answer from  │
-                          │  fact list with citation │
-                          │  and reasoning labels    │
+                          │  Stage 4 · Answer        │  ← gemma4:31b
+                          │  atomic comparison JSON  │
+                          │  render, otherwise LLM   │
+                          │  generation              │
                           └────────────┬────────────┘
                                        │
                           ┌────────────▼────────────┐
@@ -112,7 +124,7 @@ rather than a black-box AI that changes without notice.
                           ┌────────────▼────────────┐
                           │  Stage 7 · Translation   │
                           │  EN draft → 繁體中文      │
-                          │  (if EN_DRAFT_PIPELINE)  │
+                          │  (if translation enabled)│
                           └────────────┬────────────┘
                                        │
                         ┌─────────────▼──────────────┐
@@ -142,6 +154,7 @@ Pull the following models before running:
 
 ```bash
 ollama pull gemma4:31b          # Stage 3 synthesis + Stage 4 generation + Stage 5 correction
+ollama pull qwen3.5:27b         # Main/fallback LLM and contextual summaries
 ollama pull qwen3.5:35b-a3b     # Stage 5 verification (thinking model)
 ollama pull qwen2.5:14b         # Paper selection + sub-question planning
 ollama pull qwen3-vl:32b        # Vision-language figure analysis
@@ -274,6 +287,7 @@ evaluation harness to confirm the change actually helped — instead of guessing
 python eval/run_eval.py --run --label baseline       # run the question set, save results
 # ...make a change (e.g. edit RERANK_CANDIDATE_K)...
 python eval/run_eval.py --run --label experiment
+python eval/run_eval.py --run --label focused --ids Q02,Q08
 python eval/run_eval.py --compare baseline experiment # side-by-side metric comparison
 ```
 
@@ -375,25 +389,30 @@ rag_project/
 
 All parameters are centralized in `config.py`:
 
-| Parameter | Default | Description |
+| Parameter | Current value | Description |
 |-----------|---------|-------------|
 | `ACTIVE_PROJECT` | `"boron_bnct"` | Active paper collection |
-| `LLM_MODEL` | `"gemma4:31b"` | Main generation model |
+| `LLM_MODEL` | `"qwen3.5:27b"` | Main/fallback model and contextual summaries |
 | `PLANNING_LLM_MODEL` | `"qwen2.5:14b"` | Paper selection + planning model |
+| `SYNTHESIS_MODEL` | `"gemma4:31b"` | Stage 3 synthesis and normal Stage 4 generation |
 | `VERIFY_MODEL` | `"qwen3.5:35b-a3b"` | Stage 5 verifier model |
 | `EMBED_MODEL` | `"bge-m3"` | Embedding model |
-| `REASONING_MODE` | `"reasoning"` | `"reasoning"` or `"strict"` |
+| `REASONING_MODE` | `"strict"` | `"reasoning"` or `"strict"` |
 | `SYNTHESIS_ENABLED` | `True` | Enable Stage 3 knowledge synthesis |
 | `VERIFY_ENABLED` | `True` | Enable Stage 5 verification |
 | `CHUNK_SIZE` | `1024` | Token size per chunk |
 | `SIMILARITY_TOP_K` | `8` | Base candidate count (grounding-flow fallback) |
 | `RERANK_CANDIDATE_K` | `24` | Candidates retrieved before reranking (must be > `RERANKER_TOP_N`) |
 | `RERANKER_TOP_N` | `8` | Final chunks kept after reranking |
+| `RERANK_ENABLED` | `False` | Optional cross-encoder reranking A/B |
 | `GROUNDING_TOP_K` | `20` | Chunks retrieved for Stage 6 NLI grounding |
-| `EN_DRAFT_PIPELINE` | `True` | Reason/verify/NLI in English, translate at the end |
+| `STAGE2_LLM_SUBANSWERS_ENABLED` | `False` | Feed retrieval evidence blocks directly to Stage 3 |
+| `COMPARISON_JSON_DIRECT_RENDER_ENABLED` | `True` | Render validated atomic comparison JSON without Stage 4 LLM prose |
+| `ANSWERABILITY_GATE_ENABLED` | `False` | Temporarily off during the current comparison A/B |
+| `EN_DRAFT_PIPELINE` | `True` | Reason, verify and run NLI in English |
+| `FINAL_TRANSLATION_ENABLED` | `False` | Temporarily keep the English draft during comparison testing |
 | `VL_AUTO_RUN` | `True` | Auto-run VL analysis on new PDFs |
 | `CONTEXT_SUMMARY_ENABLED` | `True` | Generate LLM summary header per chunk |
-| `EN_DRAFT_PIPELINE` | `True` | Full English draft pipeline (improves NLI accuracy) |
 | `NLI_TRANSLATE_TO_EN` | `True` | Translate hypotheses to English before NLI |
 | `NLI_CONTRADICTION_ENABLED` | `True` | Enable contradiction detection |
 | `PLAN_EXECUTE_ENABLED` | `False` | Plan-and-Execute architecture (experimental) |
@@ -415,20 +434,30 @@ All parameters are centralized in `config.py`:
 
 ## 功能特色
 
-- **7 階段 Pipeline**：論文預篩 → ① 子問題規劃 → ② 混合檢索 → ③ 知識蒸餾 → ④ 三層答案生成 → ⑤ 驗證與修正 → ⑥ NLI 引用比對 → ⑦ 繁體中文翻譯
-- **混合檢索**：BM25 稀疏 + 向量稠密搜尋 → Cross-encoder Reranker（取 24 個候選，rerank 砍到 8）
+- **7 階段 Pipeline**：論文預篩 → ① 子問題規劃 → ② 混合檢索 → ③ 知識蒸餾 → ④ 答案渲染/生成 → ⑤ 驗證與修正 → ⑥ NLI 引用比對 → ⑦ 選用的繁體中文翻譯
+- **混合檢索**：BM25 稀疏 + 向量稠密搜尋，可選擇啟用 Cross-encoder Reranker
 - **三層答案結構**：每則回答分為【論文直接依據】/【跨文獻推論】/【知識延伸與推測】，各層各算 grounding 分數——認知誠實優先於答案完整
-- **知識蒸餾（Stage 3）**：LLM 在生成答案前，先將檢索結果蒸餾成結構化事實清單
+- **知識蒸餾（Stage 3）**：LLM 將具來源歸屬的 evidence blocks 蒸餾成事實清單或經驗證的 comparison JSON
+- **確定性跨文獻比較**：atomic comparison JSON 通過驗證後，直接渲染成單一來源的比較陳述，避免 Stage 4 再次隨機改寫
 - **答案驗證（Stage 5）**：推理模型驗證推論跳躍與無依據推論；若發現問題，由修正 LLM 重寫答案
-- **NLI 引用比對（Stage 6）**：mDeBERTa 多語言 NLI 逐句比對 **PDF 原文 chunk**（非 LLM 摘要）；依據不足的句子送回重新引用；含矛盾偵測
-- **English-first pipeline**：推理、驗證、NLI 全程用英文（單語 NLI 準確度遠高於跨語言），最後再翻譯成繁體中文
+- **NLI 引用比對（Stage 6）**：mDeBERTa 多語言 NLI 逐句比對 **PDF 原文 chunk**（非 LLM 摘要），回報無依據或矛盾陳述
+- **可答性 gate**：選用的三分路由在最終生成前區分可回答、部分可回答與確實不可回答
+- **English-first pipeline**：推理、驗證、NLI 全程用英文，最終繁體中文翻譯可獨立開關
 - **情境式 chunk 摘要**：建索引時為每個 chunk 加上 LLM 生成的摘要標頭（Anthropic Contextual-Retrieval 風格）
 - **視覺語言支援**：使用 VL 模型自動擷取並描述 PDF 圖表，支援碎片圖偵測與向量圖光柵化
 - **多專案支援**：在 `config.py` 切換 `ACTIVE_PROJECT` 即可管理多個論文資料庫
 - **跨 session 記憶**：ChromaDB 儲存推論結論與使用者偏好，跨對話保留
-- **評估骨架**：`eval/run_eval.py` 跑標準題組，回報論文選擇命中率、檢索覆蓋率、grounding 分數與各階段延遲——用數據做回歸測試
+- **評估骨架**：`eval/run_eval.py` 回報 correctness、論文選擇命中率、檢索覆蓋率、grounding 與各階段延遲，用於有標籤的 A/B 回歸測試
 - **OpenAI 相容 API**：直接在 Open WebUI 當成自訂模型使用，無需工具呼叫設定
 - **串流輸出**：Pipeline 進度即時串流至 Open WebUI，以 blockquote 格式顯示
+
+## 開發狀態
+
+截至 **2026-07-12**，Q08 跨文獻比較 A/B 已達到 **correctness 1.0**、**grounding 1.0**、**論文選擇命中率 100%** 與 **檢索覆蓋率 100%**。成功路徑使用 5 個去重後的逐篇檢索任務、經驗證的 atomic comparison JSON，以及不經 Stage 4 LLM 的確定性渲染。
+
+這證明架構方向有效，但尚不能宣稱穩定。下一個驗收依序是同設定複跑一次、Q02/Q08 回歸，再跑完整 eval set。Stage 3 仍是主要延遲來源（成功輪為 `375.2s`，其中包含一次 JSON repair），應等結果可重現後再優化。
+
+目前推進順序與長期 roadmap 見 [PENDING_TASKS.md](PENDING_TASKS.md)。
 
 ## 系統架構
 
@@ -452,20 +481,20 @@ All parameters are centralized in `config.py`:
                           ┌────────────▼────────────┐
                           │  Stage 2 · 混合檢索      │
                           │  BM25 + 向量搜尋         │
-                          │  → Cross-encoder Rerank  │
+                          │  → evidence blocks       │
                           └────────────┬────────────┘
                                        │
                           ┌────────────▼────────────┐
                           │  Stage 3 · 知識蒸餾      │  ← gemma4:31b
-                          │  將子答案蒸餾成           │
-                          │  結構化事實清單            │
-                          │  [事實1][事實2]…         │
+                          │  將證據蒸餾成             │
+                          │  事實清單或經驗證的        │
+                          │  comparison JSON         │
                           └────────────┬────────────┘
                                        │
                           ┌────────────▼────────────┐
-                          │  Stage 4 · 答案生成      │  ← gemma4:31b
-                          │  從事實清單生成完整回答   │
-                          │  含引用標注與推論層次      │
+                          │  Stage 4 · 答案處理      │  ← gemma4:31b
+                          │  比較題確定性渲染；        │
+                          │  其他題型由 LLM 生成      │
                           └────────────┬────────────┘
                                        │
                           ┌────────────▼────────────┐
@@ -484,7 +513,7 @@ All parameters are centralized in `config.py`:
                           ┌────────────▼────────────┐
                           │  Stage 7 · 翻譯          │
                           │  英文初稿 → 繁體中文      │
-                          │  （EN_DRAFT_PIPELINE）   │
+                          │  （翻譯開啟時）           │
                           └────────────┬────────────┘
                                        │
                         ┌─────────────▼──────────────┐
@@ -514,6 +543,7 @@ All parameters are centralized in `config.py`:
 
 ```bash
 ollama pull gemma4:31b          # Stage 3 蒸餾 + Stage 4 生成 + Stage 5 修正
+ollama pull qwen3.5:27b         # 主/備援 LLM 與情境式摘要
 ollama pull qwen3.5:35b-a3b     # Stage 5 驗證（思考型模型）
 ollama pull qwen2.5:14b         # 論文篩選 + 子問題規劃
 ollama pull qwen3-vl:32b        # 視覺語言圖表分析
@@ -646,6 +676,7 @@ Pipeline 進度（論文篩選、子問題、Stage 3/4/5 狀態）會即時串�
 python eval/run_eval.py --run --label baseline       # 跑題組，存結果
 # ...做一個改動（例如改 RERANK_CANDIDATE_K）...
 python eval/run_eval.py --run --label experiment
+python eval/run_eval.py --run --label focused --ids Q02,Q08
 python eval/run_eval.py --compare baseline experiment # 並排比較彙總指標
 ```
 
@@ -747,25 +778,30 @@ rag_project/
 
 所有參數集中在 `config.py`：
 
-| 參數 | 預設值 | 說明 |
+| 參數 | 目前值 | 說明 |
 |------|--------|------|
 | `ACTIVE_PROJECT` | `"boron_bnct"` | 目前使用的論文專案 |
-| `LLM_MODEL` | `"gemma4:31b"` | 主生成模型 |
+| `LLM_MODEL` | `"qwen3.5:27b"` | 主/備援模型與情境式摘要 |
 | `PLANNING_LLM_MODEL` | `"qwen2.5:14b"` | 論文篩選與規劃模型 |
+| `SYNTHESIS_MODEL` | `"gemma4:31b"` | Stage 3 蒸餾與一般 Stage 4 生成 |
 | `VERIFY_MODEL` | `"qwen3.5:35b-a3b"` | Stage 5 驗證模型 |
 | `EMBED_MODEL` | `"bge-m3"` | Embedding 模型 |
-| `REASONING_MODE` | `"reasoning"` | `"reasoning"` 或 `"strict"` |
+| `REASONING_MODE` | `"strict"` | `"reasoning"` 或 `"strict"` |
 | `SYNTHESIS_ENABLED` | `True` | 啟用 Stage 3 知識蒸餾 |
 | `VERIFY_ENABLED` | `True` | 啟用 Stage 5 驗證 |
 | `CHUNK_SIZE` | `1024` | 每個 chunk 的 token 數 |
 | `SIMILARITY_TOP_K` | `8` | 基礎候選數（grounding flow 的 fallback） |
 | `RERANK_CANDIDATE_K` | `24` | 進 reranker 前的候選數（須 > `RERANKER_TOP_N`） |
 | `RERANKER_TOP_N` | `8` | Rerank 後保留的 chunk 數 |
+| `RERANK_ENABLED` | `False` | 選用的 Cross-encoder reranking A/B |
 | `GROUNDING_TOP_K` | `20` | Stage 6 NLI 比對用的 chunk 數 |
-| `EN_DRAFT_PIPELINE` | `True` | 推理/驗證/NLI 全程英文，最後翻譯 |
+| `STAGE2_LLM_SUBANSWERS_ENABLED` | `False` | 將 retrieval evidence blocks 直接交給 Stage 3 |
+| `COMPARISON_JSON_DIRECT_RENDER_ENABLED` | `True` | atomic comparison JSON 通過驗證後跳過 Stage 4 LLM prose |
+| `ANSWERABILITY_GATE_ENABLED` | `False` | 比較題 A/B 期間暫時關閉 |
+| `EN_DRAFT_PIPELINE` | `True` | 推理、驗證與 NLI 全程英文 |
+| `FINAL_TRANSLATION_ENABLED` | `False` | 比較題測試期間暫時保留英文 draft |
 | `VL_AUTO_RUN` | `True` | 新增 PDF 時自動執行 VL 圖表分析 |
 | `CONTEXT_SUMMARY_ENABLED` | `True` | 為每個 chunk 生成 LLM 摘要標頭 |
-| `EN_DRAFT_PIPELINE` | `True` | 全英文 draft 流程（提升 NLI 準確度） |
 | `NLI_TRANSLATE_TO_EN` | `True` | NLI 前將 hypothesis 翻譯為英文 |
 | `NLI_CONTRADICTION_ENABLED` | `True` | 啟用矛盾偵測 |
 | `PLAN_EXECUTE_ENABLED` | `False` | Plan-and-Execute 架構（實驗性） |

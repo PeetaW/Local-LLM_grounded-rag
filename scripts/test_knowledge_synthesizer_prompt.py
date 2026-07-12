@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 import os
 import sys
+import json
 import types
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -24,6 +25,29 @@ from rag.knowledge_synthesizer import (
 
 
 class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
+    def test_generate_captures_ollama_terminal_metadata(self):
+        response = MagicMock()
+        response.iter_lines.return_value = [
+            json.dumps({"response": "answer", "done": False}).encode(),
+            json.dumps({
+                "response": "",
+                "done": True,
+                "done_reason": "length",
+                "prompt_eval_count": 123,
+                "eval_count": 8192,
+            }).encode(),
+        ]
+        metadata = {}
+
+        with patch("rag.knowledge_synthesizer.requests.post", return_value=response):
+            output = KnowledgeSynthesizer()._generate("prompt", "system", metadata)
+
+        self.assertEqual(output, "answer")
+        self.assertEqual(metadata["done_reason"], "length")
+        self.assertEqual(metadata["prompt_eval_count"], 123)
+        self.assertEqual(metadata["eval_count"], 8192)
+        self.assertEqual(metadata["requested_num_ctx"], cfg.STAGE3_NUM_CTX)
+
     def test_comparison_schema_is_ab_switch(self):
         old = cfg.STAGE3_COMPARISON_SCHEMA_ENABLED
         old_json = cfg.COMPARISON_JSON_ENABLED
@@ -342,6 +366,7 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         )
 
         self.assertIn("retrieved evidence", artifacts["stage3_prompt"])
+        self.assertEqual(artifacts["stage3_generation_meta"], [{"attempt": "comparison_json"}])
         self.assertIn("route comparison evidence", artifacts["stage3_raw_output"])
         self.assertEqual(artifacts["stage3_knowledge_base"], result)
 
