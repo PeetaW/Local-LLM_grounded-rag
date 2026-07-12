@@ -61,9 +61,9 @@ rather than a black-box AI that changes without notice.
 
 ## Development Status
 
-As of **2026-07-12**, the Q08 cross-paper comparison A/B reached **1.0 correctness**, **1.0 grounding**, **100% paper-selection recall**, and **100% retrieval coverage**. The successful path used five deduplicated paper-specific retrieval tasks, validated atomic comparison JSON, and deterministic rendering with no Stage 4 LLM generation.
+As of **2026-07-12**, the Q08 cross-paper comparison A/B has reached **1.0 correctness** and **1.0 grounding** in one run, using validated atomic comparison JSON and deterministic rendering with no Stage 4 LLM generation. A stability repeat kept correctness at `1.0` but exposed partial `ALL` task duplication, a literal validator false positive, and grounding `0.875`; deterministic fixes are implemented and await the next Q08 run.
 
-This is a strong architecture result, not yet a stability claim. The next gates are one same-config repeat, a Q02/Q08 regression, and then the full eval set. Stage 3 remains the latency bottleneck (`375.2s` in the successful run), including one JSON repair; optimize that only after the result repeats.
+This is a strong architecture result, not yet a stability claim. The next gates are a post-fix Q08 repeat, a Q02/Q08 regression, and then the full eval set. Stage 3 remains the latency bottleneck; optimization follows reproducible quality.
 
 The active sequence and longer-term roadmap are tracked in [PENDING_TASKS.md](PENDING_TASKS.md).
 
@@ -453,9 +453,9 @@ All parameters are centralized in `config.py`:
 
 ## 開發狀態
 
-截至 **2026-07-12**，Q08 跨文獻比較 A/B 已達到 **correctness 1.0**、**grounding 1.0**、**論文選擇命中率 100%** 與 **檢索覆蓋率 100%**。成功路徑使用 5 個去重後的逐篇檢索任務、經驗證的 atomic comparison JSON，以及不經 Stage 4 LLM 的確定性渲染。
+截至 **2026-07-12**，Q08 跨文獻比較 A/B 曾以 validated atomic comparison JSON 與不經 Stage 4 LLM 的確定性渲染達到 **correctness 1.0**、**grounding 1.0**。穩定性複跑仍維持 correctness `1.0`，但暴露部分 `ALL` task 重複、validator 字面誤判與 grounding `0.875`；三項確定性修正已完成，等待下一輪 Q08 驗證。
 
-這證明架構方向有效，但尚不能宣稱穩定。下一個驗收依序是同設定複跑一次、Q02/Q08 回歸，再跑完整 eval set。Stage 3 仍是主要延遲來源（成功輪為 `375.2s`，其中包含一次 JSON repair），應等結果可重現後再優化。
+這證明架構方向有效，但尚不能宣稱穩定。下一個驗收依序是修正後 Q08 複跑、Q02/Q08 回歸，再跑完整 eval set。Stage 3 仍是主要延遲來源，應等品質可重現後再優化。
 
 目前推進順序與長期 roadmap 見 [PENDING_TASKS.md](PENDING_TASKS.md)。
 

@@ -49,6 +49,7 @@ memory_db/
 *.chroma
 e--Projects-rag-project/
 .codex/project-memory.md
+.codex/config.toml
 
 # ── Internal dev docs ─────────────────────────────────
 pipeline_v2_task_spec.md

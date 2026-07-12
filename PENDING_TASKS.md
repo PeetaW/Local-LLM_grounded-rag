@@ -11,9 +11,9 @@
 
 ## 目前 checkpoint（2026-07-12）
 
-- **Q08 跨文獻比較架構已得到單輪完整通過**：`q08_atomic_evidence_render_r3_dedup` 達 correctness `1.0`、grounding `1.0`、selection/coverage `100%`、`C0/U0`。
-- 成功路徑：5 個去重後的逐篇 retrieval tasks → source-bound atomic comparison JSON → validator → deterministic render；Stage 4 LLM 為 `0.0s`。
-- 尚未宣稱穩定：Stage 3 仍觸發一次 central-tradeoff repair，Stage 3 共 `375.2s`，總延遲 `418.2s`。先做同設定複跑，再做 Q02/Q08 與完整題組回歸。
+- **Q08 跨文獻比較架構已有單輪完整通過**：`q08_atomic_evidence_render_r3_dedup` 達 correctness `1.0`、grounding `1.0`、selection/coverage `100%`、`C0/U0`。
+- `q08_atomic_evidence_render_r4_stability` 未通過穩定性門檻：correctness `1.0`、grounding `0.875`、9 tasks、Stage 4 `231.9s`、Corrector `116.0s`、總延遲 `804.9s`。
+- r4 暴露三個確定性根因：4 specific + 1 `ALL` 仍重複展開、validator 不接受 `high optical purity + 10B` 的等價表述、comparison snippet 在 `normal boric acid` 中途截斷。修正已完成，待 r5 驗證。
 - 目前 `ANSWERABILITY_GATE_ENABLED=False`、`FINAL_TRANSLATION_ENABLED=False` 是 Q08 隔離測試狀態，不代表已撤回產品設計；完整回歸前需恢復並驗證。
 
 ---
@@ -168,11 +168,13 @@ citation 修正全題組站得住（無 bullet 掛 4–5 篇）＝結構性勝�
 
 `q08_atomic_evidence_render_r3_dedup` 結果：correctness `1.0`、grounding `1.0`、selection/coverage `100%`、Stage 4 LLM `0.0s`。Ollama metadata 證實兩次 Stage 3 generation 都是 `done_reason=stop`，不是 context 截斷。剩餘問題是首次 JSON 少了 validator 要求的 high-purity/isotopic-enrichment trade-off framing，因此多跑一次 repair；品質已通過，但速度仍可改善。
 
+`q08_atomic_evidence_render_r4_stability` correctness 仍為 `1.0`，但 grounding 降至 `0.875`，不能視為穩定重現。Planner 產生 4 specific + 1 `ALL`，舊 guard 因尚有一篇未被 specific 覆蓋而保留 `ALL`，task builder 再將它展開到全部 5 篇，形成 9 tasks。Stage 3 原始 atomic JSON 內容完整，卻因 validator 只認字面 `high-purity` 而拒絕等價的 `high optical purity + 10B`；repair 在 14734 prompt tokens 後以 `done_reason=length` 截斷，遂回退 Stage 4/Corrector。Grounding 唯一失敗則源於 evidence clip 把原文 `normal boric acid` 截斷，後續補成 `normal boron`。現行修正讓 `ALL` 只補未覆蓋論文、validator 接受純度詞與同位素詞組合，並在 200 字內補齊關鍵句句尾。
+
 ---
 
 ## 建議推進序（2026-07-12）
 
-1. **Q08 同設定穩定性複跑**：不改 code/config，執行 `python eval\run_eval.py --run --label q08_atomic_evidence_render_r4_stability --ids Q08`。驗收：correctness/grounding `1.0`、5 tasks、atomic JSON valid、Stage 4 LLM `0s`。
+1. **Q08 修正後穩定性複跑**：執行 `python eval\run_eval.py --run --label q08_atomic_evidence_render_r5_partial_dedup --ids Q08`。驗收：correctness/grounding `1.0`、5 tasks、首次 atomic JSON valid、Stage 4 LLM `0s`、cost evidence 保留 `normal boric acid`。
 2. **Q02/Q08 小回歸**：若複跑通過，執行 `python eval\run_eval.py --run --label q02_q08_atomic_render_regression --ids Q02,Q08`，確認比較題特化沒有傷到方法題。
 3. **恢復產品開關後跑完整 baseline**：將 answerability gate 與最終中文翻譯恢復產品狀態，再跑全題組；英文 correctness 仍使用 pre-translation `answer_for_judge`。
 4. **通過後才 promote/commit comparison direct-render 路徑**。若 Q08 複跑失敗，先比較 Stage 3 JSON/artifact，不再盲目加 prompt。

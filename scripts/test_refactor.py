@@ -480,6 +480,17 @@ class TestBuildSubqueryTasks(unittest.TestCase):
         self.assertEqual(len(valid), 2)
         self.assertEqual(len(prefilled), 0)
 
+    def test_all_only_expands_to_papers_without_specific_task(self):
+        sub_q = [
+            {"paper": "paper_a", "sub_q": "Specific A?"},
+            {"paper": "ALL", "sub_q": "Compare all?"},
+        ]
+        valid, _ = build_subquery_tasks(sub_q, self.engines, self.engines)
+        self.assertEqual([(task[1], task[3]) for task in valid], [
+            ("【paper_a】", "Specific A?"),
+            ("【paper_b】", "Compare all?"),
+        ])
+
     def test_specific_paper_found_creates_one_task(self):
         sub_q = [{"paper": "paper_a", "sub_q": "Q?"}]
         valid, prefilled = build_subquery_tasks(sub_q, self.engines, self.engines)
@@ -598,6 +609,16 @@ class TestRunSubqueriesParallel(unittest.TestCase):
         )
         self.assertIn("cost-effectiveness", clipped)
         self.assertIn("high cost of isotopically enriched 10B", clipped)
+
+    def test_comparison_snippet_finishes_nearby_sentence(self):
+        text = (
+            "introductory material " * 8
+            + "The high cost is more than 1000 fold that of normal boric acid. "
+            + "A separate sentence must stay outside the clip. "
+            + "trailing material " * 20
+        )
+        clipped = _clip_evidence_snippet(text, "Compare route cost-effectiveness.", limit=90)
+        self.assertTrue(clipped.endswith("normal boric acid."))
 
     def test_atomic_comparison_snippets_keep_top_two_and_dimension_overview(self):
         old = cfg.COMPARISON_JSON_DIRECT_RENDER_ENABLED

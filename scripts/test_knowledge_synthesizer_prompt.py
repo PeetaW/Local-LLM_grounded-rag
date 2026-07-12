@@ -184,6 +184,34 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         self.assertTrue(any("Review/comparison source" in err for err in errors))
         self.assertTrue(any("central_tradeoff" in err for err in errors))
 
+    def test_validator_accepts_semantic_purity_isotope_tradeoff(self):
+        raw = json.dumps({
+            "comparison_json": {
+                "source_roles": [{"source": "RouteA", "role": "route"}],
+                "direct_routes": [{
+                    "source": "RouteA",
+                    "route_phrase": "hybrid route",
+                    "outcome": "Optically pure product with 100% optical purity",
+                    "produces_target": True,
+                    "evidence": "route evidence",
+                }],
+                "review_comparison_sources": [],
+                "dimensions": {
+                    "isotopic_enrichment": {
+                        "requested": True,
+                        "evidence_found": True,
+                        "evidence": [{"source": "RouteA", "claim": "10B material is required."}],
+                    }
+                },
+                "central_tradeoff": {
+                    "claim": "High optical purity is achievable, but 10B material is costly.",
+                    "sources": ["RouteA"],
+                },
+            }
+        })
+        errors = _comparison_json_validation_errors(raw, "Compare isotopic enrichment.")
+        self.assertFalse(any("high-purity/isotopically enriched" in err for err in errors))
+
     def test_validator_does_not_misread_chemical_derivative_as_background(self):
         raw = """
         {

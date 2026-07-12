@@ -278,10 +278,16 @@ def _comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
         for route in comparison.get("direct_routes", [])
         if isinstance(route, dict)
     ).lower()
+    purity_framed = any(term in tradeoff for term in (
+        "high-purity", "high purity", "high optical purity", "optically pure", "enantiopur",
+    ))
+    isotope_framed = any(term in tradeoff for term in (
+        "isotopically enriched", "isotopic enrichment", "10b", "boron-10",
+    ))
     if (
         "isotopic_enrichment" in query_dims
         and any(term in route_outcomes for term in ("optically pure", "optical purity", "e.e.", " ee", "enantiopur"))
-        and "high-purity" not in tradeoff
+        and not (purity_framed and isotope_framed)
     ):
         errors.append(
             "central_tradeoff must explicitly frame high-purity/isotopically enriched material."

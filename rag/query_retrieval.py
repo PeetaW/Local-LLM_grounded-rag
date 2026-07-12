@@ -136,7 +136,15 @@ def _clip_evidence_snippet(text: str, query_text: str, limit: int = 900) -> str:
         return text[:limit]
     pos = min(positions)
     start = max(0, pos - limit // 3)
-    return text[start:start + limit]
+    end = min(len(text), start + limit)
+    # ponytail: finish only a nearby sentence; raise the 200-char tail if eval still clips key terms.
+    anchor = max(position for position in positions if position < end)
+    sentence_end = text.rfind(". ", anchor, end)
+    if sentence_end < 0:
+        sentence_end = text.find(". ", end, min(len(text), end + 200))
+    if sentence_end >= 0:
+        end = sentence_end + 1
+    return text[start:end].rstrip()
 
 
 def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
@@ -208,12 +216,25 @@ def build_subquery_tasks(sub_questions: list, paper_engines_to_use: dict, paper_
     prefilled = {}
     idx = 0
 
+    specific_targets = set()
+    for sq in sub_questions:
+        paper = sq.get("paper", "ALL")
+        if paper == "ALL":
+            continue
+        matched = paper if paper in paper_engines_to_use else next(
+            (name for name in paper_engines_to_use if paper in name), None
+        )
+        if matched:
+            specific_targets.add(matched)
+
     for sq in sub_questions:
         paper = sq.get("paper", "ALL")
         sub_q = sq.get("sub_q", "")
 
         if paper == "ALL":
             for name, engine in paper_engines_to_use.items():
+                if name in specific_targets:
+                    continue
                 valid_tasks.append((idx, f"【{name}】", engine, sub_q))
                 idx += 1
         else:
