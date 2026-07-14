@@ -12,7 +12,10 @@ import time
 from llama_index.core import Settings
 
 import config as cfg
-from rag.knowledge_synthesizer import KnowledgeSynthesizer, _comparison_json_validation_errors
+from rag.knowledge_synthesizer import KnowledgeSynthesizer
+from rag.comparison_json_validator import (
+    comparison_json_validation_errors as _comparison_json_validation_errors,
+)
 from rag.answer_verifier import AnswerVerifier
 from rag.query_planning import detect_target_paper, _keyword_prefilter, select_relevant_papers, plan_sub_questions
 from rag.query_retrieval import build_subquery_tasks, run_subqueries_parallel, is_empty_result, extract_paper_name
@@ -127,16 +130,32 @@ def _stage4_answer_validation_issues(answer: str, knowledge_base: str, question:
     return "VERIFY_FAIL\n" + "\n".join(f"- {issue}" for issue in issues) if issues else ""
 
 
-def _stage4_empty_answer_fallback(knowledge_base: str, atomic_only: bool = False) -> str:
+def _stage4_empty_answer_fallback(
+    knowledge_base: str,
+    atomic_only: bool = False,
+    question: str = "",
+) -> str:
     comparison = _comparison_json_from_knowledge_base(knowledge_base)
     if not comparison:
         return "" if atomic_only else (knowledge_base or "").strip()
 
+    q_lower = (question or "").lower()
+    detail_requested = any(term in q_lower for term in (
+        "yield", "percentage", "percent", "e.e.", "optical purity", "ld50",
+        "toxicity", "dose", "temperature", "reaction condition", "reagent",
+        "step-by-step", "numerical",
+    ))
+    concise = bool(question) and not detail_requested
     source_roles = comparison.get("source_roles") if isinstance(comparison.get("source_roles"), list) else []
     background_sources = {
         str(item.get("source", "")).strip()
         for item in source_roles
         if isinstance(item, dict) and str(item.get("role", "")).lower() == "background"
+    }
+    route_sources = {
+        str(item.get("source", "")).strip()
+        for item in source_roles
+        if isinstance(item, dict) and str(item.get("role", "")).lower() == "route"
     }
     tradeoff_value = comparison.get("central_tradeoff", "")
     if isinstance(tradeoff_value, dict):
@@ -149,13 +168,20 @@ def _stage4_empty_answer_fallback(knowledge_base: str, atomic_only: bool = False
     if atomic_only and (not tradeoff or not tradeoff_sources):
         return ""
 
+    target_compound = str(comparison.get("target_compound", "") or "the target compound").strip().rstrip(".")
     lines = ["Comparison scaffold:"]
     for route in comparison.get("direct_routes", []):
         if not isinstance(route, dict):
             continue
         source = str(route.get("source", "")).strip()
         phrase = str(route.get("route_phrase", "")).strip().rstrip(".")
-        outcome = str(route.get("outcome", "")).strip()
+        outcome = str(route.get("outcome", "")).strip().rstrip(".")
+        outcome_lower = outcome.lower()
+        if concise and "optically pure" in outcome_lower:
+            product = "L-BPA" if "l-bpa" in outcome_lower else target_compound
+            outcome = f"optically pure {product}"
+            if "e.e." in outcome_lower or "enantiomeric excess" in outcome_lower:
+                outcome += " at high e.e."
         if atomic_only and (not source or not phrase or not outcome):
             return ""
         if source and phrase and source not in background_sources:
@@ -166,15 +192,36 @@ def _stage4_empty_answer_fallback(knowledge_base: str, atomic_only: bool = False
         if not isinstance(review, dict):
             continue
         source = str(review.get("source", "")).strip()
-        claim = str(review.get("claim", "")).strip().rstrip(".") or "reviews and compares synthetic routes"
         if source and source not in background_sources:
-            lines.append(f"- Review/comparison source: `{source}` {claim} [{source}].")
+            dimensions = [
+                str(value).strip().replace("_", "-")
+                for value in review.get("dimensions", [])
+                if str(value).strip()
+            ] if isinstance(review.get("dimensions"), list) else []
+            lines.append(
+                f"- Review/comparison source: `{source}` reports that the synthesis of "
+                f"{target_compound} has been approached through multiple routes"
+                f" [{source}]."
+            )
+            if concise and dimensions:
+                review_dimensions = [
+                    value for value in dimensions if "isotop" not in value.lower()
+                ] or dimensions
+                dimension_text = review_dimensions[0] if len(review_dimensions) == 1 else (
+                    ", ".join(review_dimensions[:-1]) + f", and {review_dimensions[-1]}"
+                )
+                lines.append(
+                    "- Review dimensions: The review highlights limitations of each method "
+                    f"regarding {dimension_text} [{source}]."
+                )
 
     dimensions = comparison.get("dimensions") if isinstance(comparison.get("dimensions"), dict) else {}
     labels = {
         "isotopic_enrichment": (
             "High-purity/isotopic enrichment"
-            if "high-purity" in tradeoff.lower()
+            if any(term in tradeoff.lower() for term in (
+                "high-purity", "high purity", "high optical purity", "optically pure", "enantiopur",
+            ))
             else "Isotopic enrichment"
         ),
         "scalability": "Scalability",
@@ -182,9 +229,12 @@ def _stage4_empty_answer_fallback(knowledge_base: str, atomic_only: bool = False
         "safety": "Safety",
     }
     dimension_lines = []
+    seen_claims = set()
     for key in ("isotopic_enrichment", "scalability", "cost_effectiveness", "safety"):
         item = dimensions.get(key)
         if not isinstance(item, dict) or not item.get("evidence_found"):
+            continue
+        if concise and not item.get("requested"):
             continue
         evidence = [
             entry for entry in item.get("evidence", [])
@@ -195,11 +245,29 @@ def _stage4_empty_answer_fallback(knowledge_base: str, atomic_only: bool = False
                 and str(entry.get("source")).strip() not in background_sources
             )
         ] if isinstance(item.get("evidence"), list) else []
+        if concise and key == "scalability" and len(evidence) > 1:
+            non_safety = [
+                entry for entry in evidence
+                if not any(term in str(entry["claim"]).lower() for term in (
+                    "safety", "toxicity", "contamination", "oxidant",
+                ))
+            ]
+            if non_safety:
+                evidence = non_safety
+            route_evidence = [entry for entry in evidence if str(entry["source"]).strip() in route_sources]
+            if route_evidence:
+                evidence = route_evidence
+        if concise:
+            evidence = evidence[:1]
         if atomic_only and not evidence:
             return ""
         for entry in evidence:
             source = str(entry["source"]).strip()
-            claim = str(entry["claim"]).strip()
+            claim = str(entry["claim"]).strip().rstrip(".")
+            claim_key = (source.lower(), claim.lower())
+            if claim_key in seen_claims:
+                continue
+            seen_claims.add(claim_key)
             dimension_lines.append(f"- {labels[key]}: {claim} [{source}].")
         if evidence:
             continue
@@ -212,7 +280,19 @@ def _stage4_empty_answer_fallback(knowledge_base: str, atomic_only: bool = False
             dimension_lines.append(f"- {labels[key]}: {text}" + (f" [{sources}]." if sources else "."))
 
     if dimension_lines:
-        lines.extend(("", "Central trade-off:", *dimension_lines))
+        tradeoff_heading = "Central trade-off:"
+        if concise:
+            requested_labels = [
+                labels[key].lower()
+                for key in ("isotopic_enrichment", "scalability", "cost_effectiveness", "safety")
+                if isinstance(dimensions.get(key), dict) and dimensions[key].get("requested")
+            ]
+            if len(requested_labels) >= 2:
+                right = requested_labels[1] if len(requested_labels) == 2 else (
+                    ", ".join(requested_labels[1:-1]) + f" and {requested_labels[-1]}"
+                )
+                tradeoff_heading = f"Central trade-off ({requested_labels[0]} versus {right}):"
+        lines.extend(("", tradeoff_heading, *dimension_lines))
     if atomic_only and len(lines) == 1:
         return ""
     return "\n".join(lines).strip()
@@ -376,7 +456,11 @@ def execute_structured_query(
             and getattr(cfg, "COMPARISON_JSON_DIRECT_RENDER_ENABLED", False)
             and not _comparison_json_validation_errors(knowledge_base, question)
         ):
-            direct_answer = _stage4_empty_answer_fallback(knowledge_base, atomic_only=True)
+            direct_answer = _stage4_empty_answer_fallback(
+                knowledge_base,
+                atomic_only=True,
+                question=question,
+            )
         if direct_answer:
             stage4_direct_rendered = True
             synthesis_prompt = "[deterministic comparison_json renderer]"
@@ -414,7 +498,7 @@ def execute_structured_query(
             print("\n")
             if rag_found_anything and not full_text.strip():
                 _status("  ⚠️  [synthesis-llm] empty answer; using Stage 3 facts fallback")
-                full_text = _stage4_empty_answer_fallback(knowledge_base)
+                full_text = _stage4_empty_answer_fallback(knowledge_base, question=question)
     if on_artifact:
         on_artifact("stage4_draft", full_text)
     _status(f"[synthesis-llm] 完成 elapsed_ms={int((time.perf_counter()-t3)*1000)}")

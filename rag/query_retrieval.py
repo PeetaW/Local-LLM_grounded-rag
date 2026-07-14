@@ -119,23 +119,37 @@ def _is_comparison_query(query_text: str) -> bool:
     ))
 
 
-def _clip_evidence_snippet(text: str, query_text: str, limit: int = 900) -> str:
+def _strip_context_summary(text: str) -> str:
     text = " ".join(text.split())
+    if text.startswith("[摘要："):
+        _, marker, text = text.partition("]")
+        if marker:
+            return text.lstrip()
+    return text
+
+
+def _clip_evidence_snippet(text: str, query_text: str, limit: int = 900) -> str:
+    is_comparison = _is_comparison_query(query_text)
+    text = _strip_context_summary(text) if is_comparison else " ".join(text.split())
     if len(text) <= limit:
         return text
-    if not _is_comparison_query(query_text):
+    if not is_comparison:
         return text[:limit]
 
     lower = text.lower()
     terms = (
         "high cost", "cost-effectiveness", "cost effectiveness", "isotopically enriched",
-        "10b", "scalability", "safety", "cost", "multiple routes",
+        "10b", "scalability", "safety", "toxicity", "contamination", "risk",
+        "cost", "multiple routes",
     )
     positions = [lower.find(term) for term in terms if lower.find(term) >= 0]
     if not positions:
         return text[:limit]
     pos = min(positions)
     start = max(0, pos - limit // 3)
+    sentence_start = text.rfind(". ", max(0, start - 200), start)
+    if sentence_start >= 0:
+        start = sentence_start + 2
     end = min(len(text), start + limit)
     # ponytail: finish only a nearby sentence; raise the 200-char tail if eval still clips key terms.
     anchor = max(position for position in positions if position < end)
@@ -190,7 +204,7 @@ def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
         def _coverage(nws):
             node = _node(nws)
             text = node.get_content() if hasattr(node, "get_content") else str(node)
-            lower = text.lower()
+            lower = _strip_context_summary(text).lower()
             return sum(any(term in lower for term in group) for group in dimension_terms)
 
         remaining = candidates[len(selected_nodes):]

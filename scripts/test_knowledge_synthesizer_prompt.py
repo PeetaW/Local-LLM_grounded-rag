@@ -14,6 +14,11 @@ if "requests" not in sys.modules:
     sys.modules["requests"] = requests_stub
 
 import config as cfg
+from rag.comparison_json_validator import (
+    attach_comparison_requirements,
+    build_comparison_requirements,
+    exact_isotope_terms,
+)
 from rag.knowledge_synthesizer import (
     _build_user_prompt,
     _append_isotope_cost_fact,
@@ -212,6 +217,118 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         errors = _comparison_json_validation_errors(raw, "Compare isotopic enrichment.")
         self.assertFalse(any("high-purity/isotopically enriched" in err for err in errors))
 
+    def test_requirement_audit_flags_missing_review_dimension_support(self):
+        query = "Compare routes focusing on isotopic enrichment, scalability, and cost-effectiveness."
+        requirements = build_comparison_requirements(query, [
+            {
+                "source": "ReviewA",
+                "text": (
+                    "Source metadata (not paper evidence): role_hint=review/comparison source\n"
+                    "Retrieved evidence snippets:\n"
+                    "Boron-10 isotopically enriched routes face scale-up limits and high cost."
+                ),
+            },
+            {
+                "source": "RouteA",
+                "text": "Retrieved evidence snippets:\nA hybrid route produces the target.",
+            },
+        ])
+        payload = {
+            "comparison_json": {
+                "source_roles": [{"source": "RouteA", "role": "route"}],
+                "direct_routes": [{
+                    "source": "RouteA",
+                    "route_phrase": "hybrid route",
+                    "outcome": "target product",
+                }],
+                "review_comparison_sources": [],
+                "dimensions": {
+                    "isotopic_enrichment": {
+                        "requested": True,
+                        "evidence_found": True,
+                        "evidence": [{"source": "RouteA", "claim": "10B-enriched target"}],
+                    },
+                    "scalability": {
+                        "requested": True,
+                        "evidence_found": True,
+                        "evidence": [{"source": "RouteA", "claim": "The route can be scaled."}],
+                    },
+                    "cost_effectiveness": {
+                        "requested": True,
+                        "evidence_found": False,
+                        "evidence": [],
+                    },
+                },
+                "central_tradeoff": {
+                    "claim": "10B enrichment must be balanced against scale and cost.",
+                    "sources": ["RouteA"],
+                },
+            }
+        }
+        attach_comparison_requirements(payload, requirements)
+
+        errors = _comparison_json_validation_errors(json.dumps(payload), query)
+
+        self.assertTrue(any("must retain role=review/comparison source" in error for error in errors))
+        self.assertTrue(any("Review/comparison source `ReviewA`" in error for error in errors))
+        self.assertTrue(any("dimensions.cost_effectiveness.evidence" in error for error in errors))
+
+    def test_exact_isotope_parser_ignores_figure_and_nmr_labels(self):
+        text = (
+            "BNCT results are shown in Fig. 5C. "
+            "The 13C-NMR spectrum was recorded. "
+            "Producing isotopically enriched 10B material remains difficult."
+        )
+        self.assertEqual(exact_isotope_terms(text), ["10B"])
+
+    def test_requirement_audit_keeps_isotope_and_cost_in_one_claim(self):
+        query = "Compare routes focusing on isotopic enrichment and cost-effectiveness."
+        requirements = build_comparison_requirements(query, [{
+            "source": "ReviewA",
+            "text": (
+                "Source metadata (not paper evidence): role_hint=review/comparison source\n"
+                "Retrieved evidence snippets:\n"
+                "Producing isotopically enriched 10B material is challenging. "
+                "The major cost comes from the isotope starting material."
+            ),
+        }])
+        payload = {
+            "comparison_json": {
+                "source_roles": [{"source": "ReviewA", "role": "review/comparison source"}],
+                "direct_routes": [],
+                "review_comparison_sources": [{"source": "ReviewA", "claim": "compares routes"}],
+                "dimensions": {
+                    "isotopic_enrichment": {
+                        "requested": True,
+                        "evidence_found": True,
+                        "evidence": [{"source": "ReviewA", "claim": "10B-enriched material is required."}],
+                    },
+                    "cost_effectiveness": {
+                        "requested": True,
+                        "evidence_found": True,
+                        "evidence": [{
+                            "source": "ReviewA",
+                            "claim": "The major cost comes from the isotope starting material.",
+                        }],
+                    },
+                },
+                "central_tradeoff": {
+                    "claim": "10B enrichment must be balanced against cost.",
+                    "sources": ["ReviewA"],
+                },
+            }
+        }
+        attach_comparison_requirements(payload, requirements)
+
+        errors = _comparison_json_validation_errors(json.dumps(payload), query)
+        self.assertTrue(any("related facts in separate dimensions" in error for error in errors))
+
+        payload["comparison_json"]["dimensions"]["cost_effectiveness"]["evidence"][0]["claim"] = (
+            "The major cost of 10B-enriched material comes from the isotope starting material."
+        )
+        errors = _comparison_json_validation_errors(json.dumps(payload), query)
+        self.assertFalse(any("related facts in separate dimensions" in error for error in errors))
+
     def test_validator_does_not_misread_chemical_derivative_as_background(self):
         raw = """
         {
@@ -361,6 +478,72 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             self.assertEqual(synth._generate.call_count, 2)
             self.assertIn('"evidence_found": true', result)
             self.assertTrue(any("validator failed" in status for status in statuses))
+            self.assertTrue(any("validation passed" in status for status in statuses))
+        finally:
+            cfg.COMPARISON_JSON_ENABLED = old_enabled
+            cfg.COMPARISON_JSON_VALIDATION_ENABLED = old_validation
+            cfg.COMPARISON_JSON_REPAIR_RETRIES = old_retries
+
+    def test_synthesizer_repairs_lost_exact_isotope_once(self):
+        old_enabled = cfg.COMPARISON_JSON_ENABLED
+        old_validation = cfg.COMPARISON_JSON_VALIDATION_ENABLED
+        old_retries = cfg.COMPARISON_JSON_REPAIR_RETRIES
+        try:
+            cfg.COMPARISON_JSON_ENABLED = True
+            cfg.COMPARISON_JSON_VALIDATION_ENABLED = True
+            cfg.COMPARISON_JSON_REPAIR_RETRIES = 1
+            generic = {
+                "comparison_json": {
+                    "source_roles": [{"source": "ReviewA", "role": "review/comparison source"}],
+                    "direct_routes": [],
+                    "review_comparison_sources": [{"source": "ReviewA", "claim": "compares routes"}],
+                    "dimensions": {
+                        "isotopic_enrichment": {
+                            "requested": True,
+                            "evidence_found": True,
+                            "evidence": [{
+                                "source": "ReviewA",
+                                "claim": "Producing isotopically enriched material is challenging.",
+                            }],
+                        }
+                    },
+                    "central_tradeoff": {
+                        "claim": "Isotopic enrichment raises synthesis difficulty.",
+                        "sources": ["ReviewA"],
+                    },
+                }
+            }
+            repaired = json.loads(json.dumps(generic))
+            repaired["comparison_json"]["dimensions"]["isotopic_enrichment"]["evidence"][0]["claim"] = (
+                "Producing high-purity, 10B-enriched material is challenging."
+            )
+            synth = KnowledgeSynthesizer()
+            synth._generate = MagicMock(side_effect=[json.dumps(generic), json.dumps(repaired)])
+            statuses = []
+
+            result = synth.synthesize(
+                [{
+                    "text": (
+                        "Source metadata (not paper evidence): role_hint=review/comparison source\n"
+                        "Retrieved evidence snippets:\n"
+                        "Boron-10 is required; producing high-purity, isotopically enriched material is challenging."
+                    ),
+                    "source": "ReviewA",
+                }],
+                query="Compare routes focusing on isotopic enrichment.",
+                on_status=statuses.append,
+            )
+            payload = json.loads(result)
+            comparison = payload["comparison_json"]
+
+            self.assertEqual(synth._generate.call_count, 2)
+            self.assertEqual(payload["comparison_requirements"]["exact_isotopes"], ["10B"])
+            self.assertEqual(
+                payload["comparison_requirements"]["dimension_sources"],
+                {"isotopic_enrichment": ["ReviewA"]},
+            )
+            self.assertIn("10B-enriched", comparison["dimensions"]["isotopic_enrichment"]["text"])
+            self.assertTrue(any("exact isotope" in status for status in statuses))
             self.assertTrue(any("validation passed" in status for status in statuses))
         finally:
             cfg.COMPARISON_JSON_ENABLED = old_enabled

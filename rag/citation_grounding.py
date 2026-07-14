@@ -12,7 +12,7 @@ import re
 import time
 import torch
 import config as cfg
-from rag.query_grounding_flow import split_into_sentences
+from rag.query_grounding_flow import split_into_sentences, _cited_sources_in_sentence
 
 # ── grounding 階段計時拆解（NLI vs LLM）──────────────────
 # 讓 NLI device A/B 能區分「CPU NLI 變慢」與「gemma4 因 VRAM 紓解變快」。
@@ -303,10 +303,60 @@ def _preprocess_for_nli(text: str, citation_sources=()) -> str:
     text = re.sub(r'[：:]\s*$', '', text)
     # 整理空白
     text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r'([.!?])\1+$', r'\1', text)
     # 清洗後太短（< 15 字元）→ 跳過，避免孤立數值/標籤送進 NLI 產生誤判
     if len(text) < 15:
         return ""
     return text
+
+
+_LEXICAL_STOPWORDS = {
+    "a", "an", "and", "any", "are", "as", "at", "be", "been", "being", "by",
+    "for", "from", "in", "is", "it", "its", "of", "on", "or", "that", "the",
+    "these", "this", "those", "to", "was", "were", "when", "where", "which", "while",
+    "with",
+}
+_LEXICAL_NEGATIONS = {"no", "not", "never", "without"}
+
+
+def _lexical_tokens(text: str) -> set[str]:
+    tokens = set()
+    for token in re.findall(r"[a-z0-9]+", (text or "").lower()):
+        if token in _LEXICAL_STOPWORDS:
+            continue
+        if len(token) > 4 and token.endswith("s") and not token.endswith(("ss", "is")):
+            token = token[:-1]
+        tokens.add(token)
+    return tokens
+
+
+def _find_lexical_support(
+    hypothesis: str,
+    chunks: list[dict],
+    cited_sources: tuple[str, ...],
+) -> tuple[str, float] | None:
+    claim = hypothesis
+    for source in cited_sources:
+        claim = re.sub(re.escape(source), " ", claim, flags=re.IGNORECASE)
+    claim_tokens = _lexical_tokens(claim)
+    if len(claim_tokens) < 6:
+        return None
+
+    claim_numbers = {token for token in claim_tokens if any(char.isdigit() for char in token)}
+    claim_negated = bool(claim_tokens & _LEXICAL_NEGATIONS)
+    best = None
+    for chunk in chunks:
+        text = re.sub(r"\s+", " ", str(chunk.get("text", ""))).strip()
+        for source_sentence in re.split(r"(?<=[.!?])\s+", text):
+            source_tokens = _lexical_tokens(source_sentence)
+            if bool(source_tokens & _LEXICAL_NEGATIONS) != claim_negated:
+                continue
+            if not claim_numbers.issubset(source_tokens):
+                continue
+            coverage = len(claim_tokens & source_tokens) / len(claim_tokens)
+            if coverage >= 0.8 and (best is None or coverage > best[1]):
+                best = (str(chunk.get("id", chunk.get("source", ""))), coverage)
+    return best
 
 
 def _batch_translate_to_en(hypotheses: list[str]) -> list[str]:
@@ -397,20 +447,21 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
         return []
 
     # ── 第一步：預處理所有句子，收集有效的 (sentence, hypothesis) 對 ──────
-    valid_pairs: list[tuple[str, str]] = []   # (原始句子, 預處理後 hypothesis)
+    valid_pairs: list[tuple[str, str, tuple[str, ...]]] = []
     skipped_sentences: set[int] = set()       # 原始 sentences 中被跳過的 index
 
-    citation_sources = {
+    citation_sources = sorted({
         str(chunk.get("source", "")).strip()
         for chunk in chunks
         if chunk.get("source")
-    }
+    })
     for idx, sentence in enumerate(sentences):
         hypothesis = _preprocess_for_nli(sentence, citation_sources)
         if not hypothesis:
             skipped_sentences.add(idx)
             continue
-        valid_pairs.append((sentence, hypothesis))
+        cited_sources = _cited_sources_in_sentence(sentence, citation_sources)
+        valid_pairs.append((sentence, hypothesis, cited_sources))
 
     if not valid_pairs:
         return []
@@ -418,44 +469,58 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
     # ── 第二步：若啟用翻譯，批次將 hypothesis 翻譯為英文 ───────────────────
     # EN_DRAFT_PIPELINE=True 時 hypothesis 本身已是英文，跳過翻譯步驟
     if cfg.NLI_TRANSLATE_TO_EN and not cfg.EN_DRAFT_PIPELINE:
-        raw_hypotheses = [h for _, h in valid_pairs]
+        raw_hypotheses = [h for _, h, _ in valid_pairs]
         translated     = _batch_translate_to_en(raw_hypotheses)
-        valid_pairs    = [(s, t) for (s, _), t in zip(valid_pairs, translated)]
+        valid_pairs    = [(s, t, sources) for (s, _, sources), t in zip(valid_pairs, translated)]
 
     # ── 第三步：逐句跑 NLI ────────────────────────────────────────────────
     results = []
 
-    for sentence, hypothesis in valid_pairs:
+    for sentence, hypothesis, cited_sources in valid_pairs:
         best_entail  = 0.0
         best_chunk_id = None
         best_entail_c = 0.0   # contradiction score of the best-entailment chunk
+        support_method = "nli"
+        scoped_chunks = chunks
+        if getattr(cfg, "GROUNDING_CITATION_AWARE_ENABLED", False) and cited_sources:
+            scoped_chunks = [c for c in chunks if str(c.get("source", "")) in cited_sources] or chunks
 
-        # 滑動窗：chunk 常比 mDeBERTa 的 512-token 窗大，直接截斷會漏掉落在後段的事實
-        # （實測事實常在第 1000~3400 字元，被舊的 [:512] 砍掉 → 誤判 unsupported）。
-        # 把每個 chunk 切成重疊窗，全部一次批次 NLI，取最高 entailment。
-        win_texts, win_chunk_ids = [], []
-        for c in chunks:
-            cid = c.get("id", c.get("source", ""))
-            for w in _window_text(c["text"]):
-                win_texts.append(w)
-                win_chunk_ids.append(cid)
-        try:
-            scores_list = _run_nli_batch(win_texts, [hypothesis] * len(win_texts))
-        except Exception as e:
-            _report_nli_error(e)
-            scores_list = []
-        for cid, scores in zip(win_chunk_ids, scores_list):
-            e_score = scores["entailment"]
-            if e_score > best_entail:
-                best_entail   = e_score
-                best_entail_c = scores["contradiction"]
-                best_chunk_id = cid
+        lexical = None
+        if (
+            getattr(cfg, "GROUNDING_LEXICAL_SUPPORT_ENABLED", False)
+            and cited_sources
+        ):
+            lexical = _find_lexical_support(hypothesis, scoped_chunks, cited_sources)
+        if lexical:
+            best_chunk_id, best_entail = lexical
+            support_method = "lexical"
+        else:
+            # 滑動窗：chunk 常比 mDeBERTa 的 512-token 窗大，直接截斷會漏掉落在後段的事實
+            # （實測事實常在第 1000~3400 字元，被舊的 [:512] 砍掉 → 誤判 unsupported）。
+            # 把每個 chunk 切成重疊窗，全部一次批次 NLI，取最高 entailment。
+            win_texts, win_chunk_ids = [], []
+            for c in scoped_chunks:
+                cid = c.get("id", c.get("source", ""))
+                for w in _window_text(c["text"]):
+                    win_texts.append(w)
+                    win_chunk_ids.append(cid)
+            try:
+                scores_list = _run_nli_batch(win_texts, [hypothesis] * len(win_texts))
+            except Exception as e:
+                _report_nli_error(e)
+                scores_list = []
+            for cid, scores in zip(win_chunk_ids, scores_list):
+                e_score = scores["entailment"]
+                if e_score > best_entail:
+                    best_entail   = e_score
+                    best_entail_c = scores["contradiction"]
+                    best_chunk_id = cid
 
         # ── 升級一：多來源聯合驗證（NLI_JOINT_VERIFY_ENABLED）────────────
         # 個別 chunk 都不夠支撐，但 top-3 合併後可以 → INFERENCE_BRIDGE
         is_bridge = False
         if best_entail < 0.5 and cfg.NLI_JOINT_VERIFY_ENABLED:
-            joint = joint_verify(hypothesis, chunks)
+            joint = joint_verify(hypothesis, scoped_chunks)
             if joint["is_inference_bridge"]:
                 is_bridge = True
                 print(f"  [NLI-bridge] joint_score={joint['joint_score']:.3f} → INFERENCE_BRIDGE")
@@ -463,7 +528,7 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
         # ── 升級二：子命題拆解驗證（NLI_DECOMPOSE_ENABLED）──────────────
         # 長句整句 NLI 不過，拆成子命題分別驗後全通過 → 視為 SUPPORTED
         if best_entail < 0.5 and not is_bridge and cfg.NLI_DECOMPOSE_ENABLED:
-            decomp = decompose_and_verify(hypothesis, chunks)
+            decomp = decompose_and_verify(hypothesis, scoped_chunks)
             if decomp["chain_complete"] and decomp["sub_claims"]:
                 best_entail = 0.7  # 合成分數，標記為有效支撐
                 print(f"  [NLI-decomp] chain_complete → upgrade to SUPPORTED")
@@ -484,8 +549,9 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
         else:
             status = "CONFLICT" if contradiction_detected else "UNSUPPORTED"
 
+        scope = ",".join(cited_sources) if cited_sources else "all"
         print(f"  [NLI-debug] e={best_entail:.3f} c={best_entail_c:.3f} "
-              f"status={status} | {sentence[:60]}")
+              f"status={status} method={support_method} scope={scope} | {sentence[:60]}")
         # 顯示預處理後實際送進 NLI 的 hypothesis，方便對照確認前處理效果
         if hypothesis != sentence[:len(hypothesis)]:
             print(f"  [NLI-hypo]  → {hypothesis[:80]}")
@@ -498,6 +564,8 @@ def check_citation_grounding(sentences: list, chunks: list) -> list:
             "contradiction_detected": contradiction_detected,
             "contradiction_source": best_chunk_id if contradiction_detected else None,
             "status": status,
+            "citation_sources": list(cited_sources),
+            "support_method": support_method,
         })
 
     return results

@@ -51,6 +51,7 @@ _STUBS = [
     "rag.llm_client",
     "rag.metadata_manager",
     "rag.citation_grounding",
+    "rag.comparison_json_validator",
     "rag.knowledge_synthesizer",
     "rag.answer_verifier",
     "llama_index.core",
@@ -65,6 +66,9 @@ sys.modules["rag.knowledge_synthesizer"].KnowledgeSynthesizer = MagicMock(
     return_value=MagicMock()
 )
 sys.modules["rag.knowledge_synthesizer"]._comparison_json_validation_errors = MagicMock(
+    return_value=[]
+)
+sys.modules["rag.comparison_json_validator"].comparison_json_validation_errors = MagicMock(
     return_value=[]
 )
 sys.modules["rag.answer_verifier"].AnswerVerifier = MagicMock(
@@ -88,6 +92,8 @@ from rag.query_retrieval import (
 from rag.query_grounding_flow import (
     _extract_direct_citation_section,
     _partition_results_by_section,
+    _cited_sources_in_sentence,
+    _fetch_grounding_chunks,
     run_grounding_check,
 )
 from rag.query_prompts import build_synthesis_prompt, build_fallback_prompt
@@ -620,6 +626,26 @@ class TestRunSubqueriesParallel(unittest.TestCase):
         clipped = _clip_evidence_snippet(text, "Compare route cost-effectiveness.", limit=90)
         self.assertTrue(clipped.endswith("normal boric acid."))
 
+    def test_comparison_snippet_uses_raw_safety_evidence_not_summary(self):
+        text = (
+            "[摘要：NaIO4-based synthesis poses contamination and safety risks.]\n\n"
+            + "opening material " * 35
+            + "The oral LD50 values for NaIO4 are reported in rats. "
+            + "Considering this toxicity potential, late-stage deprotection raises concerns. "
+            + "There is a substantial risk of contamination of the final L-BPA with NaIO4. "
+            + "The use of any oxidant on scale is also inherently a process safety risk. "
+            + "trailing material " * 35
+        )
+        clipped = _clip_evidence_snippet(
+            text,
+            "Compare routes for isotopic enrichment, scalability, cost-effectiveness, and safety.",
+            limit=420,
+        )
+        self.assertNotIn("[摘要：", clipped)
+        self.assertIn("toxicity potential", clipped)
+        self.assertIn("risk of contamination", clipped)
+        self.assertIn("process safety risk", clipped)
+
     def test_atomic_comparison_snippets_keep_top_two_and_dimension_overview(self):
         old = cfg.COMPARISON_JSON_DIRECT_RENDER_ENABLED
         try:
@@ -709,6 +735,42 @@ class TestExtractDirectCitationSection(unittest.TestCase):
         text = "## Some Random Section\nContent without a direct-citation header."
         result = _extract_direct_citation_section(text)
         self.assertEqual(result, "")
+
+
+class TestCitationAwareGroundingRetrieval(unittest.TestCase):
+    def test_extracts_only_known_citation_sources(self):
+        sentence = "Claim [PaperA, PaperB]. [Fact 1]"
+        self.assertEqual(
+            _cited_sources_in_sentence(sentence, ("PaperA", "PaperB", "PaperC")),
+            ("PaperA", "PaperB"),
+        )
+
+    @patch("rag.query_embedding_guard.prepare_query_text", side_effect=lambda text: text)
+    def test_retrieves_with_claims_citing_each_paper(self, _):
+        old = cfg.GROUNDING_CITATION_AWARE_ENABLED
+        try:
+            cfg.GROUNDING_CITATION_AWARE_ENABLED = True
+            nws = MagicMock()
+            nws.node.node_id = "node-12345678"
+            nws.node.get_content.return_value = "[摘要：Generated summary.]\n\nRaw supporting evidence."
+            nws.score = 0.9
+            engine = MagicMock()
+            engine.retriever.retrieve.return_value = [nws]
+
+            chunks = _fetch_grounding_chunks(
+                "Original question",
+                {"PaperA": engine},
+                ["Specific safety claim [PaperA]."],
+            )
+
+            query = engine.retriever.retrieve.call_args.args[0]
+            self.assertIn("Original question", query)
+            self.assertIn("Specific safety claim", query)
+            self.assertNotIn("[PaperA]", query)
+            self.assertEqual(chunks[0]["source"], "PaperA")
+            self.assertEqual(chunks[0]["text"], "Raw supporting evidence.")
+        finally:
+            cfg.GROUNDING_CITATION_AWARE_ENABLED = old
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1073,6 +1135,7 @@ class TestExecuteStructuredQuery(unittest.TestCase):
           "dimensions":{
             "isotopic_enrichment":{"requested":true,"evidence_found":true,"evidence":[{"source":"CMDC-20-e202500059","claim":"10B-enriched material is required."}]},
             "scalability":{"requested":true,"evidence_found":true,"evidence":[
+              {"source":"CMDC-20-e202500059","claim":"The use of any oxidant on scale is inherently a process safety risk."},
               {"source":"CMDC-20-e202500059","claim":"Gram-scale deprotection can leave ester residue."},
               {"source":"bbb0683","claim":"The hybrid route uses few reaction steps."}
             ]},
@@ -1081,15 +1144,21 @@ class TestExecuteStructuredQuery(unittest.TestCase):
               {"source":"FormulationA","claim":"The formulation is safe."}
             ]}
           },
-          "central_tradeoff":{"claim":"High-purity 10B material must be balanced against scalability and cost-effectiveness.","sources":["CMDC-20-e202500059"]}
+          "central_tradeoff":{"claim":"Optically pure, 10B-enriched material must be balanced against scalability and cost-effectiveness.","sources":["CMDC-20-e202500059"]}
         }}
         """
         answer = pipeline_module._stage4_empty_answer_fallback(kb, atomic_only=True)
         self.assertIn("Comparison scaffold", answer)
         self.assertIn("bbb0683", answer)
         self.assertIn("chymotrypsin-catalysed enzymatic hydrolysis", answer)
-        self.assertIn("optically pure L-BPA at high e.e.", answer)
+        self.assertIn("optically pure L-BPA at high e.e", answer)
         self.assertIn("CMDC-20-e202500059", answer)
+        self.assertIn(
+            "reports that the synthesis of the target compound has been approached through multiple routes",
+            answer,
+        )
+        self.assertNotIn("reviews scalability, cost-effectiveness, and safety", answer)
+        self.assertIn("oxidant on scale", answer)
         self.assertIn("Gram-scale deprotection", answer)
         self.assertIn("The hybrid route uses few reaction steps", answer)
         self.assertIn("The review compares route safety", answer)
@@ -1113,6 +1182,69 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             )
         finally:
             cfg.STAGE4_ANSWER_VALIDATION_ENABLED = old
+
+    def test_stage4_direct_render_is_concise_for_high_level_question(self):
+        kb = """
+        {"comparison_json":{
+          "target_compound":"4-borono-L-phenylalanine (L-BPA)",
+          "source_roles":[
+            {"source":"bbb0683","role":"route"},
+            {"source":"CMDC-20-e202500059","role":"review/comparison source"}
+          ],
+          "direct_routes":[{
+            "source":"bbb0683",
+            "route_phrase":"enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis",
+            "outcome":"74% e.e. for adduct 4; optically pure L-BPA (100% optical purity) with 79% yield"
+          }],
+          "review_comparison_sources":[{
+            "source":"CMDC-20-e202500059",
+            "dimensions":["isotopic enrichment","scalability","cost-effectiveness","safety"]
+          }],
+          "dimensions":{
+            "isotopic_enrichment":{"requested":true,"evidence_found":true,"evidence":[
+              {"source":"CMDC-20-e202500059","claim":"Producing high-purity, isotopically enriched material is a primary challenge."}
+            ]},
+            "scalability":{"requested":true,"evidence_found":true,"evidence":[
+              {"source":"CMDC-20-e202500059","claim":"The use of any oxidant on scale is inherently a process safety risk."},
+              {"source":"bbb0683","claim":"The hybrid method has an advantage in ease of workup and few reaction steps."}
+            ]},
+            "cost_effectiveness":{"requested":true,"evidence_found":true,"evidence":[
+              {"source":"CMDC-20-e202500059","claim":"The major cost comes from the isotope starting material."}
+            ]},
+            "safety":{"requested":false,"evidence_found":true,"evidence":[
+              {"source":"CMDC-20-e202500059","claim":"NaIO4 toxicity includes specific LD50 values."}
+            ]}
+          },
+          "central_tradeoff":{"claim":"High purity must be balanced with scale and cost.","sources":["CMDC-20-e202500059"]}
+        }}
+        """
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question="Compare routes focusing on isotopic enrichment, scalability, and cost-effectiveness.",
+        )
+        self.assertIn("yielding optically pure L-BPA at high e.e.", answer)
+        self.assertIn(
+            "has been approached through multiple routes [CMDC-20-e202500059].",
+            answer,
+        )
+        self.assertIn(
+            "Review dimensions: The review highlights limitations of each method regarding "
+            "scalability, cost-effectiveness, and safety [CMDC-20-e202500059].",
+            answer,
+        )
+        self.assertIn(
+            "Central trade-off (high-purity/isotopic enrichment versus scalability and "
+            "cost-effectiveness):",
+            answer,
+        )
+        self.assertNotIn("multiple routes and compares", answer)
+        self.assertIn("ease of workup and few reaction steps", answer)
+        self.assertIn("The major cost comes from the isotope starting material", answer)
+        self.assertNotIn("74%", answer)
+        self.assertNotIn("79%", answer)
+        self.assertNotIn("oxidant on scale", answer)
+        self.assertNotIn("LD50", answer)
 
     @patch("rag.query_pipeline.translate_to_traditional_chinese")
     @patch("rag.query_pipeline.run_grounding_check")
@@ -1149,7 +1281,7 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             "Compare routes for scalability.", {"paper_a": MagicMock()}
         )
 
-        self.assertIn("high-purity product at high e.e.", result)
+        self.assertIn("high-purity product at high e.e", result)
         self.assertIn("Route A is practical at scale", result)
         pipeline_module._comparison_json_validation_errors.assert_called()
         mock_settings.llm.stream_complete.assert_not_called()

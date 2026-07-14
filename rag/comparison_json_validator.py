@@ -1,0 +1,386 @@
+import json
+import re
+
+import config as cfg
+
+
+_ABSENCE_MARKERS = (
+    "does not explicitly", "not explicitly", "does not contain", "not contain",
+    "did not provide", "does not provide", "not provide", "not reported",
+    "unaddressed", "lacks", "missing",
+)
+_EVIDENCE_DIMENSION_MARKERS = {
+    "isotopic_enrichment": ("isotop", "enrich"),
+    "scalability": ("scalab", " scale", "scale-", "workup", "few reaction steps"),
+    "cost_effectiveness": ("cost", "expens", "economic"),
+    "safety": ("safety", "safe", "risk", "toxic", "contamination"),
+}
+_ISOTOPE_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:"
+    r"(?P<mass>\d{1,3})-?(?P<symbol>Cl|Br|H|B|C|N|O|F|P|S|I)"
+    r"|(?P<name>hydrogen|boron|carbon|nitrogen|oxygen|fluorine|phosphorus|sulfur|chlorine|bromine|iodine)"
+    r"\s*-?\s*(?P<name_mass>\d{1,3})"
+    r")(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+_ISOTOPE_CONTEXT_MARKERS = (
+    "isotop", "enrich", "label", "radio", "neutron", "bnct",
+)
+_ISOTOPE_SYMBOLS = {
+    "h": "H", "b": "B", "c": "C", "n": "N", "o": "O", "f": "F",
+    "p": "P", "s": "S", "cl": "Cl", "br": "Br", "i": "I",
+    "hydrogen": "H", "boron": "B", "carbon": "C", "nitrogen": "N",
+    "oxygen": "O", "fluorine": "F", "phosphorus": "P", "sulfur": "S",
+    "chlorine": "Cl", "bromine": "Br", "iodine": "I",
+}
+_SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
+
+
+def query_dimension_keys(query: str) -> set[str]:
+    text = (query or "").lower()
+    keys = set()
+    if "isotopic" in text or "10b" in text or "同位素" in text:
+        keys.add("isotopic_enrichment")
+    if "scalability" in text or "可擴展" in text or "放大" in text:
+        keys.add("scalability")
+    if "cost" in text or "成本" in text:
+        keys.add("cost_effectiveness")
+    if "safety" in text or "安全" in text:
+        keys.add("safety")
+    return keys
+
+
+def comparison_json_payload(text: str):
+    stripped = (text or "").strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    start, end = stripped.find("{"), stripped.rfind("}")
+    if start > 0 and end > start:
+        stripped = stripped[start:end + 1]
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+
+
+def exact_isotope_terms(text: str, require_context: bool = True) -> list[str]:
+    normalized = str(text or "").translate(_SUPERSCRIPT_DIGITS)
+    terms = []
+    for match in _ISOTOPE_RE.finditer(normalized):
+        prefix = normalized[max(0, match.start() - 16):match.start()]
+        suffix = normalized[match.end():match.end() + 12]
+        if re.search(r"(?:fig(?:ure)?|scheme|table)\.?\s*$", prefix, re.IGNORECASE):
+            continue
+        if re.match(r"\s*-?\s*NMR\b", suffix, re.IGNORECASE):
+            continue
+        context = normalized[max(0, match.start() - 120):match.end() + 120].lower()
+        if require_context and not any(marker in context for marker in _ISOTOPE_CONTEXT_MARKERS):
+            continue
+        mass = match.group("mass") or match.group("name_mass")
+        element = match.group("symbol") or match.group("name")
+        term = f"{int(mass)}{_ISOTOPE_SYMBOLS[element.lower()]}"
+        if term not in terms:
+            terms.append(term)
+    return terms
+
+
+def _citable_evidence(text: str) -> str:
+    marker = "Retrieved evidence snippets:"
+    value = str(text or "")
+    return value.split(marker, 1)[1] if marker in value else value
+
+
+def build_comparison_requirements(query: str, chunks: list[dict]) -> dict:
+    rows = []
+    for index, chunk in enumerate(chunks or []):
+        source = str(chunk.get("source") or f"chunk_{index}").strip()
+        text = str(chunk.get("text") or chunk.get("content") or "")
+        rows.append({
+            "source": source,
+            "review": "role_hint=review/comparison source" in text.lower(),
+            "evidence": _citable_evidence(text),
+        })
+
+    requested = sorted(query_dimension_keys(query))
+    review_rows = [row for row in rows if row["review"]]
+    review_sources = list(dict.fromkeys(row["source"] for row in review_rows))
+    dimension_sources = {}
+    for key in requested:
+        markers = _EVIDENCE_DIMENSION_MARKERS[key]
+        sources = [
+            row["source"] for row in review_rows
+            if any(marker in row["evidence"].lower() for marker in markers)
+        ]
+        if sources:
+            dimension_sources[key] = list(dict.fromkeys(sources))
+
+    isotope_scope = review_rows or rows
+    isotopes = []
+    isotopes_by_source = {}
+    if "isotopic_enrichment" in requested:
+        for row in isotope_scope:
+            for term in exact_isotope_terms(row["evidence"]):
+                if term not in isotopes:
+                    isotopes.append(term)
+                source_terms = isotopes_by_source.setdefault(row["source"], [])
+                if term not in source_terms:
+                    source_terms.append(term)
+
+    relation_requirements = []
+    if {"isotopic_enrichment", "cost_effectiveness"}.issubset(requested):
+        shared_sources = (
+            set(dimension_sources.get("isotopic_enrichment", []))
+            & set(dimension_sources.get("cost_effectiveness", []))
+        )
+        for source in review_sources:
+            anchors = isotopes_by_source.get(source, [])
+            if source in shared_sources and anchors:
+                relation_requirements.append({
+                    "dimension": "cost_effectiveness",
+                    "source": source,
+                    "anchors": anchors,
+                })
+
+    return {
+        "version": 2,
+        "requested_dimensions": requested,
+        "review_sources": review_sources,
+        "dimension_sources": dimension_sources,
+        "exact_isotopes": isotopes,
+        "relation_requirements": relation_requirements,
+    }
+
+
+def attach_comparison_requirements(data: dict, requirements: dict) -> None:
+    data["comparison_requirements"] = requirements
+
+
+def _has_absence_claim(text: str) -> bool:
+    lower = str(text or "").lower()
+    return any(marker in lower for marker in _ABSENCE_MARKERS)
+
+
+def _has_review_comparison_source(comparison: dict) -> bool:
+    source_roles = comparison.get("source_roles") if isinstance(comparison.get("source_roles"), list) else []
+    return (
+        any(
+            isinstance(item, dict) and "review/comparison" in str(item.get("role", "")).lower()
+            for item in source_roles
+        )
+        or bool(comparison.get("review_comparison_sources"))
+    )
+
+
+def comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
+    data = comparison_json_payload(text)
+    if not isinstance(data, dict):
+        return ["Output is not valid JSON."]
+    comparison = data.get("comparison_json")
+    if not isinstance(comparison, dict):
+        return ["Missing root object: comparison_json."]
+
+    errors = []
+    for field in ("source_roles", "direct_routes", "review_comparison_sources"):
+        if not isinstance(comparison.get(field), list):
+            errors.append(f"`{field}` must be a list.")
+
+    dimensions = comparison.get("dimensions")
+    if not isinstance(dimensions, dict):
+        errors.append("`dimensions` must be an object.")
+        dimensions = {}
+
+    requirements = data.get("comparison_requirements")
+    requirements = requirements if isinstance(requirements, dict) else {}
+    query_dims = set(requirements.get("requested_dimensions", [])) or query_dimension_keys(query)
+    has_review_source = _has_review_comparison_source(comparison)
+    atomic_required = getattr(cfg, "COMPARISON_JSON_DIRECT_RENDER_ENABLED", False)
+    source_roles = comparison.get("source_roles") if isinstance(comparison.get("source_roles"), list) else []
+    roles_by_source = {
+        str(item.get("source", "")).strip(): str(item.get("role", "")).lower()
+        for item in source_roles
+        if isinstance(item, dict) and item.get("source")
+    }
+    review_sources = {
+        source for source, role in roles_by_source.items() if "review/comparison" in role
+    }
+    route_sources = {
+        source for source, role in roles_by_source.items() if role == "route"
+    }
+    background_sources = {
+        source for source, role in roles_by_source.items() if "background" in role
+    }
+    direct_route_sources = {
+        str(item.get("source", "")).strip()
+        for item in comparison.get("direct_routes", [])
+        if isinstance(item, dict) and item.get("source")
+    }
+    review_entry_sources = {
+        str(item.get("source", "")).strip()
+        for item in comparison.get("review_comparison_sources", [])
+        if isinstance(item, dict) and item.get("source")
+    }
+
+    for source in requirements.get("review_sources", []):
+        if "review/comparison" not in roles_by_source.get(source, ""):
+            errors.append(f"Source `{source}` must retain role=review/comparison source.")
+        if source not in review_entry_sources:
+            errors.append(f"Review/comparison source `{source}` is missing from review_comparison_sources.")
+    for source in route_sources - direct_route_sources:
+        errors.append(f"Route source `{source}` is missing from direct_routes.")
+    for source in review_sources - review_entry_sources:
+        errors.append(f"Review/comparison source `{source}` is missing from review_comparison_sources.")
+
+    required_isotopes = {
+        str(term) for term in requirements.get("exact_isotopes", [])
+        if isinstance(term, str) and term
+    }
+    if "isotopic_enrichment" in query_dims and required_isotopes:
+        isotope_item = dimensions.get("isotopic_enrichment")
+        isotope_evidence = isotope_item.get("evidence", []) if isinstance(isotope_item, dict) else []
+        isotope_claims = " ".join(
+            str(entry.get("claim", ""))
+            for entry in isotope_evidence
+            if isinstance(entry, dict)
+        )
+        if not required_isotopes.intersection(
+            exact_isotope_terms(isotope_claims, require_context=False)
+        ):
+            errors.append(
+                "`dimensions.isotopic_enrichment.evidence` must preserve an exact isotope "
+                f"identifier from the retrieved evidence ({', '.join(sorted(required_isotopes))}); "
+                "do not replace it with only generic isotopic-enrichment wording."
+            )
+
+    for key, item in dimensions.items():
+        if not isinstance(item, dict) or not isinstance(item.get("evidence"), list):
+            continue
+        invalid_sources = {
+            entry.get("source") for entry in item["evidence"]
+            if isinstance(entry, dict) and entry.get("source") in background_sources
+        }
+        if invalid_sources:
+            errors.append(
+                f"`dimensions.{key}.evidence` must not use background source(s): "
+                f"{', '.join(sorted(invalid_sources))}."
+            )
+
+    dimension_sources = requirements.get("dimension_sources", {})
+    dimension_sources = dimension_sources if isinstance(dimension_sources, dict) else {}
+    for key in query_dims:
+        item = dimensions.get(key)
+        if not isinstance(item, dict):
+            errors.append(f"`dimensions.{key}` is missing.")
+            continue
+        if not item.get("requested"):
+            errors.append(f"`dimensions.{key}.requested` must be true because the question asks for it.")
+        atomic = item.get("evidence") if isinstance(item.get("evidence"), list) else []
+        valid_atomic = [
+            entry for entry in atomic
+            if isinstance(entry, dict) and entry.get("source") and entry.get("claim")
+        ]
+        if item.get("evidence_found") and atomic_required and not valid_atomic:
+            errors.append(f"`dimensions.{key}` must contain source-bound atomic evidence entries.")
+        elif item.get("evidence_found") and not valid_atomic and (not item.get("text") or not item.get("sources")):
+            errors.append(f"`dimensions.{key}` says evidence_found=true but lacks evidence.")
+        expected_sources = set(dimension_sources.get(key, []))
+        actual_sources = {str(entry.get("source", "")).strip() for entry in valid_atomic}
+        missing_sources = sorted(expected_sources - actual_sources)
+        if missing_sources:
+            errors.append(
+                f"`dimensions.{key}.evidence` omitted retrieved support from: "
+                f"{', '.join(missing_sources)}."
+            )
+        if (
+            key in ("scalability", "cost_effectiveness")
+            and has_review_source
+            and not item.get("evidence_found")
+            and _has_absence_claim(item.get("text", ""))
+        ):
+            errors.append(
+                f"`dimensions.{key}` is requested but marked missing with absence wording; "
+                "re-check qualitative review/comparison evidence before setting evidence_found=false."
+            )
+
+    for requirement in requirements.get("relation_requirements", []):
+        if not isinstance(requirement, dict):
+            continue
+        key = str(requirement.get("dimension", "")).strip()
+        source = str(requirement.get("source", "")).strip()
+        anchors = {
+            str(term) for term in requirement.get("anchors", [])
+            if isinstance(term, str) and term
+        }
+        item = dimensions.get(key)
+        evidence = item.get("evidence", []) if isinstance(item, dict) else []
+        matched = any(
+            isinstance(entry, dict)
+            and str(entry.get("source", "")).strip() == source
+            and anchors.intersection(
+                exact_isotope_terms(str(entry.get("claim", "")), require_context=False)
+            )
+            and any(
+                marker in str(entry.get("claim", "")).lower()
+                for marker in _EVIDENCE_DIMENSION_MARKERS.get(key, ())
+            )
+            for entry in evidence
+        )
+        if anchors and source and not matched:
+            errors.append(
+                f"`dimensions.{key}.evidence` must connect an exact isotope identifier "
+                f"({', '.join(sorted(anchors))}) to {key} in one source-bound atomic claim "
+                f"from `{source}`; do not leave the related facts in separate dimensions."
+            )
+
+    for route in comparison.get("direct_routes", []) if isinstance(comparison.get("direct_routes"), list) else []:
+        if not isinstance(route, dict):
+            continue
+        source = str(route.get("source", "")).strip()
+        if source in review_sources:
+            errors.append(f"Review/comparison source `{source}` must not appear in direct_routes.")
+        if source in roles_by_source and source not in route_sources:
+            errors.append(f"Direct route `{source}` must have role=route in source_roles.")
+        if atomic_required and not str(route.get("route_phrase", "")).strip():
+            errors.append(f"Direct route `{source}` must preserve its route-defining phrase.")
+        if atomic_required and not str(route.get("outcome", "")).strip():
+            errors.append(f"Direct route `{source}` must preserve its reported outcome.")
+        if source in background_sources or any(
+            term in source.lower()
+            for term in ("derivative", "formulation", "solubility", "biological propert")
+        ):
+            errors.append("Derivative/formulation/solubility/biological-property source must not be a direct target-compound route.")
+
+    tradeoff_value = comparison.get("central_tradeoff", "")
+    tradeoff = str(
+        tradeoff_value.get("claim", "") if isinstance(tradeoff_value, dict) else tradeoff_value
+    ).lower()
+    if _has_absence_claim(tradeoff) and query_dims:
+        errors.append("central_tradeoff contains an absence claim for requested comparison dimensions.")
+    route_outcomes = " ".join(
+        str(route.get("outcome", ""))
+        for route in comparison.get("direct_routes", [])
+        if isinstance(route, dict)
+    ).lower()
+    purity_framed = any(term in tradeoff for term in (
+        "high-purity", "high purity", "high optical purity", "optically pure", "enantiopur",
+    ))
+    isotope_framed = any(term in tradeoff for term in (
+        "isotopically enriched", "isotopic enrichment", "10b", "boron-10",
+    ))
+    if (
+        "isotopic_enrichment" in query_dims
+        and any(term in route_outcomes for term in ("optically pure", "optical purity", "e.e.", " ee", "enantiopur"))
+        and not (purity_framed and isotope_framed)
+    ):
+        errors.append("central_tradeoff must explicitly frame high-purity/isotopically enriched material.")
+    if atomic_required and query_dims and (
+        not isinstance(tradeoff_value, dict)
+        or not tradeoff_value.get("claim")
+        or not tradeoff_value.get("sources")
+    ):
+        errors.append("central_tradeoff must contain a source-bound claim.")
+    return errors

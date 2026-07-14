@@ -38,6 +38,10 @@ CONTEXT_SUMMARY_MODEL   = LLM_MODEL  # 用 deepseek-r1:32b
 
 # ── Citation Grounding + Answer Relevance Check 設定 ──
 CITATION_GROUNDING_ENABLED = True   # 改成 False 可以關閉審查
+# A/B：以答案 citation 對應的 claim 到被引用論文內取證，並限制 NLI source scope。
+GROUNDING_CITATION_AWARE_ENABLED = True
+# A/B：近乎逐字存在於 cited raw source 的 claim 先用 deterministic lexical verifier。
+GROUNDING_LEXICAL_SUPPORT_ENABLED = True
 
 # ── 推理模式設定 ──────────────────────────────────────
 # "strict"    → 只引用論文原文，不做推論（高精確度，防幻覺）

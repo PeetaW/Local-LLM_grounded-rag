@@ -4,6 +4,13 @@ import logging
 import re
 import requests
 import config as cfg
+from rag.comparison_json_validator import (
+    attach_comparison_requirements,
+    build_comparison_requirements,
+    comparison_json_payload as _comparison_json_payload,
+    comparison_json_validation_errors as _comparison_json_validation_errors,
+    query_dimension_keys as _query_dimension_keys,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +38,6 @@ _COMPARISON_QUERY_HINTS = (
     "safety", "isotopic", "enrichment", "比較", "差異", "不同", "路線", "策略",
     "可擴展", "放大", "成本", "安全", "同位素", "富集",
 )
-_ABSENCE_MARKERS = (
-    "does not explicitly", "not explicitly", "does not contain", "not contain",
-    "did not provide", "does not provide", "not provide", "not reported",
-    "unaddressed", "lacks", "missing",
-)
 
 
 def _system_prompt() -> str:
@@ -55,56 +57,12 @@ def _is_comparison_query(query: str) -> bool:
     return any(hint in text for hint in _COMPARISON_QUERY_HINTS)
 
 
-def _query_dimension_keys(query: str) -> set[str]:
-    text = (query or "").lower()
-    keys = set()
-    if "isotopic" in text or "10b" in text or "同位素" in text:
-        keys.add("isotopic_enrichment")
-    if "scalability" in text or "可擴展" in text or "放大" in text:
-        keys.add("scalability")
-    if "cost" in text or "成本" in text:
-        keys.add("cost_effectiveness")
-    if "safety" in text or "安全" in text:
-        keys.add("safety")
-    return keys
-
-
-def _has_absence_claim(text: str) -> bool:
-    lower = str(text or "").lower()
-    return any(marker in lower for marker in _ABSENCE_MARKERS)
-
-
-def _has_review_comparison_source(comparison: dict) -> bool:
-    source_roles = comparison.get("source_roles") if isinstance(comparison.get("source_roles"), list) else []
-    review_sources = comparison.get("review_comparison_sources")
-    return (
-        any(
-            isinstance(item, dict) and "review/comparison" in str(item.get("role", ""))
-            for item in source_roles
-        )
-        or bool(review_sources)
-    )
-
-
-def _comparison_json_payload(text: str):
-    stripped = (text or "").strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
-    start, end = stripped.find("{"), stripped.rfind("}")
-    if start > 0 and end > start:
-        stripped = stripped[start:end + 1]
-    try:
-        return json.loads(stripped)
-    except json.JSONDecodeError:
-        return None
-
-
-def _normalize_comparison_json(text: str, query: str = "") -> str:
+def _normalize_comparison_json(
+    text: str,
+    query: str = "",
+    evidence_text: str = "",
+    requirements: dict | None = None,
+) -> str:
     data = _comparison_json_payload(text)
     if not isinstance(data, dict):
         return text
@@ -179,126 +137,13 @@ def _normalize_comparison_json(text: str, query: str = "") -> str:
         ))
     else:
         comparison["central_tradeoff"] = {"claim": "", "sources": []}
-    return json.dumps(data, ensure_ascii=False, indent=2)
-
-
-def _comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
-    data = _comparison_json_payload(text)
-    if not isinstance(data, dict):
-        return ["Output is not valid JSON."]
-    comparison = data.get("comparison_json")
-    if not isinstance(comparison, dict):
-        return ["Missing root object: comparison_json."]
-
-    errors = []
-    for field in ("source_roles", "direct_routes", "review_comparison_sources"):
-        if not isinstance(comparison.get(field), list):
-            errors.append(f"`{field}` must be a list.")
-
-    dimensions = comparison.get("dimensions")
-    if not isinstance(dimensions, dict):
-        errors.append("`dimensions` must be an object.")
-        dimensions = {}
-
-    query_dims = _query_dimension_keys(query)
-    has_review_source = _has_review_comparison_source(comparison)
-    atomic_required = getattr(cfg, "COMPARISON_JSON_DIRECT_RENDER_ENABLED", False)
-    source_roles = comparison.get("source_roles") if isinstance(comparison.get("source_roles"), list) else []
-    review_sources = {
-        item.get("source") for item in source_roles
-        if isinstance(item, dict) and "review/comparison" in str(item.get("role", "")).lower()
-    }
-    background_sources = {
-        item.get("source") for item in source_roles
-        if isinstance(item, dict) and "background" in str(item.get("role", "")).lower()
-    }
-    for key, item in dimensions.items():
-        if not isinstance(item, dict) or not isinstance(item.get("evidence"), list):
-            continue
-        invalid_sources = {
-            entry.get("source") for entry in item["evidence"]
-            if isinstance(entry, dict) and entry.get("source") in background_sources
-        }
-        if invalid_sources:
-            errors.append(
-                f"`dimensions.{key}.evidence` must not use background source(s): "
-                f"{', '.join(sorted(invalid_sources))}."
-            )
-    for key in query_dims:
-        item = dimensions.get(key)
-        if not isinstance(item, dict):
-            errors.append(f"`dimensions.{key}` is missing.")
-            continue
-        if not item.get("requested"):
-            errors.append(f"`dimensions.{key}.requested` must be true because the question asks for it.")
-        atomic = item.get("evidence") if isinstance(item.get("evidence"), list) else []
-        valid_atomic = [
-            entry for entry in atomic
-            if isinstance(entry, dict) and entry.get("source") and entry.get("claim")
-        ]
-        if item.get("evidence_found") and atomic_required and not valid_atomic:
-            errors.append(
-                f"`dimensions.{key}` must contain source-bound atomic evidence entries."
-            )
-        elif item.get("evidence_found") and not valid_atomic and (not item.get("text") or not item.get("sources")):
-            errors.append(f"`dimensions.{key}` says evidence_found=true but lacks evidence.")
-        if (
-            key in ("scalability", "cost_effectiveness")
-            and has_review_source
-            and not item.get("evidence_found")
-            and _has_absence_claim(item.get("text", ""))
-        ):
-            errors.append(
-                f"`dimensions.{key}` is requested but marked missing with absence wording; "
-                "re-check qualitative review/comparison evidence before setting evidence_found=false."
-            )
-
-    for route in comparison.get("direct_routes", []) if isinstance(comparison.get("direct_routes"), list) else []:
-        if not isinstance(route, dict):
-            continue
-        if route.get("source") in review_sources:
-            errors.append(f"Review/comparison source `{route.get('source')}` must not appear in direct_routes.")
-        if atomic_required and not str(route.get("outcome", "")).strip():
-            errors.append(f"Direct route `{route.get('source')}` must preserve its reported outcome.")
-        source = str(route.get("source", ""))
-        if route.get("source") in background_sources or any(
-            term in source.lower()
-            for term in ("derivative", "formulation", "solubility", "biological propert")
-        ):
-            errors.append("Derivative/formulation/solubility/biological-property source must not be a direct target-compound route.")
-
-    tradeoff_value = comparison.get("central_tradeoff", "")
-    tradeoff = str(
-        tradeoff_value.get("claim", "") if isinstance(tradeoff_value, dict) else tradeoff_value
-    ).lower()
-    if _has_absence_claim(tradeoff) and query_dims:
-        errors.append("central_tradeoff contains an absence claim for requested comparison dimensions.")
-    route_outcomes = " ".join(
-        str(route.get("outcome", ""))
-        for route in comparison.get("direct_routes", [])
-        if isinstance(route, dict)
-    ).lower()
-    purity_framed = any(term in tradeoff for term in (
-        "high-purity", "high purity", "high optical purity", "optically pure", "enantiopur",
-    ))
-    isotope_framed = any(term in tradeoff for term in (
-        "isotopically enriched", "isotopic enrichment", "10b", "boron-10",
-    ))
-    if (
-        "isotopic_enrichment" in query_dims
-        and any(term in route_outcomes for term in ("optically pure", "optical purity", "e.e.", " ee", "enantiopur"))
-        and not (purity_framed and isotope_framed)
-    ):
-        errors.append(
-            "central_tradeoff must explicitly frame high-purity/isotopically enriched material."
+    if requirements is None:
+        requirements = build_comparison_requirements(
+            query,
+            [{"text": evidence_text, "source": "retrieved evidence"}],
         )
-    if atomic_required and query_dims and (
-        not isinstance(tradeoff_value, dict)
-        or not tradeoff_value.get("claim")
-        or not tradeoff_value.get("sources")
-    ):
-        errors.append("central_tradeoff must contain a source-bound claim.")
-    return errors
+    attach_comparison_requirements(data, requirements)
+    return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 def _comparison_json_repair_prompt(original_prompt: str, current_json: str, errors: list[str]) -> str:
@@ -617,6 +462,9 @@ class KnowledgeSynthesizer:
         )
         t0 = time.time()
         comparison_json_mode = getattr(cfg, "COMPARISON_JSON_ENABLED", False) and _is_comparison_query(query)
+        comparison_requirements = (
+            build_comparison_requirements(query, chunks) if comparison_json_mode else {}
+        )
 
         try:
             result = _generate_attempt(
@@ -628,7 +476,12 @@ class KnowledgeSynthesizer:
                 _status("  ⚠️  [Synthesizer] empty output; using original chunks")
                 result = self._fallback_chunks(chunks)
             if comparison_json_mode and '"comparison_json"' in result:
-                result = _normalize_comparison_json(result, query)
+                result = _normalize_comparison_json(
+                    result,
+                    query,
+                    formatted,
+                    requirements=comparison_requirements,
+                )
                 errors = _comparison_json_validation_errors(result, query)
                 retries = getattr(cfg, "COMPARISON_JSON_REPAIR_RETRIES", 1)
                 if errors == ["Output is not valid JSON."]:
@@ -656,7 +509,12 @@ class KnowledgeSynthesizer:
                         )
                         repair_prompt = _comparison_json_repair_prompt(user_prompt, result, errors)
                         candidate = _generate_attempt(repair_prompt, f"json_repair_{attempt + 1}")
-                        candidate = _normalize_comparison_json(candidate, query)
+                        candidate = _normalize_comparison_json(
+                            candidate,
+                            query,
+                            formatted,
+                            requirements=comparison_requirements,
+                        )
                         if not isinstance(_comparison_json_payload(candidate), dict):
                             _status("  ⚠️  [comparison-json] repair output invalid; keeping previous JSON")
                             break

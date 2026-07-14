@@ -37,6 +37,15 @@ def split_into_sentences(text: str) -> list:
     return [sentence for sentence in sentences if not _is_non_proposition(sentence)]
 
 
+def _cited_sources_in_sentence(sentence: str, known_sources) -> tuple[str, ...]:
+    citations = {
+        part.strip().lower()
+        for value in re.findall(r"\[([^\]]+)\]", sentence or "")
+        for part in re.sub(r"^Source:\s*", "", value, flags=re.IGNORECASE).split(",")
+    }
+    return tuple(str(source) for source in known_sources if str(source).lower() in citations)
+
+
 def _extract_direct_citation_section(text: str) -> str:
     """
     Extract only the 【論文直接依據】 section from an answer.
@@ -89,22 +98,40 @@ def _retriever_node_count(retriever) -> int | None:
     return None
 
 
-def _fetch_grounding_chunks(question: str, paper_engines_to_use: dict) -> list[dict]:
+def _fetch_grounding_chunks(
+    question: str,
+    paper_engines_to_use: dict,
+    sentences: list[str] | None = None,
+) -> list[dict]:
     """
     Retrieve raw PDF chunks from the vector index for NLI grounding.
     Uses GROUNDING_TOP_K (higher than SIMILARITY_TOP_K) for broader sentence coverage.
     Returns [] on any failure; caller must fall back to sub_answers.
     """
     from rag.query_embedding_guard import prepare_query_text
+    from rag.query_retrieval import _strip_context_summary
 
     try:
-        query_text = prepare_query_text(question)
+        base_query = prepare_query_text(question)
     except Exception:
         return []
 
     chunks = []
     for name, engine in paper_engines_to_use.items():
         try:
+            query_text = base_query
+            if getattr(cfg, "GROUNDING_CITATION_AWARE_ENABLED", False):
+                cited_claims = [
+                    sentence for sentence in (sentences or [])
+                    if _cited_sources_in_sentence(sentence, (name,))
+                ]
+                if cited_claims:
+                    claim_text = "\n".join(re.sub(r"\[[^\]]+\]", "", claim) for claim in cited_claims)
+                    try:
+                        query_text = prepare_query_text(f"{question}\n{claim_text}")
+                    except Exception:
+                        pass
+
             retriever = engine.retriever if hasattr(engine, "retriever") else None
             if retriever is None:
                 continue
@@ -130,7 +157,7 @@ def _fetch_grounding_chunks(question: str, paper_engines_to_use: dict) -> list[d
             for nws in nodes:
                 chunks.append({
                     "id":     f"{name[:25]}-{nws.node.node_id[:8]}",
-                    "text":   nws.node.get_content(),
+                    "text":   _strip_context_summary(nws.node.get_content()),
                     "source": name,
                     "score":  nws.score or 0.0,
                 })
@@ -240,13 +267,18 @@ def run_grounding_check(
             print(msg)
 
     reset_grounding_timers()
+    sentences = split_into_sentences(full_text)
 
     if question and paper_engines_to_use:
         _status("  🔍 執行答案品質審查（對象：PDF raw chunks）...")
-        raw_chunks = _fetch_grounding_chunks(question, paper_engines_to_use)
+        raw_chunks = _fetch_grounding_chunks(question, paper_engines_to_use, sentences)
         if raw_chunks:
             chunks = raw_chunks
-            _status(f"  → 取得 {len(chunks)} 個 raw chunks（top_k={cfg.GROUNDING_TOP_K}）")
+            citation_aware = getattr(cfg, "GROUNDING_CITATION_AWARE_ENABLED", False)
+            _status(
+                f"  → 取得 {len(chunks)} 個 raw chunks（top_k={cfg.GROUNDING_TOP_K}, "
+                f"citation_aware={citation_aware}）"
+            )
         else:
             _status("  ⚠️  raw chunk 取得失敗，改用 sub_answers 作為比對基準")
             chunks = [
@@ -260,7 +292,6 @@ def run_grounding_check(
             for i, ans in enumerate(sub_answers)
         ]
 
-    sentences = split_into_sentences(full_text)
     citation_results = check_citation_grounding(sentences, chunks)
 
     partitioned = _partition_results_by_section(citation_results, full_text)

@@ -50,6 +50,8 @@ cfg.NLI_CONTRADICTION_ENABLED = True
 cfg.NLI_DECOMPOSE_ENABLED     = True
 cfg.NLI_JOINT_VERIFY_ENABLED  = True
 cfg.NLI_TRANSLATE_TO_EN       = False   # 測試時不呼叫翻譯 LLM
+cfg.GROUNDING_CITATION_AWARE_ENABLED = True
+cfg.GROUNDING_LEXICAL_SUPPORT_ENABLED = False
 
 from unittest import TestCase, main as _unittest_main
 from unittest.mock import patch, MagicMock
@@ -98,17 +100,102 @@ class TestNliPreprocessing(TestCase):
             "reported method in its ease of performance and workup, and few reaction steps.",
         )
 
+    def test_removes_duplicate_period_around_citation(self):
+        self.assertEqual(
+            _preprocess_for_nli("- Safety: Process safety risk. [PaperA].", {"PaperA"}),
+            "Process safety risk.",
+        )
+
+    @patch("rag.citation_grounding._run_nli_batch")
+    def test_citation_limits_nli_to_named_source(self, mock_batch):
+        chunks = [
+            {"id": "A1", "source": "PaperA", "text": "Paper A supports the claim."},
+            {"id": "B1", "source": "PaperB", "text": "Paper B is unrelated."},
+        ]
+        mock_batch.return_value = [_nli_entailment(0.9, 0.08, 0.02)]
+        result = check_citation_grounding(["The claim is supported [PaperA]."], chunks)
+        self.assertEqual(mock_batch.call_args.args[0], ["Paper A supports the claim."])
+        self.assertEqual(result[0]["best_chunk"], "A1")
+        self.assertEqual(result[0]["citation_sources"], ["PaperA"])
+
+    @patch("rag.citation_grounding._run_nli_batch")
+    def test_near_verbatim_cited_claim_uses_lexical_support(self, mock_batch):
+        old = cfg.GROUNDING_LEXICAL_SUPPORT_ENABLED
+        try:
+            cfg.GROUNDING_LEXICAL_SUPPORT_ENABLED = True
+            chunks = [{
+                "id": "A1",
+                "source": "PaperA",
+                "text": "When preparing isotopically enriched compounds, the major cost "
+                        "typically comes from the isotope starting material.",
+            }]
+            result = check_citation_grounding([
+                "Cost-effectiveness: For isotopically enriched compounds, the major cost "
+                "typically comes from the isotope starting material [PaperA]."
+            ], chunks)
+            mock_batch.assert_not_called()
+            self.assertEqual(result[0]["status"], "SUPPORTED")
+            self.assertEqual(result[0]["support_method"], "lexical")
+            self.assertEqual(result[0]["best_chunk"], "A1")
+        finally:
+            cfg.GROUNDING_LEXICAL_SUPPORT_ENABLED = old
+
+    @patch("rag.citation_grounding._run_nli_batch")
+    def test_pdf_line_break_still_uses_lexical_support(self, mock_batch):
+        old = cfg.GROUNDING_LEXICAL_SUPPORT_ENABLED
+        try:
+            cfg.GROUNDING_LEXICAL_SUPPORT_ENABLED = True
+            result = check_citation_grounding([
+                "Review dimensions: The review highlights limitations of each method regarding "
+                "scalability, cost-effectiveness, and safety [PaperA]."
+            ], [{
+                "id": "A1",
+                "source": "PaperA",
+                "text": "The review also highlights the lim- itations of each method regarding "
+                        "scalability, cost-effectiveness, and safety.",
+            }])
+            mock_batch.assert_not_called()
+            self.assertEqual(result[0]["support_method"], "lexical")
+        finally:
+            cfg.GROUNDING_LEXICAL_SUPPORT_ENABLED = old
+
+    @patch("rag.citation_grounding._run_nli_batch")
+    def test_lexical_support_does_not_ignore_negation(self, mock_batch):
+        old_lexical = cfg.GROUNDING_LEXICAL_SUPPORT_ENABLED
+        old_joint = cfg.NLI_JOINT_VERIFY_ENABLED
+        try:
+            cfg.GROUNDING_LEXICAL_SUPPORT_ENABLED = True
+            cfg.NLI_JOINT_VERIFY_ENABLED = False
+            mock_batch.return_value = [_nli_entailment(0.1, 0.8, 0.1)]
+            result = check_citation_grounding([
+                "No palladium catalyst is required during final synthesis purification [PaperA]."
+            ], [{
+                "id": "A1",
+                "source": "PaperA",
+                "text": "A palladium catalyst is required during final synthesis purification.",
+            }])
+            self.assertEqual(result[0]["status"], "UNSUPPORTED")
+            self.assertEqual(result[0]["support_method"], "nli")
+        finally:
+            cfg.GROUNDING_LEXICAL_SUPPORT_ENABLED = old_lexical
+            cfg.NLI_JOINT_VERIFY_ENABLED = old_joint
+
 
 class TestContradictionDetection(TestCase):
 
     def _run(self, sentences, nli_side_effect, joint_enabled=False, decomp_enabled=False):
-        """共用 helper：patch _run_nli 後執行 check_citation_grounding。"""
+        """共用 helper：patch batched NLI 後執行 check_citation_grounding。"""
         old_joint  = cfg.NLI_JOINT_VERIFY_ENABLED
         old_decomp = cfg.NLI_DECOMPOSE_ENABLED
         cfg.NLI_JOINT_VERIFY_ENABLED  = joint_enabled
         cfg.NLI_DECOMPOSE_ENABLED     = decomp_enabled
         try:
-            with patch("rag.citation_grounding._run_nli", side_effect=nli_side_effect):
+            scores = iter(nli_side_effect)
+
+            def fake_batch(premises, hypotheses, batch_size=None):
+                return [next(scores) for _ in premises]
+
+            with patch("rag.citation_grounding._run_nli_batch", side_effect=fake_batch):
                 return check_citation_grounding(sentences, _CHUNKS)
         finally:
             cfg.NLI_JOINT_VERIFY_ENABLED  = old_joint
@@ -218,8 +305,8 @@ class TestDecomposeAndVerify(TestCase):
         mock_resp = self._mock_llm_response(sub_claims_text)
 
         with patch("requests.post", return_value=mock_resp):
-            with patch("rag.citation_grounding._run_nli",
-                       return_value=_nli_entailment(0.8, 0.15, 0.05)):
+            with patch("rag.citation_grounding._run_nli_batch",
+                       return_value=[_nli_entailment(0.8, 0.15, 0.05)] * len(_CHUNKS)):
                 result = decompose_and_verify(
                     "The synthesis uses KBH4 under ambient conditions.",
                     _CHUNKS,
@@ -236,8 +323,8 @@ class TestDecomposeAndVerify(TestCase):
         mock_resp = self._mock_llm_response(sub_claims_text)
 
         with patch("requests.post", return_value=mock_resp):
-            with patch("rag.citation_grounding._run_nli",
-                       return_value=_nli_entailment(0.52, 0.38, 0.10)):
+            with patch("rag.citation_grounding._run_nli_batch",
+                       return_value=[_nli_entailment(0.52, 0.38, 0.10)] * len(_CHUNKS)):
                 result = decompose_and_verify(
                     "Gelatin aerogel enhances NZVI electron selectivity.",
                     _CHUNKS,
@@ -255,13 +342,13 @@ class TestDecomposeAndVerify(TestCase):
         mock_resp = self._mock_llm_response(sub_claims_text)
 
         # 第一個 claim 三個 chunk 給高分，第二個給低分
-        nli_scores = (
-            [_nli_entailment(0.8, 0.1, 0.1)] * 3   # claim 1 × 3 chunks
-            + [_nli_entailment(0.1, 0.8, 0.1)] * 3  # claim 2 × 3 chunks
-        )
+        nli_scores = [
+            [_nli_entailment(0.8, 0.1, 0.1)] * 3,
+            [_nli_entailment(0.1, 0.8, 0.1)] * 3,
+        ]
 
         with patch("requests.post", return_value=mock_resp):
-            with patch("rag.citation_grounding._run_nli", side_effect=nli_scores):
+            with patch("rag.citation_grounding._run_nli_batch", side_effect=nli_scores):
                 result = decompose_and_verify(
                     "The synthesis uses KBH4 under nitrogen atmosphere.",
                     _CHUNKS,
@@ -277,8 +364,8 @@ class TestDecomposeAndVerify(TestCase):
         mock_resp.raise_for_status.side_effect = Exception("connection refused")
 
         with patch("requests.post", return_value=mock_resp):
-            with patch("rag.citation_grounding._run_nli",
-                       return_value=_nli_entailment(0.7, 0.2, 0.1)):
+            with patch("rag.citation_grounding._run_nli_batch",
+                       return_value=[_nli_entailment(0.7, 0.2, 0.1)] * len(_CHUNKS)):
                 result = decompose_and_verify(
                     "The original conclusion sentence.",
                     _CHUNKS,
@@ -296,8 +383,8 @@ class TestDecomposeAndVerify(TestCase):
         mock_resp.raise_for_status = MagicMock()
 
         with patch("requests.post", return_value=mock_resp):
-            with patch("rag.citation_grounding._run_nli",
-                       return_value=_nli_entailment(0.5, 0.3, 0.2)):
+            with patch("rag.citation_grounding._run_nli_batch",
+                       return_value=[_nli_entailment(0.5, 0.3, 0.2)] * len(_CHUNKS)):
                 result = decompose_and_verify("Any conclusion.", _CHUNKS)
 
         self.assertEqual(len(result["sub_claims"]), 1)
@@ -324,14 +411,12 @@ class TestJointVerify(TestCase):
         """
         # 3 chunks：個別低，聯合後高
         individual_scores = [0.3, 0.25, 0.28]
-        # _run_nli 被呼叫：先 3 次個別（各 chunk），再 1 次聯合
-        nli_side = (
-            [_nli_entailment(s, 0.5, 0.2) for s in individual_scores]
-            + [_nli_entailment(0.72, 0.18, 0.10)]  # joint
-        )
-
-        with patch("rag.citation_grounding._run_nli", side_effect=nli_side):
-            result = joint_verify("The combined mechanism explains the high degradation.", _CHUNKS)
+        with patch("rag.citation_grounding._run_nli_batch", return_value=[
+            _nli_entailment(s, 0.5, 0.2) for s in individual_scores
+        ]):
+            with patch("rag.citation_grounding._run_nli",
+                       return_value=_nli_entailment(0.72, 0.18, 0.10)):
+                result = joint_verify("The combined mechanism explains the high degradation.", _CHUNKS)
 
         self.assertTrue(result["is_inference_bridge"])
         self.assertAlmostEqual(result["joint_score"], 0.72)
@@ -341,13 +426,12 @@ class TestJointVerify(TestCase):
     def test_not_bridge_high_individual(self):
         """個別分數已高（avg >= 0.5）→ 不觸發 inference_bridge"""
         individual_scores = [0.82, 0.75, 0.68]
-        nli_side = (
-            [_nli_entailment(s, 0.15, 0.05) for s in individual_scores]
-            + [_nli_entailment(0.88, 0.10, 0.02)]  # joint
-        )
-
-        with patch("rag.citation_grounding._run_nli", side_effect=nli_side):
-            result = joint_verify("KBH4 reduces iron ions directly.", _CHUNKS)
+        with patch("rag.citation_grounding._run_nli_batch", return_value=[
+            _nli_entailment(s, 0.15, 0.05) for s in individual_scores
+        ]):
+            with patch("rag.citation_grounding._run_nli",
+                       return_value=_nli_entailment(0.88, 0.10, 0.02)):
+                result = joint_verify("KBH4 reduces iron ions directly.", _CHUNKS)
 
         self.assertFalse(result["is_inference_bridge"])
         self.assertEqual(result["bridge_sources"], [])
@@ -355,19 +439,18 @@ class TestJointVerify(TestCase):
     def test_not_bridge_low_joint(self):
         """個別低 AND joint 也低（< 0.65）→ 不觸發 inference_bridge"""
         individual_scores = [0.2, 0.15, 0.18]
-        nli_side = (
-            [_nli_entailment(s, 0.6, 0.2) for s in individual_scores]
-            + [_nli_entailment(0.35, 0.45, 0.20)]  # joint 也低
-        )
-
-        with patch("rag.citation_grounding._run_nli", side_effect=nli_side):
-            result = joint_verify("Completely unsupported claim.", _CHUNKS)
+        with patch("rag.citation_grounding._run_nli_batch", return_value=[
+            _nli_entailment(s, 0.6, 0.2) for s in individual_scores
+        ]):
+            with patch("rag.citation_grounding._run_nli",
+                       return_value=_nli_entailment(0.35, 0.45, 0.20)):
+                result = joint_verify("Completely unsupported claim.", _CHUNKS)
 
         self.assertFalse(result["is_inference_bridge"])
 
     def test_empty_facts(self):
         """無任何 chunks → 回傳 zero 結果，不丟例外"""
-        with patch("rag.citation_grounding._run_nli"):
+        with patch("rag.citation_grounding._run_nli_batch"):
             result = joint_verify("Some claim.", [])
         self.assertFalse(result["is_inference_bridge"])
         self.assertEqual(result["individual_scores"], [])
@@ -377,13 +460,12 @@ class TestJointVerify(TestCase):
         chunks_4 = _CHUNKS + [{"id": "C004", "text": "Extra chunk with low relevance."}]
         # C001=0.8, C002=0.6, C003=0.5, C004=0.2 → top3 = C001,C002,C003
         individual_scores = [0.8, 0.6, 0.5, 0.2]
-        nli_side = (
-            [_nli_entailment(s, 0.1, 0.1) for s in individual_scores]
-            + [_nli_entailment(0.71, 0.19, 0.10)]  # joint
-        )
-
-        with patch("rag.citation_grounding._run_nli", side_effect=nli_side):
-            result = joint_verify("A cross-chunk claim.", chunks_4)
+        with patch("rag.citation_grounding._run_nli_batch", return_value=[
+            _nli_entailment(s, 0.1, 0.1) for s in individual_scores
+        ]):
+            with patch("rag.citation_grounding._run_nli",
+                       return_value=_nli_entailment(0.71, 0.19, 0.10)):
+                result = joint_verify("A cross-chunk claim.", chunks_4)
 
         # individual_scores 只保留 top-3
         self.assertEqual(len(result["individual_scores"]), 3)
@@ -591,6 +673,7 @@ if __name__ == "__main__":
     suite  = unittest.TestSuite()
 
     for cls in [
+        TestNliPreprocessing,
         TestContradictionDetection,
         TestDecomposeAndVerify,
         TestJointVerify,
