@@ -288,10 +288,11 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             "text": (
                 "Source metadata (not paper evidence): role_hint=review/comparison source\n"
                 "Retrieved evidence snippets:\n"
-                "Producing isotopically enriched 10B material is challenging. "
-                "The major cost comes from the isotope starting material."
+                "[Snippet 1] BNCT requires 10B material.\n"
+                "[Snippet 2] The high cost of 10B is expected to decline."
             ),
         }])
+        self.assertEqual(requirements["relation_requirements"][0]["anchors"], ["10B"])
         payload = {
             "comparison_json": {
                 "source_roles": [{"source": "ReviewA", "role": "review/comparison source"}],
@@ -328,6 +329,22 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         )
         errors = _comparison_json_validation_errors(json.dumps(payload), query)
         self.assertFalse(any("related facts in separate dimensions" in error for error in errors))
+
+    def test_requirement_audit_does_not_force_cross_snippet_relation(self):
+        requirements = build_comparison_requirements(
+            "Compare routes focusing on isotopic enrichment and cost-effectiveness.",
+            [{
+                "source": "ReviewA",
+                "text": (
+                    "Source metadata (not paper evidence): role_hint=review/comparison source\n"
+                    "Retrieved evidence snippets:\n"
+                    "[Snippet 1] Producing isotopically enriched 10B material is challenging.\n"
+                    "[Snippet 2] The major cost comes from the isotope starting material."
+                ),
+            }],
+        )
+
+        self.assertEqual(requirements["relation_requirements"], [])
 
     def test_validator_does_not_misread_chemical_derivative_as_background(self):
         raw = """

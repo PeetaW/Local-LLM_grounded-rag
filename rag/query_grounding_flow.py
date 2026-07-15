@@ -237,6 +237,7 @@ def run_grounding_check(
     knowledge_base: str,
     question: str | None = None,
     paper_engines_to_use: dict | None = None,
+    grounding_claims: list[str] | None = None,
     on_status=None,
 ) -> tuple[str, str]:
     """
@@ -267,7 +268,7 @@ def run_grounding_check(
             print(msg)
 
     reset_grounding_timers()
-    sentences = split_into_sentences(full_text)
+    sentences = list(grounding_claims) if grounding_claims else split_into_sentences(full_text)
 
     if question and paper_engines_to_use:
         _status("  🔍 執行答案品質審查（對象：PDF raw chunks）...")

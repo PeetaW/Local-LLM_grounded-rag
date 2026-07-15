@@ -100,7 +100,7 @@ def count_issues(answer: str) -> dict:
 
 
 def summarize(rows: list) -> dict:
-    """彙整多題結果為平均指標；None 與解析失敗值自動略過。"""
+    """彙整多題結果；平均略過 None，但另外揭露評分覆蓋率。"""
     def _avg(key, sub=None):
         vals = []
         for r in rows:
@@ -109,8 +109,14 @@ def summarize(rows: list) -> dict:
                 vals.append(v)
         return round(sum(vals) / len(vals), 3) if vals else None
 
+    correctness_scored = sum(
+        isinstance(row.get("correctness"), (int, float)) and row["correctness"] >= 0
+        for row in rows
+    )
     return {
         "n_questions":          len(rows),
+        "n_correctness_scored": correctness_scored,
+        "n_correctness_na":     len(rows) - correctness_scored,
         "avg_correctness":      _avg("correctness"),
         "avg_grounding_score":  _avg("grounding_score"),
         "avg_paper_sel_recall": _avg("paper_selection_recall"),

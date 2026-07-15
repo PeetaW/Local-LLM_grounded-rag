@@ -7,6 +7,7 @@
 #   execute_structured_query_stream(...) → Generator[str, None, None]
 
 import json
+import re
 import time
 
 from llama_index.core import Settings
@@ -30,6 +31,151 @@ _FALLBACK_NOTICE = (
     "⚠️ **資料來源說明**：本地學術文獻資料庫中未找到與此問題直接相關的內容。"
     "以下回答來自模型自身知識，非論文原文，請謹慎參考並自行查證。\n\n"
 )
+
+_FACT_LIST_LINE = re.compile(
+    r"^\s*\[(?:Fact|事實)\s*(\d+)\]\s*(.*?)\s*"
+    r"\((?:Source|來源)\s*[:：]\s*(.*?)\)\s*\.?\s*$",
+    re.IGNORECASE,
+)
+_METHOD_QUERY_TERMS = (
+    "method", "process", "procedure", "synthesis", "synthesize", "preparation",
+    "key step", "steps", "reaction route", "方法", "製程", "流程", "合成", "步驟",
+)
+_COMPARISON_QUERY_TERMS = (
+    "compare", "comparison", "different routes", "across the papers", "trade-off",
+    "scalability", "cost-effectiveness", "比較", "跨文獻", "不同路線", "權衡",
+)
+
+
+def _fact_list_items(knowledge_base: str) -> list[dict]:
+    items = []
+    for line in (knowledge_base or "").splitlines():
+        match = _FACT_LIST_LINE.match(line)
+        if not match:
+            continue
+        source_text = match.group(3).strip()
+        sources = [value.strip() for value in re.split(r"\s*[,;]\s*", source_text) if value.strip()]
+        if sources:
+            items.append({
+                "id": f"F{match.group(1)}",
+                "claim": match.group(2).strip(),
+                "sources": sources,
+            })
+    return items
+
+
+def _is_method_fact_query(question: str) -> bool:
+    lower = (question or "").lower()
+    return (
+        any(term in lower for term in _METHOD_QUERY_TERMS)
+        and not any(term in lower for term in _COMPARISON_QUERY_TERMS)
+    )
+
+
+def _method_fact_roles(claim: str) -> set[str]:
+    lower = (claim or "").lower()
+    roles = set()
+    if any(term in lower for term in (
+        "hybrid process", "synthesized", "synthesis of", "synthesis is based",
+        "preparation of", "method uses", "process involving",
+    )):
+        roles.add("overview")
+    if any(term in lower for term in (
+        "reacted", "reaction", "alkylation", "hydroly", "treatment", "treated",
+        "furnish", "gave", "gives", "yielded", "produced", "converted",
+    )):
+        roles.add("steps")
+    if (
+        re.search(r"(?:^|\s)-?\d+(?:\.\d+)?\s*°\s*c\b", lower)
+        or any(term in lower for term in (
+            "temperature", "reaction time", "concentration", "solvent", " in thf",
+            "conducted at", "conducted in", "performed at", "performed in", "under reflux",
+        ))
+    ):
+        roles.add("conditions")
+    if any(term in lower for term in (
+        "yield", "e.e.", "enantiomeric excess", "optically pure", "enantiomerically pure",
+        "furnish", "gave", "gives", "to give", "produced", "afforded", "resulted in",
+    )):
+        roles.add("outcome")
+    if any(term in lower for term in (
+        "starting material", "prepared from commercially", "was protected as",
+        "group was protected", "initial efforts were directed toward",
+    )):
+        roles.add("precursor")
+    if any(term in lower for term in ("alternative route", "control route", "non-enzymatic")):
+        roles.add("alternative")
+    return roles
+
+
+def _method_requirements(question: str, sub_questions: list[dict]) -> set[str]:
+    plan_text = " ".join(
+        [question or ""]
+        + [str(item.get("sub_q", "")) for item in (sub_questions or []) if isinstance(item, dict)]
+    ).lower()
+    requirements = {"overview", "steps", "outcome"}
+    if any(term in plan_text for term in (
+        "experimental condition", "reaction condition", "temperature", "solvent",
+        "concentration", "reaction time", "stirring", "pressure", "ph",
+    )):
+        requirements.add("conditions")
+    return requirements
+
+
+def _render_method_fact_list(
+    knowledge_base: str,
+    question: str,
+    sub_questions: list[dict],
+) -> tuple[str, list[str], dict]:
+    """Render source-bound Stage 3 facts without asking Stage 4 to rewrite them."""
+    if not _is_method_fact_query(question):
+        return "", [], {}
+    facts = _fact_list_items(knowledge_base)
+    if not facts:
+        return "", [], {}
+
+    requirements = _method_requirements(question, sub_questions)
+    full_protocol = any(term in (question or "").lower() for term in (
+        "full protocol", "complete protocol", "step-by-step", "all experimental conditions",
+        "完整實驗", "完整操作", "所有條件",
+    ))
+    selected, excluded, seen = [], [], set()
+    for fact in facts:
+        roles = _method_fact_roles(fact["claim"])
+        fact["roles"] = roles
+        if not full_protocol and roles & {"precursor", "alternative"}:
+            excluded.append(fact["id"])
+            continue
+        normalized = " ".join(fact["claim"].lower().split())
+        if normalized in seen:
+            continue
+        if roles & requirements:
+            selected.append(fact)
+            seen.add(normalized)
+
+    covered = set().union(*(fact["roles"] for fact in selected)) if selected else set()
+    missing = requirements - covered
+    if missing:
+        return "", [], {
+            "requirements": sorted(requirements),
+            "selected_fact_ids": [fact["id"] for fact in selected],
+            "excluded_fact_ids": excluded,
+            "missing_requirements": sorted(missing),
+        }
+
+    claims = []
+    for fact in selected:
+        citation = ", ".join(fact["sources"])
+        claim = fact["claim"].strip()
+        line = f"- {claim} [{citation}]" if claim.endswith((".", "!", "?")) else f"- {claim} [{citation}]."
+        claims.append(line)
+    answer = "Method evidence:\n" + "\n".join(claims)
+    return answer, claims, {
+        "requirements": sorted(requirements),
+        "selected_fact_ids": [fact["id"] for fact in selected],
+        "excluded_fact_ids": excluded,
+        "missing_requirements": [],
+    }
 
 
 def _build_memory_section(memory_context: str, is_fallback: bool) -> str:
@@ -445,6 +591,9 @@ def execute_structured_query(
     t3 = time.perf_counter()
     synthesis_prompt = ""
     stage4_direct_rendered = False
+    direct_render_text = ""
+    direct_grounding_claims = []
+    direct_render_meta = {}
     if gate_abstain:
         _status("  🚪 [answerability] NOT_ANSWERABLE → 誠實棄答，跳過生成")
         full_text = gate_notice
@@ -461,11 +610,38 @@ def execute_structured_query(
                 atomic_only=True,
                 question=question,
             )
+            if direct_answer:
+                direct_grounding_claims = [
+                    line.strip() for line in direct_answer.splitlines()
+                    if line.strip().startswith("-")
+                ]
+                synthesis_prompt = "[deterministic comparison_json renderer]"
+        if (
+            not direct_answer
+            and rag_found_anything
+            and cfg.EN_DRAFT_PIPELINE
+            and cfg.REASONING_MODE == "strict"
+            and getattr(cfg, "METHOD_FACT_LIST_DIRECT_RENDER_ENABLED", False)
+        ):
+            direct_answer, direct_grounding_claims, direct_render_meta = _render_method_fact_list(
+                knowledge_base,
+                question,
+                sub_questions,
+            )
+            if direct_answer:
+                synthesis_prompt = "[deterministic method fact-list renderer]"
         if direct_answer:
             stage4_direct_rendered = True
-            synthesis_prompt = "[deterministic comparison_json renderer]"
             full_text = direct_answer
-            _status("  🧱 [synthesis-llm] validated atomic comparison_json → deterministic render")
+            direct_render_text = direct_answer
+            if direct_render_meta:
+                _status(
+                    "  🧱 [synthesis-llm] method fact_list → deterministic render "
+                    f"selected={','.join(direct_render_meta['selected_fact_ids'])} "
+                    f"requirements={','.join(direct_render_meta['requirements'])}"
+                )
+            else:
+                _status("  🧱 [synthesis-llm] validated atomic comparison_json → deterministic render")
         else:
             if not rag_found_anything:
                 _status("  ℹ️  RAG 資料庫未找到相關內容，切換至模型推理模式...")
@@ -488,6 +664,10 @@ def execute_structured_query(
                 )
         if on_artifact:
             on_artifact("stage4_prompt", synthesis_prompt)
+            if direct_render_meta:
+                on_artifact("stage4_fact_requirements", json.dumps(direct_render_meta, ensure_ascii=False, indent=2))
+            if direct_grounding_claims:
+                on_artifact("stage4_grounding_claims", "\n".join(direct_grounding_claims))
 
         if not stage4_direct_rendered:
             print("\n 最終綜合回答（Stage 4 初稿）：")
@@ -529,6 +709,11 @@ def execute_structured_query(
             full_text, nli_report = run_grounding_check(
                 full_text, sub_answers, knowledge_base,
                 question=question, paper_engines_to_use=paper_engines_to_use,
+                grounding_claims=(
+                    direct_grounding_claims
+                    if direct_grounding_claims and full_text == direct_render_text
+                    else None
+                ),
                 on_status=_status,
             )
             print(nli_report)
@@ -655,12 +840,56 @@ def execute_structured_query_stream(
 
     # ── Stage 4: LLM synthesis ───────────────────────────────────────
     t3 = time.perf_counter()
+    direct_render_text = ""
+    direct_grounding_claims = []
     if gate_abstain:
         yield "[STATUS] 🚪 [answerability] NOT_ANSWERABLE → 誠實棄答，跳過生成\n"
         yield gate_notice
         full_text = gate_notice
     else:
-        if not rag_found_anything:
+        direct_answer = ""
+        direct_render_meta = {}
+        if (
+            rag_found_anything
+            and cfg.EN_DRAFT_PIPELINE
+            and getattr(cfg, "COMPARISON_JSON_DIRECT_RENDER_ENABLED", False)
+            and not _comparison_json_validation_errors(knowledge_base, question)
+        ):
+            direct_answer = _stage4_empty_answer_fallback(
+                knowledge_base,
+                atomic_only=True,
+                question=question,
+            )
+            if direct_answer:
+                direct_grounding_claims = [
+                    line.strip() for line in direct_answer.splitlines()
+                    if line.strip().startswith("-")
+                ]
+        if (
+            not direct_answer
+            and rag_found_anything
+            and cfg.EN_DRAFT_PIPELINE
+            and cfg.REASONING_MODE == "strict"
+            and getattr(cfg, "METHOD_FACT_LIST_DIRECT_RENDER_ENABLED", False)
+        ):
+            direct_answer, direct_grounding_claims, direct_render_meta = _render_method_fact_list(
+                knowledge_base,
+                question,
+                sub_questions,
+            )
+
+        if direct_answer:
+            full_text = direct_answer
+            direct_render_text = direct_answer
+            if direct_render_meta:
+                yield (
+                    "[STATUS] 🧱 method fact_list → deterministic render "
+                    f"selected={','.join(direct_render_meta['selected_fact_ids'])}\n"
+                )
+            else:
+                yield "[STATUS] 🧱 validated atomic comparison_json → deterministic render\n"
+            yield full_text
+        elif not rag_found_anything:
             yield "[STATUS] ⚠️ RAG 未找到相關內容，切換至模型知識推理...\n"
             fallback_notice = _FALLBACK_NOTICE
             synthesis_prompt = build_fallback_prompt(
@@ -679,12 +908,13 @@ def execute_structured_query_stream(
                 cfg.REASONING_MODE, lang,
             )
 
-        if fallback_notice:
-            yield fallback_notice
-        full_text = fallback_notice
-        for chunk in Settings.llm.stream_complete(synthesis_prompt):
-            yield chunk.delta
-            full_text += chunk.delta
+        if not direct_answer:
+            if fallback_notice:
+                yield fallback_notice
+            full_text = fallback_notice
+            for chunk in Settings.llm.stream_complete(synthesis_prompt):
+                yield chunk.delta
+                full_text += chunk.delta
     yield f"\n[STATUS] [synthesis-llm] 完成 elapsed_ms={int((time.perf_counter()-t3)*1000)}\n"
 
     if rag_found_anything and not gate_abstain:
@@ -724,6 +954,11 @@ def execute_structured_query_stream(
             full_text, nli_report = run_grounding_check(
                 full_text, sub_answers, knowledge_base,
                 question=question, paper_engines_to_use=paper_engines_to_use,
+                grounding_claims=(
+                    direct_grounding_claims
+                    if direct_grounding_claims and full_text == direct_render_text
+                    else None
+                ),
                 on_status=lambda msg: grounding_msgs.append(msg),
             )
             for msg in grounding_msgs:

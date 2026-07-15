@@ -195,7 +195,7 @@ def _run_nli_batch(premises: list, hypotheses: list, batch_size: int = None) -> 
 
 
 def _latex_to_plain(text: str) -> str:
-    """
+    r"""
     將 LaTeX 數學式轉換為可讀的科學表達式，保留化學式的語義資訊。
 
     範例：
@@ -320,8 +320,12 @@ _LEXICAL_NEGATIONS = {"no", "not", "never", "without"}
 
 
 def _lexical_tokens(text: str) -> set[str]:
+    raw = (text or "").lower()
+    # PDF extraction often splits one word at a line break ("distil- lation").
+    # Keep the original pieces and add the joined form for lexical matching.
+    dehyphenated = re.sub(r"(?<=[a-z0-9])-\s+(?=[a-z0-9])", "", raw)
     tokens = set()
-    for token in re.findall(r"[a-z0-9]+", (text or "").lower()):
+    for token in re.findall(r"[a-z0-9]+", f"{raw} {dehyphenated}"):
         if token in _LEXICAL_STOPWORDS:
             continue
         if len(token) > 4 and token.endswith("s") and not token.endswith(("ss", "is")):
@@ -347,8 +351,13 @@ def _find_lexical_support(
     best = None
     for chunk in chunks:
         text = re.sub(r"\s+", " ", str(chunk.get("text", ""))).strip()
-        for source_sentence in re.split(r"(?<=[.!?])\s+", text):
-            source_tokens = _lexical_tokens(source_sentence)
+        sentences = [s for s in re.split(r"(?<=[.!?])\s+", text) if s]
+        windows = sentences + [
+            f"{sentences[i]} {sentences[i + 1]}"
+            for i in range(len(sentences) - 1)
+        ]
+        for source_window in windows:
+            source_tokens = _lexical_tokens(source_window)
             if bool(source_tokens & _LEXICAL_NEGATIONS) != claim_negated:
                 continue
             if not claim_numbers.issubset(source_tokens):

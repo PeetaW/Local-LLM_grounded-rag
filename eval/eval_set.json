@@ -4,8 +4,9 @@
     "how_to_use": [
       "1. gold_papers：該題答案所在的論文（檔名去掉 .pdf，須與 projects/boron_bnct/papers/ 內檔名完全一致）。下面的值是我依 metadata 推測的，請你逐題核對。",
       "2. reference_answer：標準答案（你最清楚，請填）。目前留空 → 跑 Mode 1（只看自評分數與延遲）。",
-      "3. gold_spans：答案在原文中的關鍵句（1~3 句，直接從 PDF 複製）。填了才會算『檢索覆蓋率』。",
-      "4. 填好 gold 欄位後即升級為 Mode 2，可量測論文選擇命中率與檢索覆蓋率。"
+      "3. reference_facts：可選的人工原子事實清單；填寫後 correctness judge 會逐項稽核並保存候選答案引句。",
+      "4. gold_spans：答案在原文中的關鍵句（1~3 句，直接從 PDF 複製）。填了才會算『檢索覆蓋率』。",
+      "5. 填好 gold 欄位後即升級為 Mode 2，可量測論文選擇命中率與檢索覆蓋率。"
     ],
     "type_legend": {
       "single_paper": "單篇深挖，預期論文選擇命中率與檢索覆蓋率都應很高",
@@ -39,6 +40,14 @@
         "bbb0683"
       ],
       "reference_answer": "Optically pure L-p-boronophenylalanine (L-BPA) was made by a hybrid chemo-enzymatic process. Key steps: (1) enantioselective alkylation — lithiated (2R)-(-)-2,5-dihydro-2-isopropyl-3,6-dimethoxypyrazine (a chiral Schoellkopf-type auxiliary) is alkylated with 4-bromomethylbenzeneboronate in THF at -78 C to set the stereocentre (initial adduct ~74% e.e.); (2) acidic hydrolysis (HCl) of the pyrazine auxiliary to give the amino-acid methyl ester; (3) enzymatic hydrolysis with chymotrypsin to resolve/deprotect, affording enantiomerically pure L-BPA (up to 100% e.e.).",
+      "reference_facts": [
+        "Optically pure L-BPA is made by a hybrid chemo-enzymatic process.",
+        "The route uses enantioselective alkylation of lithiated (2R)-2,5-dihydro-2-isopropyl-3,6-dimethoxypyrazine with 4-bromomethylbenzeneboronate.",
+        "The enantioselective alkylation is conducted in THF at -78 C.",
+        "The initial alkylation adduct is reported at about 74% e.e.",
+        "Acidic treatment with HCl gives the L-BPA methyl ester.",
+        "Chymotrypsin hydrolysis furnishes optically pure or enantiomerically pure L-BPA."
+      ],
       "gold_spans": [
         "Optically pure L-p-boronophenylalanine (BP A) was synthesized by a hybrid process involving enantioselective alkylation and subsequent enzymatic hydrolysis."
       ]
@@ -120,6 +129,15 @@
         "bbb0683"
       ],
       "reference_answer": "Across the papers, L-BPA is reached by several distinct routes, reflecting the difficulty of producing high-purity, isotopically enriched (10B) material. bbb0683 reports a hybrid chemo-enzymatic route (enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis) that delivers optically pure L-BPA at high e.e. CMDC-20-e202500059 reviews/compares multiple synthetic approaches and explicitly weighs scalability, cost-effectiveness and safety, especially the high cost of isotopically enriched boron precursors. The central trade-off is between routes that maximise enantiopurity/isotopic enrichment and those that are scalable and cost-effective given the expensive 10B-enriched starting materials.",
+      "reference_facts": [
+        "Multiple distinct synthetic routes to L-BPA are reported across the papers.",
+        "Producing high-purity, isotopically enriched 10B material is a central challenge.",
+        "bbb0683 uses enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis.",
+        "The bbb0683 route delivers optically pure or high-e.e. L-BPA.",
+        "CMDC-20-e202500059 compares synthetic approaches in terms of scalability, cost-effectiveness, and safety.",
+        "Isotopically enriched boron or 10B starting material is a major cost limitation.",
+        "The central trade-off balances enantiopurity or isotopic enrichment against scalability and cost-effectiveness."
+      ],
       "gold_spans": [
         "the synthesis of L-BPA has been approached through multiple routes, reflecting the challenges in producing high-purity, isotopically enriched material",
         "regarding scalability, cost-effectiveness, and safety, especially considering the high cost of isotopically enriched",

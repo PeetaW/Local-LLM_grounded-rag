@@ -7,6 +7,7 @@ import concurrent.futures
 import time
 
 import config as cfg
+from rag.comparison_json_validator import exact_isotope_terms
 from rag.query_embedding_guard import prepare_query_text
 
 
@@ -197,15 +198,27 @@ def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
         dimension_terms = (
             ("isotopically enriched", "isotopic enrichment", "10b"),
             ("scalability", "scale-up", "gram-scale", "few steps", "reaction steps", "workup"),
-            ("cost-effectiveness", "cost effectiveness", "high cost", "major cost"),
+            ("cost-effectiveness", "cost effectiveness", "high cost", "major cost", "cost"),
             ("safety", "safe", "toxicity", "risk"),
+        )
+        query_lower = query_text.lower()
+        prefer_isotope_cost_witness = (
+            any(term in query_lower for term in ("isotop", "enrich", "10b", "同位素", "富集"))
+            and any(term in query_lower for term in ("cost", "成本"))
         )
 
         def _coverage(nws):
             node = _node(nws)
             text = node.get_content() if hasattr(node, "get_content") else str(node)
             lower = _strip_context_summary(text).lower()
-            return sum(any(term in lower for term in group) for group in dimension_terms)
+            score = sum(any(term in lower for term in group) for group in dimension_terms)
+            if (
+                prefer_isotope_cost_witness
+                and exact_isotope_terms(lower, require_context=False)
+                and any(term in lower for term in dimension_terms[2])
+            ):
+                score += len(dimension_terms)
+            return score
 
         remaining = candidates[len(selected_nodes):]
         remaining = sorted(enumerate(remaining), key=lambda pair: (-_coverage(pair[1]), pair[0]))

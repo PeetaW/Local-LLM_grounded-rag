@@ -112,6 +112,8 @@ STAGE4_ANSWER_REWRITE_RETRIES = 1
 STAGE3_ENGLISH_DISTILLATION_ENABLED = True
 # A/B：方法/key-step 題只摘要核心步驟，不把起始物準備、背景方法或替代/對照路線升格成 key steps。
 METHOD_KEY_STEP_GUARD_ENABLED = True
+# A/B：method/key-step 題直接由 Stage 3 source-bound facts 渲染 atomic claims，跳過隨機 Stage 4 prose。
+METHOD_FACT_LIST_DIRECT_RENDER_ENABLED = True
 
 # ── Stage 5：邏輯自洽驗證 ─────────────────────────────
 VERIFY_ENABLED      = True
@@ -121,6 +123,8 @@ MAX_VERIFY_RETRIES  = 2             # Stage 5 verify→correct 迴圈最多重�
 # ── Eval 正確性裁判（只在 eval/judge.py 用，不在產品 pipeline）──
 # 預設用 qwen3（未參與答案生成 → 降低 self-preference 偏誤）。答案由 gemma4 生成。
 JUDGE_MODEL         = VERIFY_MODEL
+# A/B：structured judge 以候選 passage ID 回傳證據；格式仍失敗時降級 holistic judge，避免 N/A。
+STRUCTURED_JUDGE_STABLE_PROTOCOL_ENABLED = True
 # Eval debug artifacts：每題輸出 stage2/stage3/stage4/judge 文字檔，方便逐輪檢查 LLM 行為。
 EVAL_DEBUG_ARTIFACTS_ENABLED = True
 

@@ -95,6 +95,12 @@ def _citable_evidence(text: str) -> str:
     return value.split(marker, 1)[1] if marker in value else value
 
 
+def _evidence_units(text: str) -> list[str]:
+    parts = re.split(r"(?m)^\s*\[Snippet \d+\]\s*", str(text or ""))
+    units = [part.strip() for part in parts if part.strip()]
+    return units or [str(text or "")]
+
+
 def build_comparison_requirements(query: str, chunks: list[dict]) -> dict:
     rows = []
     for index, chunk in enumerate(chunks or []):
@@ -114,22 +120,36 @@ def build_comparison_requirements(query: str, chunks: list[dict]) -> dict:
         markers = _EVIDENCE_DIMENSION_MARKERS[key]
         sources = [
             row["source"] for row in review_rows
-            if any(marker in row["evidence"].lower() for marker in markers)
+            if (
+                any(marker in row["evidence"].lower() for marker in markers)
+                or (
+                    key == "isotopic_enrichment"
+                    and bool(exact_isotope_terms(row["evidence"]))
+                )
+            )
         ]
         if sources:
             dimension_sources[key] = list(dict.fromkeys(sources))
 
     isotope_scope = review_rows or rows
     isotopes = []
-    isotopes_by_source = {}
+    relation_isotopes_by_source = {}
     if "isotopic_enrichment" in requested:
         for row in isotope_scope:
             for term in exact_isotope_terms(row["evidence"]):
                 if term not in isotopes:
                     isotopes.append(term)
-                source_terms = isotopes_by_source.setdefault(row["source"], [])
-                if term not in source_terms:
-                    source_terms.append(term)
+            if "cost_effectiveness" in requested:
+                for unit in _evidence_units(row["evidence"]):
+                    if not any(
+                        marker in unit.lower()
+                        for marker in _EVIDENCE_DIMENSION_MARKERS["cost_effectiveness"]
+                    ):
+                        continue
+                    for term in exact_isotope_terms(unit, require_context=False):
+                        source_terms = relation_isotopes_by_source.setdefault(row["source"], [])
+                        if term not in source_terms:
+                            source_terms.append(term)
 
     relation_requirements = []
     if {"isotopic_enrichment", "cost_effectiveness"}.issubset(requested):
@@ -138,7 +158,10 @@ def build_comparison_requirements(query: str, chunks: list[dict]) -> dict:
             & set(dimension_sources.get("cost_effectiveness", []))
         )
         for source in review_sources:
-            anchors = isotopes_by_source.get(source, [])
+            anchors = [
+                term for term in relation_isotopes_by_source.get(source, [])
+                if term in isotopes
+            ]
             if source in shared_sources and anchors:
                 relation_requirements.append({
                     "dimension": "cost_effectiveness",
@@ -147,7 +170,7 @@ def build_comparison_requirements(query: str, chunks: list[dict]) -> dict:
                 })
 
     return {
-        "version": 2,
+        "version": 3,
         "requested_dimensions": requested,
         "review_sources": review_sources,
         "dimension_sources": dimension_sources,

@@ -71,6 +71,9 @@ sys.modules["rag.knowledge_synthesizer"]._comparison_json_validation_errors = Ma
 sys.modules["rag.comparison_json_validator"].comparison_json_validation_errors = MagicMock(
     return_value=[]
 )
+sys.modules["rag.comparison_json_validator"].exact_isotope_terms = (
+    lambda text, require_context=True: ["10B"] if "10b" in str(text).lower() else []
+)
 sys.modules["rag.answer_verifier"].AnswerVerifier = MagicMock(
     return_value=MagicMock()
 )
@@ -659,9 +662,9 @@ class TestRunSubqueriesParallel(unittest.TestCase):
 
             nodes = [
                 nws("top route evidence"),
-                nws("top isotope cost evidence"),
-                nws("generic rank three"),
-                nws("generic rank four"),
+                nws("top isotope context evidence"),
+                nws("generic isotopically enriched compounds have a major cost"),
+                nws("The cost of 10B is high compared with normal boric acid"),
                 nws("overview: isotopically enriched material, scalability, cost-effectiveness, and safety"),
                 nws("image safety noise", "image_description"),
             ]
@@ -672,9 +675,10 @@ class TestRunSubqueriesParallel(unittest.TestCase):
             )
 
             self.assertIn("top route evidence", block)
-            self.assertIn("top isotope cost evidence", block)
+            self.assertIn("top isotope context evidence", block)
+            self.assertIn("The cost of 10B is high", block)
             self.assertIn("overview: isotopically enriched material", block)
-            self.assertNotIn("generic rank four", block)
+            self.assertNotIn("generic isotopically enriched compounds", block)
             self.assertNotIn("image safety noise", block)
         finally:
             cfg.COMPARISON_JSON_DIRECT_RENDER_ENABLED = old
@@ -707,6 +711,15 @@ class TestEvalMetrics(unittest.TestCase):
         self.assertEqual(lat["retrieval_prefilled"], 1)
         self.assertEqual(lat["retrieval_phase_a"], 20)
         self.assertEqual(lat["retrieval_phase_b"], 80)
+
+    def test_summarize_exposes_missing_correctness_scores(self):
+        summary = eval_metrics.summarize([
+            {"correctness": 0.75},
+            {"correctness": None},
+        ])
+        self.assertEqual(summary["avg_correctness"], 0.75)
+        self.assertEqual(summary["n_correctness_scored"], 1)
+        self.assertEqual(summary["n_correctness_na"], 1)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1049,6 +1062,7 @@ def _setup_cfg(cfg_mock):
     cfg_mock.STAGE4_ANSWER_VALIDATION_ENABLED = False
     cfg_mock.STAGE4_ANSWER_REWRITE_RETRIES = 1
     cfg_mock.COMPARISON_JSON_DIRECT_RENDER_ENABLED = False
+    cfg_mock.METHOD_FACT_LIST_DIRECT_RENDER_ENABLED = False
     cfg_mock.EN_DRAFT_PIPELINE = False
     cfg_mock.FINAL_TRANSLATION_ENABLED = True
     cfg_mock.REASONING_MODE = "strict"
@@ -1056,6 +1070,40 @@ def _setup_cfg(cfg_mock):
 
 
 class TestExecuteStructuredQuery(unittest.TestCase):
+    def test_method_fact_renderer_keeps_core_condition_and_excludes_precursors(self):
+        kb = """
+[Fact 1] Optically pure L-BPA was synthesized by a hybrid process. (Source: bbb0683)
+[Fact 2] Lithiated auxiliary was reacted with bromide to yield an adduct in a 74% e.e. (Source: bbb0683)
+[Fact 3] Treatment with hydrochloric acid gave L-BPA methyl ester. (Source: bbb0683)
+[Fact 4] L-BPA methyl ester was hydrolyzed with chymotrypsin to furnish optically pure L-BPA. (Source: bbb0683)
+[Fact 5] The starting material was prepared from commercially available 4-bromotoluene. (Source: bbb0683)
+[Fact 6] The dihydroxyboryl group was protected as a cyclic borinate in a 79% yield. (Source: bbb0683)
+[Fact 7] Enantioselective alkylation was conducted in THF at -78°C. (Source: bbb0683)
+"""
+        answer, claims, audit = pipeline_module._render_method_fact_list(
+            kb,
+            "What hybrid process is used for the synthesis, and what are its key steps?",
+            [{"paper": "bbb0683", "sub_q": "Describe reagents and experimental conditions."}],
+        )
+
+        self.assertIn("THF at -78°C", answer)
+        self.assertIn("chymotrypsin", answer)
+        self.assertNotIn("commercially available", answer)
+        self.assertNotIn("79%", answer)
+        self.assertIn("conditions", audit["requirements"])
+        self.assertEqual(audit["missing_requirements"], [])
+        self.assertTrue(all(claim.startswith("- ") and "[bbb0683]" in claim for claim in claims))
+
+    def test_method_fact_renderer_falls_back_when_required_condition_is_missing(self):
+        answer, claims, audit = pipeline_module._render_method_fact_list(
+            "[Fact 1] Compound A was synthesized by a method that gave product B. (Source: PaperA)",
+            "What method is used and what are its key steps?",
+            [{"paper": "PaperA", "sub_q": "Report the experimental conditions and temperature."}],
+        )
+
+        self.assertEqual((answer, claims), ("", []))
+        self.assertEqual(audit["missing_requirements"], ["conditions"])
+
     def test_stage4_validator_flags_bad_comparison_answer(self):
         old = cfg.STAGE4_ANSWER_VALIDATION_ENABLED
         try:
@@ -1285,6 +1333,56 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertIn("Route A is practical at scale", result)
         pipeline_module._comparison_json_validation_errors.assert_called()
         mock_settings.llm.stream_complete.assert_not_called()
+        mock_translate.assert_not_called()
+
+    @patch("rag.query_pipeline.translate_to_traditional_chinese")
+    @patch("rag.query_pipeline.run_grounding_check")
+    @patch("rag.query_pipeline.run_subqueries_parallel")
+    @patch("rag.query_pipeline.build_subquery_tasks")
+    @patch("rag.query_pipeline.plan_sub_questions")
+    @patch("rag.query_pipeline.detect_target_paper")
+    @patch("rag.query_pipeline.cfg")
+    @patch("rag.query_pipeline.Settings")
+    def test_method_fact_renderer_skips_stage4_and_supplies_grounding_claims(
+        self, mock_settings, mock_cfg,
+        mock_detect, mock_plan, mock_build, mock_run,
+        mock_grounding, mock_translate,
+    ):
+        _setup_cfg(mock_cfg)
+        mock_cfg.SYNTHESIS_ENABLED = True
+        mock_cfg.CITATION_GROUNDING_ENABLED = True
+        mock_cfg.METHOD_FACT_LIST_DIRECT_RENDER_ENABLED = True
+        mock_cfg.EN_DRAFT_PIPELINE = True
+        mock_cfg.FINAL_TRANSLATION_ENABLED = False
+        mock_detect.return_value = "bbb0683"
+        mock_plan.return_value = [{
+            "paper": "bbb0683",
+            "sub_q": "Describe the key steps, reagents, and experimental conditions.",
+        }]
+        mock_build.return_value = ([], {})
+        mock_run.return_value = [(
+            "【bbb0683】",
+            "Retrieved paper evidence contains the complete hybrid synthesis procedure.",
+        )]
+        kb = """
+[Fact 1] Optically pure L-BPA was synthesized by a hybrid process. (Source: bbb0683)
+[Fact 2] Alkylation yielded an adduct in a 74% e.e. (Source: bbb0683)
+[Fact 3] Hydrochloric acid treatment gave L-BPA methyl ester. (Source: bbb0683)
+[Fact 4] Chymotrypsin hydrolysis furnished optically pure L-BPA. (Source: bbb0683)
+[Fact 5] The alkylation was conducted in THF at -78°C. (Source: bbb0683)
+"""
+        mock_grounding.side_effect = lambda full_text, *args, **kwargs: (full_text, "")
+
+        with patch.object(pipeline_module._synthesizer, "synthesize", return_value=kb):
+            result = pipeline_module.execute_structured_query(
+                "What hybrid process is used for the synthesis, and what are its key steps?",
+                {"bbb0683": MagicMock()},
+            )
+
+        self.assertIn("THF at -78°C", result)
+        mock_settings.llm.stream_complete.assert_not_called()
+        claims = mock_grounding.call_args.kwargs["grounding_claims"]
+        self.assertTrue(any("THF at -78°C" in claim for claim in claims))
         mock_translate.assert_not_called()
 
     def test_stage4_appends_missing_isotope_cost_fact(self):
@@ -1603,6 +1701,55 @@ class TestExecuteStructuredQueryStream(unittest.TestCase):
 
         self.assertTrue(len(status_tokens) > 0, "Expected at least one [STATUS] token")
         self.assertIn("Streamed answer token.", "".join(content_tokens))
+
+    @patch("rag.query_pipeline.translate_to_traditional_chinese")
+    @patch("rag.query_pipeline.run_grounding_check")
+    @patch("rag.query_pipeline.run_subqueries_parallel")
+    @patch("rag.query_pipeline.build_subquery_tasks")
+    @patch("rag.query_pipeline.plan_sub_questions")
+    @patch("rag.query_pipeline.detect_target_paper")
+    @patch("rag.query_pipeline.cfg")
+    @patch("rag.query_pipeline.Settings")
+    def test_stream_method_fact_renderer_skips_stage4_llm(
+        self, mock_settings, mock_cfg,
+        mock_detect, mock_plan, mock_build, mock_run,
+        mock_grounding, mock_translate,
+    ):
+        _setup_cfg(mock_cfg)
+        mock_cfg.SYNTHESIS_ENABLED = True
+        mock_cfg.CITATION_GROUNDING_ENABLED = True
+        mock_cfg.METHOD_FACT_LIST_DIRECT_RENDER_ENABLED = True
+        mock_cfg.EN_DRAFT_PIPELINE = True
+        mock_cfg.FINAL_TRANSLATION_ENABLED = False
+        mock_detect.return_value = "PaperA"
+        mock_plan.return_value = [{
+            "paper": "PaperA",
+            "sub_q": "Report the key steps and experimental conditions.",
+        }]
+        mock_build.return_value = ([], {})
+        mock_run.return_value = [(
+            "【PaperA】",
+            "Retrieved paper evidence contains a complete source-bound synthesis method.",
+        )]
+        kb = """
+[Fact 1] Product B was synthesized by a hybrid process. (Source: PaperA)
+[Fact 2] Reagent A reacted to give product B. (Source: PaperA)
+[Fact 3] The reaction was conducted in THF at -78°C. (Source: PaperA)
+"""
+        mock_grounding.side_effect = lambda full_text, *args, **kwargs: (full_text, "")
+
+        with patch.object(pipeline_module._synthesizer, "synthesize", return_value=kb):
+            tokens = self._collect(
+                pipeline_module.execute_structured_query_stream(
+                    "What synthesis process is used and what are its key steps?",
+                    {"PaperA": MagicMock()},
+                )
+            )
+
+        self.assertIn("THF at -78°C", "".join(tokens))
+        mock_settings.llm.stream_complete.assert_not_called()
+        self.assertTrue(mock_grounding.call_args.kwargs["grounding_claims"])
+        mock_translate.assert_not_called()
 
     @patch("rag.query_pipeline.translate_to_traditional_chinese")
     @patch("rag.query_pipeline.run_grounding_check")

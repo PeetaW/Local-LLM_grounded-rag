@@ -1,104 +1,428 @@
 # eval/judge.py
-# 正確性量尺：用 LLM-judge 比對系統答案 vs reference_answer（人工依原文填的標準答案）。
-# 只在 eval 時跑，不在產品 pipeline。裁判用 JUDGE_MODEL（預設 qwen3，未參與答案生成 → 降低 self-preference 偏誤）。
-# 跨語言可行：系統最終答案是繁中、reference 是英文，現代 LLM 可語意比對。
+# Correctness evaluation only. This module is not part of the product pipeline.
 
+import json
 import os
-import sys
 import re
-import requests
+import sys
+import unicodedata
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))  # 讓 standalone 也能 import config
+try:
+    import requests
+except ModuleNotFoundError:  # Offline self-checks do not need the HTTP client.
+    requests = None
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config as cfg
 
-# 強化版（2026-06-23 A/B 採用）：correctness judge 只管「對 reference 的涵蓋+不矛盾」。
-# 額外細節/標注的推論-推測層 OUT OF SCOPE（不獎不罰）——捏造偵測交給 grounding，非 judge 職責。
-# 移除「正確答案因額外細節/推測層被罰」的假象（Q04/06/08/11），同時 Q07/10/12 真漏講/假前提仍被扣。
+
 _JUDGE_SYSTEM = (
-    "You are a scientific answer grader. You compare a CANDIDATE answer against a REFERENCE answer. "
-    "The REFERENCE is the SOLE ground truth (from the source papers). Do NOT use your own outside "
-    "knowledge to decide correctness: if the CANDIDATE agrees with the REFERENCE it is correct even "
-    "if you believe otherwise.\n"
-    "Score ONLY whether the candidate (a) covers the REFERENCE's key facts and (b) does not "
-    "CONTRADICT them. Penalize ONLY: contradicting a reference fact, getting a reference fact wrong, "
-    "or OMITTING a key reference fact.\n"
-    "The candidate will usually contain MORE detail than the reference, and may include sections "
-    "explicitly labeled as cross-paper inference or speculation (e.g. '跨文獻推論', 'insufficient "
-    "literature basis', 'model speculation'). Extra detail beyond the reference, and such clearly-"
-    "labeled inference/speculation sections, are OUT OF SCOPE for this score — do NOT reward and do "
-    "NOT penalize them. Whether extra detail is faithful to the papers is measured separately and is "
-    "not your job.\n"
-    "Ignore style and language (the candidate may be in Chinese)."
+    "You are a scientific answer grader. Compare the CANDIDATE against the REFERENCE, which is "
+    "the sole ground truth. Score only coverage and agreement. Penalize only contradictions, "
+    "incorrect reference facts, or omitted key reference facts. Ignore style, language, citations, "
+    "and extra details; grounding is evaluated separately."
 )
 
 _RUBRIC = (
-    "Score 1-5 (coverage of and agreement with the REFERENCE's key facts ONLY):\n"
-    "5 = all the reference's key facts present and correct, none contradicted\n"
-    "4 = key facts mostly covered, one minor reference fact missing or slightly imprecise\n"
-    "3 = some key reference facts missing, or one notable contradiction/error\n"
-    "2 = most key reference facts missing or wrong\n"
-    "1 = fails to address the reference's key facts, or contradicts them throughout\n"
-    "For out-of-scope / false-premise questions, the REFERENCE says the system should refuse or "
-    "flag the false premise; score 5 if the candidate does so, 1 if it asserts a fabricated answer "
-    "to the false premise."
+    "Score 1-5:\n"
+    "5 = all key reference facts present and correct, none contradicted\n"
+    "4 = mostly covered, with one minor fact missing or imprecise\n"
+    "3 = some key facts missing, or one notable contradiction/error\n"
+    "2 = most key facts missing or wrong\n"
+    "1 = fails to address or broadly contradicts the reference\n"
+    "For false-premise questions, score 5 when the candidate flags the premise and does not fabricate."
+)
+
+_FACT_JUDGE_SYSTEM = (
+    "You are a scientific fact auditor. The numbered REFERENCE FACTS are the sole ground truth. "
+    "Audit every fact independently against the entire CANDIDATE. A fact may be supported by more "
+    "than one candidate passage. Ignore style, language, citations, and extra details. Return JSON only."
 )
 
 
+def _generate(system: str, prompt: str, model: str, base_url: str,
+              timeout: int, json_mode: bool = False) -> tuple[str | None, str | None]:
+    if requests is None:
+        return None, "judge call failed: requests is not installed"
+    payload = {
+        "model": model,
+        "system": system,
+        "prompt": prompt,
+        "stream": False,
+        "think": False,
+        "options": {
+            "temperature": 0.0,
+            "num_predict": 2048 if json_mode else 1024,
+            "num_ctx": 16384,
+            "thinking": False,
+        },
+    }
+    if json_mode:
+        payload["format"] = "json"
+    try:
+        resp = requests.post(f"{base_url}/api/generate", json=payload, timeout=timeout)
+        resp.raise_for_status()
+        return resp.json().get("response", ""), None
+    except Exception as exc:
+        return None, f"judge call failed: {exc}"
+
+
+def _json_object(text: str) -> dict | None:
+    try:
+        value = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        start, end = (text or "").find("{"), (text or "").rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            value = json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            return None
+    return value if isinstance(value, dict) else None
+
+
+def _normalized(text: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", str(text or "")).lower().split())
+
+
+def _fact_items(reference_facts: list) -> list[dict]:
+    return [
+        {"id": f"F{i}", "fact": str(fact).strip()}
+        for i, fact in enumerate(reference_facts or [], 1)
+        if str(fact).strip()
+    ]
+
+
+def _candidate_items(candidate: str) -> list[dict]:
+    """Number candidate passages so the judge selects evidence instead of copying it."""
+    items = []
+    for line in (candidate or "").splitlines():
+        text = re.sub(r"^(?:[-*]|\d+[.)])\s+", "", line.strip()).strip()
+        short_heading = text.endswith(":") and len(re.findall(r"\w+", text)) <= 3
+        if not text or text == "---" or short_heading:
+            continue
+        items.append({"id": f"C{len(items) + 1}", "text": text})
+    if not items and (candidate or "").strip():
+        items.append({"id": "C1", "text": candidate.strip()})
+    return items
+
+
+def _validate_fact_audit(
+    data: dict | None,
+    facts: list[dict],
+    candidate: str,
+    candidate_items: list[dict] | None = None,
+    stable_protocol: bool | None = None,
+) -> tuple[list, list]:
+    expected = {item["id"]: item["fact"] for item in facts}
+    rows = data.get("facts") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return [], ["top-level 'facts' must be a list"]
+
+    if stable_protocol is None:
+        stable_protocol = getattr(cfg, "STRUCTURED_JUDGE_STABLE_PROTOCOL_ENABLED", False)
+    candidate_items = candidate_items or _candidate_items(candidate)
+    candidate_lookup = {item["id"]: item["text"] for item in candidate_items}
+    found, errors = {}, []
+    candidate_norm = _normalized(candidate)
+    for row in rows:
+        if not isinstance(row, dict):
+            errors.append("every fact result must be an object")
+            continue
+        fact_id = str(row.get("id", ""))
+        verdict = str(row.get("verdict", "")).lower()
+        if fact_id not in expected:
+            errors.append(f"unexpected fact id {fact_id!r}")
+            continue
+        if fact_id in found:
+            errors.append(f"duplicate fact id {fact_id}")
+            continue
+        if verdict not in {"covered", "missing", "contradicted"}:
+            errors.append(f"{fact_id} has invalid verdict {verdict!r}")
+            continue
+
+        evidence_ids = []
+        if stable_protocol:
+            evidence_ids = row.get("evidence_ids", [])
+            if isinstance(evidence_ids, str):
+                evidence_ids = [evidence_ids]
+            if not isinstance(evidence_ids, list) or any(not isinstance(x, str) for x in evidence_ids):
+                errors.append(f"{fact_id} evidence_ids must be a string list")
+                continue
+            evidence_ids = [value.strip().upper() for value in evidence_ids if value.strip()]
+            unknown_ids = [value for value in evidence_ids if value not in candidate_lookup]
+            if unknown_ids:
+                errors.append(f"{fact_id} has unknown evidence_ids: {', '.join(unknown_ids)}")
+                continue
+            evidence = [candidate_lookup[value] for value in evidence_ids]
+        else:
+            evidence = row.get("evidence", [])
+            if isinstance(evidence, str):
+                evidence = [evidence]
+            if not isinstance(evidence, list) or any(not isinstance(x, str) for x in evidence):
+                errors.append(f"{fact_id} evidence must be a string list")
+                continue
+            evidence = [x.strip() for x in evidence if x.strip()]
+            bad_quotes = [quote for quote in evidence if _normalized(quote) not in candidate_norm]
+            if bad_quotes:
+                errors.append(f"{fact_id} evidence is not a verbatim candidate excerpt")
+                continue
+
+        if verdict in {"covered", "contradicted"} and not evidence:
+            errors.append(f"{fact_id} {verdict} verdict requires candidate evidence")
+            continue
+        if verdict == "missing" and evidence:
+            errors.append(f"{fact_id} missing verdict requires empty evidence")
+            continue
+        found[fact_id] = {
+            "id": fact_id,
+            "fact": expected[fact_id],
+            "verdict": verdict,
+            "evidence": evidence,
+            "reason": str(row.get("reason", "")).strip()[:300],
+        }
+        if stable_protocol:
+            found[fact_id]["evidence_ids"] = evidence_ids
+
+    missing_ids = [fact_id for fact_id in expected if fact_id not in found]
+    if missing_ids:
+        errors.append(f"missing fact results: {', '.join(missing_ids)}")
+    return [found[item["id"]] for item in facts if item["id"] in found], errors
+
+
+def _fact_prompt(
+    question: str,
+    candidate: str,
+    facts: list[dict],
+    review: bool = False,
+    correction: str = "",
+    candidate_items: list[dict] | None = None,
+    stable_protocol: bool | None = None,
+) -> str:
+    fact_text = "\n".join(f'{item["id"]}: {item["fact"]}' for item in facts)
+    task = (
+        "This is a second-pass review of negative verdicts. Search the entire candidate for support "
+        "the first pass may have missed; overturn a verdict only when exact candidate excerpts support it."
+        if review else
+        "Audit every numbered fact."
+    )
+    repair = f"\nYour previous JSON was invalid: {correction}\nReturn a corrected complete audit." if correction else ""
+    if stable_protocol is None:
+        stable_protocol = getattr(cfg, "STRUCTURED_JUDGE_STABLE_PROTOCOL_ENABLED", False)
+    if stable_protocol:
+        candidate_items = candidate_items or _candidate_items(candidate)
+        candidate_text = "\n".join(f'{item["id"]}: {item["text"]}' for item in candidate_items)
+        schema = (
+            '{"facts":[{"id":"F1","verdict":"covered|missing|contradicted",'
+            '"evidence_ids":["C1"],"reason":"short reason"}]}\n'
+            "Use only supplied candidate passage IDs. Covered or contradicted requires one or more evidence_ids; "
+            "missing requires an empty evidence_ids list."
+        )
+        candidate_label = "CANDIDATE PASSAGES"
+    else:
+        candidate_text = candidate
+        schema = (
+            '{"facts":[{"id":"F1","verdict":"covered|missing|contradicted",'
+            '"evidence":["exact contiguous excerpt copied from CANDIDATE"],"reason":"short reason"}]}\n'
+            "Evidence may contain multiple exact excerpts when support is distributed. For missing, return an empty evidence list."
+        )
+        candidate_label = "CANDIDATE"
+    return (
+        f"{task}{repair}\n\nQUESTION:\n{question}\n\nREFERENCE FACTS:\n{fact_text}\n\n"
+        f"{candidate_label}:\n{candidate_text}\n\nReturn exactly this JSON shape:\n{schema}\n"
+        "Use every supplied fact id exactly once. Use covered only when the complete fact is expressed; "
+        "use missing only when the fact is absent, and use contradicted only for an opposing claim. "
+        "Do not output a score."
+    )
+
+
+def _request_fact_audit(question: str, candidate: str, facts: list[dict], model: str,
+                        base_url: str, timeout: int, review: bool = False) -> tuple[list | None, str | None, int]:
+    correction = ""
+    stable_protocol = getattr(cfg, "STRUCTURED_JUDGE_STABLE_PROTOCOL_ENABLED", False)
+    candidate_items = _candidate_items(candidate)
+    for attempt in range(1, 3):
+        output, error = _generate(
+            _FACT_JUDGE_SYSTEM,
+            _fact_prompt(
+                question,
+                candidate,
+                facts,
+                review,
+                correction,
+                candidate_items=candidate_items,
+                stable_protocol=stable_protocol,
+            ),
+            model,
+            base_url,
+            timeout,
+            json_mode=True,
+        )
+        if error:
+            return None, error, attempt
+        audit, errors = _validate_fact_audit(
+            _json_object(output),
+            facts,
+            candidate,
+            candidate_items=candidate_items,
+            stable_protocol=stable_protocol,
+        )
+        if not errors:
+            return audit, None, attempt
+        correction = "; ".join(errors)
+    return None, f"invalid structured judge output: {correction}", 2
+
+
+def _score_fact_audit(audit: list[dict]) -> tuple[int, float, str]:
+    total = len(audit)
+    covered = [item["id"] for item in audit if item["verdict"] == "covered"]
+    missing = [item["id"] for item in audit if item["verdict"] == "missing"]
+    contradicted = [item["id"] for item in audit if item["verdict"] == "contradicted"]
+    ratio = len(covered) / total if total else 0.0
+    if ratio == 1.0 and not contradicted:
+        raw = 5
+    elif ratio >= 0.8 and not contradicted:
+        raw = 4
+    elif ratio >= 0.5:
+        raw = 3
+    elif ratio > 0:
+        raw = 2
+    else:
+        raw = 1
+    if contradicted:
+        raw = min(raw, 3)
+    parts = [f"covered {len(covered)}/{total}"]
+    if missing:
+        parts.append(f"missing {', '.join(missing)}")
+    if contradicted:
+        parts.append(f"contradicted {', '.join(contradicted)}")
+    return raw, (raw - 1) / 4.0, "; ".join(parts)
+
+
+def _judge_holistic(
+    question: str,
+    candidate: str,
+    reference: str,
+    model: str,
+    base_url: str,
+    timeout: int,
+    mode: str = "legacy_holistic",
+) -> dict:
+    prompt = (
+        f"{_RUBRIC}\n\nQUESTION:\n{question}\n\nREFERENCE (ground truth):\n{reference}\n\n"
+        f"CANDIDATE (system answer):\n{candidate}\n\n"
+        "Output exactly two lines:\nSCORE: <1-5>\nREASON: <one sentence>"
+    )
+    output, error = _generate(_JUDGE_SYSTEM, prompt, model, base_url, timeout)
+    if error:
+        return {"score": None, "raw": None, "reason": error, "mode": mode}
+    match = re.search(r"SCORE:\s*([1-5])", output or "") or re.search(r"\b([1-5])\s*/\s*5\b", output or "")
+    if not match:
+        return {
+            "score": None,
+            "raw": None,
+            "reason": f"unparseable judge output: {(output or '')[:120]}",
+            "mode": mode,
+        }
+    raw = int(match.group(1))
+    reason_match = re.search(r"REASON:\s*(.+)", output or "", re.S)
+    reason = reason_match.group(1).strip()[:300] if reason_match else (output or "")[:200].strip()
+    return {"score": (raw - 1) / 4.0, "raw": raw, "reason": reason, "mode": mode}
+
+
+def _judge_structured(question: str, candidate: str, reference: str, reference_facts: list,
+                      model: str, base_url: str, timeout: int) -> dict:
+    facts = _fact_items(reference_facts)
+    audit, error, first_attempts = _request_fact_audit(
+        question, candidate, facts, model, base_url, timeout,
+    )
+    if error:
+        if (
+            getattr(cfg, "STRUCTURED_JUDGE_STABLE_PROTOCOL_ENABLED", False)
+            and error.startswith("invalid structured judge output:")
+        ):
+            fallback = _judge_holistic(
+                question,
+                candidate,
+                reference,
+                model,
+                base_url,
+                timeout,
+                mode="legacy_holistic_fallback",
+            )
+            fallback["structured_error"] = error
+            fallback["judge_attempts"] = first_attempts + 1
+            return fallback
+        return {
+            "score": None,
+            "raw": None,
+            "reason": error,
+            "mode": "structured_fact_audit_v1",
+        }
+
+    reviewed_ids = []
+    disputed = [item for item in facts if next(x for x in audit if x["id"] == item["id"])["verdict"] != "covered"]
+    review_attempts = 0
+    review_error = None
+    if disputed:
+        review, review_error, review_attempts = _request_fact_audit(
+            question, candidate, disputed, model, base_url, timeout, review=True,
+        )
+        if review:
+            initial = {item["id"]: item for item in audit}
+            for item in review:
+                item["initial_verdict"] = initial[item["id"]]["verdict"]
+                initial[item["id"]] = item
+                reviewed_ids.append(item["id"])
+            audit = [initial[item["id"]] for item in facts]
+
+    raw, score, reason = _score_fact_audit(audit)
+    result = {
+        "score": score,
+        "raw": raw,
+        "reason": reason,
+        "mode": "structured_fact_audit_v1",
+        "fact_audit": audit,
+        "reviewed_ids": reviewed_ids,
+        "judge_attempts": first_attempts + review_attempts,
+    }
+    if review_error:
+        result["review_error"] = review_error
+    return result
+
+
 def judge_correctness(question: str, candidate: str, reference: str,
-                      model: str = None, base_url: str = None, timeout: int = 600) -> dict:
-    """
-    回傳 {"score": float 0..1, "raw": int 1..5 | None, "reason": str}。
-    呼叫失敗回 score=None，讓上層當「未評」處理而非 0 分。
-    """
+                      model: str = None, base_url: str = None, timeout: int = 600,
+                      reference_facts: list | None = None) -> dict:
+    """Return score in 0..1. Curated reference_facts enable auditable structured judging."""
     model = model or getattr(cfg, "JUDGE_MODEL", cfg.VERIFY_MODEL)
     base_url = base_url or cfg.OLLAMA_BASE_URL
     if not (reference or "").strip() or not (candidate or "").strip():
         return {"score": None, "raw": None, "reason": "missing reference or candidate"}
-
-    prompt = (
-        f"{_RUBRIC}\n\n"
-        f"QUESTION:\n{question}\n\n"
-        f"REFERENCE (ground truth):\n{reference}\n\n"
-        f"CANDIDATE (system answer):\n{candidate}\n\n"
-        "Output exactly two lines:\nSCORE: <1-5>\nREASON: <one sentence>"
-    )
-    try:
-        resp = requests.post(
-            f"{base_url}/api/generate",
-            json={
-                "model": model,
-                "system": _JUDGE_SYSTEM,
-                "prompt": prompt,
-                "stream": False,
-                # 關 thinking：打分是有界任務，qwen3 開思考會把 num_predict 吃光、SCORE 吐不出來。
-                "think": False,
-                "options": {"temperature": 0.0, "num_predict": 1024, "num_ctx": 16384, "thinking": False},
-            },
-            timeout=timeout,
+    if _fact_items(reference_facts):
+        return _judge_structured(
+            question,
+            candidate,
+            reference,
+            reference_facts,
+            model,
+            base_url,
+            timeout,
         )
-        resp.raise_for_status()
-        out = resp.json().get("response", "")
-    except Exception as e:
-        return {"score": None, "raw": None, "reason": f"judge call failed: {e}"}
-
-    m = re.search(r"SCORE:\s*([1-5])", out)
-    if not m:
-        m = re.search(r"\b([1-5])\s*/\s*5\b", out)  # 容錯：模型寫成 N/5
-    if not m:
-        return {"score": None, "raw": None, "reason": f"unparseable judge output: {out[:120]}"}
-    raw = int(m.group(1))
-    rm = re.search(r"REASON:\s*(.+)", out, re.S)
-    reason = (rm.group(1).strip()[:300] if rm else out[:200].strip())
-    return {"score": (raw - 1) / 4.0, "raw": raw, "reason": reason}
+    return _judge_holistic(question, candidate, reference, model, base_url, timeout)
 
 
 if __name__ == "__main__":
-    # 自檢：不呼叫模型，只測 parsing 與邊界（離線可跑）
-    import types
-    fake = '{"response": "SCORE: 4\\nREASON: minor value missing."}'
-    # 直接測 regex 解析邏輯
-    assert re.search(r"SCORE:\s*([1-5])", "SCORE: 4\nREASON: x").group(1) == "4"
-    assert re.search(r"\b([1-5])\s*/\s*5\b", "I give 3/5 overall").group(1) == "3"
-    assert judge_correctness("q", "ans", "")["score"] is None     # 空 reference → 未評
-    assert judge_correctness("q", "", "ref")["score"] is None     # 空 candidate → 未評
+    candidate = "Producing high-purity, isotopically enriched 10B material is a challenge."
+    facts = _fact_items(["High-purity isotopically enriched 10B material is difficult to produce."])
+    valid = {"facts": [{
+        "id": "F1",
+        "verdict": "covered",
+        "evidence_ids": ["C1"],
+        "reason": "directly stated",
+    }]}
+    audit, errors = _validate_fact_audit(valid, facts, candidate, stable_protocol=True)
+    assert not errors and _score_fact_audit(audit)[:2] == (5, 1.0)
+    assert _validate_fact_audit({"facts": []}, facts, candidate)[1]
+    assert judge_correctness("q", "ans", "")["score"] is None
     print("judge.py self-check OK")

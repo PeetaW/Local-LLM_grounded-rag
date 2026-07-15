@@ -5,6 +5,7 @@
 # 用法：
 #   python eval/run_eval.py --run --label baseline      # 跑題組，存 results/eval_baseline.json
 #   python eval/run_eval.py --run --label rerank24      # 改 config 後再跑一次
+#   python eval/run_eval.py --rejudge-existing baseline --label baseline_rejudged
 #   python eval/run_eval.py --compare baseline rerank24 # 比較兩次彙總指標
 #
 # 兩種模式（依 eval_set.json 是否填了 gold 欄位自動切換）：
@@ -217,6 +218,11 @@ def _write_markdown_report(out: dict, path: str):
     L.append("| 指標 | 值 |")
     L.append("|------|-----|")
     L.append(f"| 平均正確性（LLM-judge） | {_fmt(s.get('avg_correctness'))} |")
+    if out.get("mode") == "gold":
+        scored = s.get("n_correctness_scored", 0)
+        total = s.get("n_questions", 0)
+        missing = s.get("n_correctness_na", total - scored)
+        L.append(f"| Correctness judge 覆蓋 | {scored}/{total}（N/A {missing}） |")
     L.append(f"| 平均 grounding 分數 | {_fmt(s.get('avg_grounding_score'))} |")
     L.append(f"| 平均論文選擇命中率 | {_fmt(s.get('avg_paper_sel_recall'), pct=True)} |")
     L.append(f"| 平均檢索覆蓋率 | {_fmt(s.get('avg_retrieval_recall'), pct=True)} |")
@@ -258,6 +264,14 @@ def _write_markdown_report(out: dict, path: str):
         L.append(f"- 選出論文：{r.get('selected_papers')}")
         L.append(f"- gold_papers：{r.get('gold_papers')}")
         L.append(f"- correctness candidate：`{r.get('correctness_candidate_source', 'answer')}`")
+        detail = r.get("correctness_detail") or {}
+        L.append(
+            f"- correctness：{_fmt(r.get('correctness'))}　"
+            f"raw：{_fmt(detail.get('raw'), suffix='/5')}　"
+            f"judge：`{detail.get('mode', 'legacy_holistic')}`"
+        )
+        if detail.get("reason"):
+            L.append(f"- judge reason：{detail['reason']}")
         L.append(
             f"- 論文選擇命中率：{_fmt(r.get('paper_selection_recall'), pct=True)}　"
             f"檢索覆蓋率：{_fmt(r.get('retrieval_span_recall'), pct=True)}　"
@@ -368,9 +382,14 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
         answer_for_judge, candidate_source = _correctness_candidate(answer, artifacts, reference)
         if reference and not retrieval_only and answer:
             from judge import judge_correctness  # 同目錄
-            j = judge_correctness(qtext, answer_for_judge, reference)
+            j = judge_correctness(
+                qtext,
+                answer_for_judge,
+                reference,
+                reference_facts=q.get("reference_facts"),
+            )
             correctness = j["score"]
-            correctness_detail = {"raw": j["raw"], "reason": j["reason"]}
+            correctness_detail = {key: value for key, value in j.items() if key != "score"}
             print(f"  ⚖️  [Judge] correctness={correctness}（{j['raw']}/5, {candidate_source}）：{j['reason'][:80]}")
 
         row = {
@@ -425,6 +444,66 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
     _log_file.close()
 
 
+def rejudge_existing(source_label: str, output_label: str = None, ids: str = None):
+    """Re-run correctness judging from saved candidates without loading indexes or the RAG pipeline."""
+    source_label = _safe_file_part(source_label)
+    output_label = _safe_file_part(output_label or f"{source_label}_rejudged")
+    source_path = os.path.join(RESULTS_DIR, f"eval_{source_label}.json")
+    with open(source_path, "r", encoding="utf-8") as f:
+        source = json.load(f)
+
+    questions = {q.get("id"): q for q in _load_questions()}
+    rows = source.get("rows", [])
+    if ids:
+        wanted = {value.strip().upper() for value in ids.split(",") if value.strip()}
+        rows = [row for row in rows if str(row.get("id", "")).upper() in wanted]
+    if not rows:
+        raise ValueError("no matching saved eval rows to rejudge")
+
+    from judge import judge_correctness
+
+    artifact_dir = os.path.join(RESULTS_DIR, output_label)
+    os.makedirs(artifact_dir, exist_ok=True)
+    for row in rows:
+        qid = row.get("id")
+        question = questions.get(qid, {})
+        reference = question.get("reference_answer", "")
+        candidate = row.get("answer_for_judge") or row.get("answer", "")
+        result = judge_correctness(
+            row.get("question") or question.get("question", ""),
+            candidate,
+            reference,
+            reference_facts=question.get("reference_facts"),
+        )
+        row["correctness"] = result["score"]
+        row["correctness_detail"] = {key: value for key, value in result.items() if key != "score"}
+        row["correctness_candidate_source"] = "answer_for_judge" if row.get("answer_for_judge") else "answer"
+        _write_text_artifact(
+            os.path.join(artifact_dir, f"{_safe_file_part(qid)}_judge.json"),
+            row["correctness_detail"],
+        )
+        print(
+            f"  ⚖️  [Rejudge] {qid}: correctness={result['score']} "
+            f"({result['raw']}/5, {result.get('mode')}) - {result['reason']}"
+        )
+
+    out = {
+        **source,
+        "label": output_label,
+        "source_label": source_label,
+        "summary": metrics.summarize(rows),
+        "rows": rows,
+    }
+    json_path = os.path.join(RESULTS_DIR, f"eval_{output_label}.json")
+    md_path = os.path.join(RESULTS_DIR, f"eval_{output_label}.md")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)
+    _write_markdown_report(out, md_path)
+    print(f"JSON result: {json_path}")
+    print(f"Markdown report: {md_path}")
+    print(f"Structured judge artifacts: {artifact_dir}")
+
+
 def compare(label_a: str, label_b: str):
     def _load(lbl):
         with open(os.path.join(RESULTS_DIR, f"eval_{lbl}.json"), "r", encoding="utf-8") as f:
@@ -440,16 +519,19 @@ def compare(label_a: str, label_b: str):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Tier 0 RAG 評估骨架")
     ap.add_argument("--run", action="store_true", help="跑題組")
-    ap.add_argument("--label", default="baseline", help="這次結果的標籤（檔名用）")
+    ap.add_argument("--label", default=None, help="這次結果的標籤（--run 預設 baseline）")
     ap.add_argument("--limit", type=int, default=None, help="只跑前 N 題（快速測試/重現用）")
     ap.add_argument("--retrieval-only", action="store_true", help="只測選擇/檢索覆蓋率，跳過完整 pipeline（幾分鐘）")
     ap.add_argument("--ids", default=None, help="只跑指定題號，逗號分隔，如 Q05,Q06,Q08（挑代表題快速迭代）")
+    ap.add_argument("--rejudge-existing", metavar="LABEL", help="只重評既有 eval JSON，不重跑 pipeline")
     ap.add_argument("--compare", nargs=2, metavar=("A", "B"), help="比較兩個 label 的彙總")
     args = ap.parse_args()
 
     if args.compare:
         compare(*args.compare)
+    elif args.rejudge_existing:
+        rejudge_existing(args.rejudge_existing, args.label, args.ids)
     elif args.run:
-        run(args.label, args.limit, args.retrieval_only, args.ids)
+        run(args.label or "baseline", args.limit, args.retrieval_only, args.ids)
     else:
         ap.print_help()
