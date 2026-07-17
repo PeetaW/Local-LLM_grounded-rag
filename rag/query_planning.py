@@ -197,6 +197,8 @@ def plan_sub_questions(question: str, paper_names: list) -> list:
    例如合成路線比較題應詢問每篇論文是否 reports, reviews, or compares high-level synthetic approaches to the target compound，
    並要求抽出與原問題指定面向相關的高層證據（例如 isotopic enrichment, scalability, cost-effectiveness, safety）。
    不要詢問 exhaustive procedural details、amounts、temperatures、step-by-step route variants，除非使用者明確要求完整實驗條件。
+7. 問題若同時要求多個面向（例如 impurities 與 storage conditions、mechanism 與 supporting data、fluoride binding 與 hydrogel formation），每個面向至少要有一個聚焦子問題；不要把它們全部塞進泛泛的 main objective/novelty 問題。
+8. 問題若以 since/because/assuming 等前提要求數值或結論，額外建立一個子問題驗證該前提，並查找文獻實際報告的替代事實；前提未驗證前不可直接接受。
 以 JSON 陣列回傳，格式如下，只輸出 JSON，不要其他文字：
 [
 {{"paper": "論文檔名（不含.pdf）或 ALL", "sub_q": "子問題內容"}},

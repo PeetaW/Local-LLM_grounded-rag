@@ -36,6 +36,13 @@ class TestStructuredJudge(unittest.TestCase):
             ],
         )
 
+    def test_candidate_items_split_multiple_sentences(self):
+        items = judge._candidate_items(
+            "JPH203 occupies the LAT1 substrate pocket. It blocks amino-acid transport."
+        )
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[1]["text"], "It blocks amino-acid transport.")
+
     def test_negative_verdict_is_rechecked_with_candidate_ids(self):
         candidate = (
             "Producing high-purity, isotopically enriched 10B material is a challenge.\n"
@@ -86,6 +93,28 @@ class TestStructuredJudge(unittest.TestCase):
         }]}, facts, "actual candidate", stable_protocol=False)
         self.assertTrue(errors)
 
+    def test_negative_review_does_not_change_negative_verdict_type(self):
+        first = {"facts": [{
+            "id": "F1", "verdict": "missing", "evidence_ids": [], "reason": "not stated",
+        }]}
+        review = {"facts": [{
+            "id": "F1", "verdict": "contradicted", "evidence_ids": ["C1"], "reason": "opposite",
+        }]}
+        client = MagicMock()
+        client.post.side_effect = [_response(first), _response(review)]
+        with patch.object(judge, "requests", client):
+            result = judge.judge_correctness(
+                "question",
+                "The candidate states a different fact.",
+                "Reference fact.",
+                model="test",
+                base_url="http://test",
+                reference_facts=["Reference fact."],
+            )
+
+        self.assertEqual(result["fact_audit"][0]["verdict"], "missing")
+        self.assertEqual(result["fact_audit"][0]["review_verdict"], "contradicted")
+
     def test_unknown_candidate_id_is_rejected(self):
         facts = judge._fact_items(["A fact"])
         _, errors = judge._validate_fact_audit({"facts": [{
@@ -125,6 +154,46 @@ class TestStructuredJudge(unittest.TestCase):
         self.assertEqual(result["score"], 1.0)
         self.assertEqual(result["mode"], "legacy_holistic_fallback")
         self.assertIn("unknown evidence_ids", result["structured_error"])
+
+
+class TestTranslationJudge(unittest.TestCase):
+    def test_translation_fidelity_uses_separate_scoring_contract(self):
+        client = MagicMock()
+        client.post.return_value = _response({"errors": [{
+            "type": "mistranslation",
+            "severity": "material",
+            "source_ids": ["S1"],
+            "target_ids": ["T1"],
+            "reason": "chymotrypsin was mistranslated as trypsin",
+        }]})
+        with patch.object(judge, "requests", client):
+            result = judge.judge_translation_fidelity(
+                "The route uses chymotrypsin-catalysed hydrolysis.",
+                "此路線使用胰蛋白酶催化水解。",
+                model="test",
+                base_url="http://test",
+            )
+
+        self.assertEqual(result["score"], 0.5)
+        self.assertEqual(result["mode"], "translation_fidelity_v2")
+        payload = client.post.call_args.kwargs["json"]
+        self.assertIn("technical term left in English", payload["system"])
+        self.assertIn("ENGLISH SOURCE SENTENCES", payload["prompt"])
+        self.assertEqual(payload["format"], "json")
+
+    def test_translation_fidelity_accepts_retained_english_terms(self):
+        client = MagicMock()
+        client.post.return_value = _response({"errors": []})
+        with patch.object(judge, "requests", client):
+            result = judge.judge_translation_fidelity(
+                "JPH203 binds LAT1.",
+                "JPH203 與 LAT1 結合。",
+                model="test",
+                base_url="http://test",
+            )
+
+        self.assertEqual(result["score"], 1.0)
+        self.assertEqual(result["error_audit"], [])
 
 
 if __name__ == "__main__":

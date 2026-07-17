@@ -113,14 +113,24 @@ def summarize(rows: list) -> dict:
         isinstance(row.get("correctness"), (int, float)) and row["correctness"] >= 0
         for row in rows
     )
+    translation_scored = sum(
+        isinstance(row.get("translation_fidelity"), (int, float))
+        and row["translation_fidelity"] >= 0
+        for row in rows
+    )
     return {
         "n_questions":          len(rows),
         "n_correctness_scored": correctness_scored,
         "n_correctness_na":     len(rows) - correctness_scored,
         "avg_correctness":      _avg("correctness"),
+        "n_translation_scored": translation_scored,
+        "n_translation_na":     len(rows) - translation_scored,
+        "avg_translation_fidelity": _avg("translation_fidelity"),
         "avg_grounding_score":  _avg("grounding_score"),
         "avg_paper_sel_recall": _avg("paper_selection_recall"),
         "avg_retrieval_recall": _avg("retrieval_span_recall"),
+        "avg_retriever_candidate_recall": _avg("retriever_candidate_recall"),
+        "avg_stage2_evidence_recall": _avg("stage2_evidence_recall"),
         "avg_total_ms":         _avg("latency", "total"),
         "avg_planning_ms":      _avg("latency", "planning"),
         "avg_retrieval_ms":     _avg("latency", "retrieval"),

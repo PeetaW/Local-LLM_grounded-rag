@@ -120,6 +120,40 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             cfg.STAGE3_COMPARISON_SCHEMA_ENABLED = old_schema
             cfg.COMPARISON_JSON_ENABLED = old_json
 
+    def test_mechanism_comparison_schema_requires_source_bound_witnesses(self):
+        prompt = _build_user_prompt(
+            "FORMATTED_CHUNKS",
+            "Compare LAT1-targeting strategies and explain how their mechanisms differ.",
+        )
+        self.assertIn('"supporting_mechanisms"', prompt)
+        self.assertIn("fill supporting_mechanisms", prompt)
+
+        payload = {
+            "comparison_json": {
+                "source_roles": [{"source": "StructureA", "role": "mechanism"}],
+                "direct_routes": [],
+                "review_comparison_sources": [],
+                "dimensions": {},
+                "central_tradeoff": "",
+            }
+        }
+        errors = _comparison_json_validation_errors(
+            json.dumps(payload),
+            "How do the mechanisms differ?",
+        )
+        self.assertTrue(any("supporting_mechanisms" in error for error in errors))
+
+        payload["comparison_json"]["supporting_mechanisms"] = [{
+            "source": "StructureA",
+            "claim": "JPH203 occupies the LAT1 substrate-binding pocket.",
+            "evidence": "JPH203 binds within the traditional substrate-binding pocket.",
+        }]
+        errors = _comparison_json_validation_errors(
+            json.dumps(payload),
+            "How do the mechanisms differ?",
+        )
+        self.assertFalse(any("supporting_mechanisms" in error for error in errors))
+
     def test_english_distillation_is_ab_switch(self):
         old = cfg.STAGE3_ENGLISH_DISTILLATION_ENABLED
         try:

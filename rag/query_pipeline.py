@@ -286,6 +286,16 @@ def _stage4_empty_answer_fallback(
         return "" if atomic_only else (knowledge_base or "").strip()
 
     q_lower = (question or "").lower()
+    route_text = " ".join(
+        str(route.get("route_phrase", ""))
+        for route in comparison.get("direct_routes", [])
+        if isinstance(route, dict)
+    ).lower()
+    is_synthesis_comparison = any(term in q_lower for term in (
+        "synthesi", "synthetic route", "preparation method", "manufactur", "合成", "製備",
+    )) or any(term in route_text for term in (
+        "synthesi", "alkylat", "hydrolys", "deprotect", "coupling", "reaction sequence",
+    ))
     detail_requested = any(term in q_lower for term in (
         "yield", "percentage", "percent", "e.e.", "optical purity", "ld50",
         "toxicity", "dose", "temperature", "reaction condition", "reagent",
@@ -331,8 +341,19 @@ def _stage4_empty_answer_fallback(
         if atomic_only and (not source or not phrase or not outcome):
             return ""
         if source and phrase and source not in background_sources:
-            result = f", yielding {outcome}" if outcome else ""
-            lines.append(f"- Route: `{source}` reports {phrase}{result} [{source}].")
+            result = (
+                f", yielding {outcome}" if is_synthesis_comparison else f", with {outcome}"
+            ) if outcome else ""
+            label = "Route" if is_synthesis_comparison else "Strategy"
+            lines.append(f"- {label}: `{source}` reports {phrase}{result} [{source}].")
+
+    for mechanism in comparison.get("supporting_mechanisms", []):
+        if not isinstance(mechanism, dict):
+            continue
+        source = str(mechanism.get("source", "")).strip()
+        claim = str(mechanism.get("claim", "")).strip().rstrip(".")
+        if source and claim and source not in background_sources:
+            lines.append(f"- Mechanism: `{source}` reports {claim} [{source}].")
 
     for review in comparison.get("review_comparison_sources", []):
         if not isinstance(review, dict):
@@ -344,11 +365,11 @@ def _stage4_empty_answer_fallback(
                 for value in review.get("dimensions", [])
                 if str(value).strip()
             ] if isinstance(review.get("dimensions"), list) else []
-            lines.append(
-                f"- Review/comparison source: `{source}` reports that the synthesis of "
-                f"{target_compound} has been approached through multiple routes"
-                f" [{source}]."
-            )
+            if is_synthesis_comparison:
+                claim = f"the synthesis of {target_compound} has been approached through multiple routes"
+            else:
+                claim = f"multiple therapeutic strategies involve {target_compound}"
+            lines.append(f"- Review/comparison source: `{source}` reports that {claim} [{source}].")
             if concise and dimensions:
                 review_dimensions = [
                     value for value in dimensions if "isotop" not in value.lower()
@@ -611,10 +632,7 @@ def execute_structured_query(
                 question=question,
             )
             if direct_answer:
-                direct_grounding_claims = [
-                    line.strip() for line in direct_answer.splitlines()
-                    if line.strip().startswith("-")
-                ]
+                direct_grounding_claims = split_into_sentences(direct_answer)
                 synthesis_prompt = "[deterministic comparison_json renderer]"
         if (
             not direct_answer
@@ -739,6 +757,8 @@ def execute_structured_query(
         _status("\n[translation] 開始")
         full_text = translate_to_traditional_chinese(full_text, on_status=on_status)
         _status(f"[translation] 完成 elapsed_ms={int((time.perf_counter()-t6)*1000)}")
+        if on_artifact:
+            on_artifact("stage7_translated_answer", full_text)
 
     # PARTIAL 軟警告：翻譯後才加（橫幅本身已是中文，不送進翻譯）。棄答時 full_text 已是橫幅，不重複。
     if gate_notice and not gate_abstain:
@@ -861,10 +881,7 @@ def execute_structured_query_stream(
                 question=question,
             )
             if direct_answer:
-                direct_grounding_claims = [
-                    line.strip() for line in direct_answer.splitlines()
-                    if line.strip().startswith("-")
-                ]
+                direct_grounding_claims = split_into_sentences(direct_answer)
         if (
             not direct_answer
             and rag_found_anything

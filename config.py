@@ -125,6 +125,8 @@ MAX_VERIFY_RETRIES  = 2             # Stage 5 verify→correct 迴圈最多重�
 JUDGE_MODEL         = VERIFY_MODEL
 # A/B：structured judge 以候選 passage ID 回傳證據；格式仍失敗時降級 holistic judge，避免 N/A。
 STRUCTURED_JUDGE_STABLE_PROTOCOL_ENABLED = True
+# Eval-only：獨立比較英文 canonical draft 與繁中譯文，不讓翻譯錯誤污染核心 correctness。
+TRANSLATION_FIDELITY_JUDGE_ENABLED = True
 # Eval debug artifacts：每題輸出 stage2/stage3/stage4/judge 文字檔，方便逐輪檢查 LLM 行為。
 EVAL_DEBUG_ARTIFACTS_ENABLED = True
 
@@ -132,6 +134,8 @@ EVAL_DEBUG_ARTIFACTS_ENABLED = True
 SUBQUERY_MAX_WORKERS = 4   # 並行子查詢的 thread pool 大小
 # A/B：True=每個子查詢先用 LLM 生成子答案；False=直接把 retrieved chunks 打包給 Stage 3 蒸餾。
 STAGE2_LLM_SUBANSWERS_ENABLED = False
+# A/B：從既有 retrieval candidates 選問題相關的完整句子視窗；False 回到固定前兩段/前 900 字。
+STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = True
 STAGE2_EVIDENCE_SNIPPETS_PER_TASK = 2
 COMPARISON_EVIDENCE_SNIPPETS_PER_TASK = 4
 
@@ -161,13 +165,13 @@ SELFCORRECT_ENTAIL_MAX = 0.2
 # 可答性 gate（answerability gate）：Stage 3 之後判蒸餾 KB 是否含答案（三分 ANSWERABLE/PARTIAL/
 # NOT_ANSWERABLE）。ANSWERABLE→正常；PARTIAL→生成+軟警告橫幅；NOT_ANSWERABLE→誠實硬棄答（跳 Stage 4-7）。
 # 預設開（baseline_v5 驗證：零誤殺硬棄答、PARTIAL 精準命中最弱兩題 Q07/Q08、Q12 棄答 corr 1.0、總延遲未增）。
-ANSWERABILITY_GATE_ENABLED = False
+ANSWERABILITY_GATE_ENABLED = True
 # English-first pipeline：Stage 4 輸出英文 → Stage 5 英文驗證 → NLI EN-vs-EN。
 # 優點：NLI 從跨語言變單語言（大幅提升 entailment 準確度），Verifier 推論邏輯更穩定
 # 注意：開啟後 NLI_TRANSLATE_TO_EN 會自動跳過（draft 已是英文，不需要再翻）
 EN_DRAFT_PIPELINE = True
-# Q08 validator 迭代：保留英文 draft，暫停 Stage 7 中文翻譯，避免混淆結構問題。
-FINAL_TRANSLATION_ENABLED = False
+# 產品輸出：英文 draft 完成驗證與 NLI 後，再由 Stage 7 翻譯為繁體中文。
+FINAL_TRANSLATION_ENABLED = True
 
 # 跨語言補償：中文 hypothesis 批次翻譯成英文後再做 NLI
 # EN_DRAFT_PIPELINE=True 時此設定自動無效（draft 本身已是英文）

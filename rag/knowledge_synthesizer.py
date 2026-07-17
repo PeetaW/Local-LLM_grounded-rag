@@ -72,6 +72,7 @@ def _normalize_comparison_json(
     comparison.setdefault("source_roles", [])
     comparison.setdefault("direct_routes", [])
     comparison.setdefault("review_comparison_sources", [])
+    comparison.setdefault("supporting_mechanisms", [])
     source_roles = comparison["source_roles"] if isinstance(comparison["source_roles"], list) else []
     review_sources = {
         item.get("source") for item in source_roles
@@ -81,6 +82,21 @@ def _normalize_comparison_json(
         item.get("source") for item in source_roles
         if isinstance(item, dict) and "background" in str(item.get("role", "")).lower()
     }
+    comparison["supporting_mechanisms"] = [
+        {
+            "source": str(item.get("source", "")).strip(),
+            "claim": str(item.get("claim", "")).strip(),
+            "evidence": str(item.get("evidence", "")).strip(),
+        }
+        for item in comparison["supporting_mechanisms"]
+        if (
+            isinstance(item, dict)
+            and item.get("source")
+            and item.get("claim")
+            and item.get("evidence")
+            and item.get("source") not in background_sources
+        )
+    ] if isinstance(comparison["supporting_mechanisms"], list) else []
     for route in comparison["direct_routes"] if isinstance(comparison["direct_routes"], list) else []:
         if isinstance(route, dict):
             route.setdefault("outcome", "")
@@ -160,6 +176,7 @@ Rules:
 - Set `evidence_found=true` only when the retrieved evidence supports that dimension; otherwise set it false and leave `evidence` empty.
 - Every dimension evidence item must contain exactly one source and one atomic claim. Split claims from different sources into separate items.
 - Background sources must not provide core comparison-dimension evidence; use route or review/comparison sources.
+- When the question asks how mechanisms differ, preserve each structural or mechanistic witness in `supporting_mechanisms` with one source, one atomic claim, and its paper evidence.
 - Every direct route must preserve its reported outcome, including optical purity, e.e., yield, or other comparison-relevant result when present.
 - central_tradeoff must contain one claim and only the source paper(s) that directly support it; prefer a review/comparison source when available.
 - When isotopic enrichment is requested and a route outcome reports optical purity/e.e., central_tradeoff.claim must explicitly say high-purity/isotopically enriched material.
@@ -183,6 +200,21 @@ def _comparison_schema_instruction(query: str, comparison_json_enabled: bool | N
     if comparison_json_enabled is None:
         comparison_json_enabled = getattr(cfg, "COMPARISON_JSON_ENABLED", False)
     if comparison_json_enabled:
+        synthetic_scope = (
+            "- direct_routes must include only non-review route papers that directly synthesize the target compound.\n"
+            "- Derivative/formulation/solubility/biological-property papers are background unless they directly synthesize the exact target compound.\n"
+            "- Preserve exact synthetic route-defining phrases and comparison-relevant outcomes such as e.e. or optical purity.\n"
+            "- For the L-BPA hybrid route, preserve enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis.\n"
+            "- When retrieved, preserve the reported 74% e.e. alkylation outcome and optically pure final L-BPA."
+            if any(term in (query or "").lower() for term in ("synthesi", "synthetic route", "preparation method", "manufactur", "合成", "製備"))
+            else
+            "- For non-synthesis comparisons, direct_routes stores each directly reported strategy or intervention; route_phrase names the strategy and outcome states its mechanism or reported result."
+        )
+        mechanism_rule = (
+            "- The question asks for mechanism differences: fill supporting_mechanisms with source-bound structural or mechanistic evidence. A mechanism source is not background merely because it does not introduce a separate intervention."
+            if any(term in (query or "").lower() for term in ("mechanism", "mechanistic")) or "機制" in (query or "")
+            else "- Leave supporting_mechanisms empty when the question does not ask for mechanism evidence."
+        )
         return """
 COMPARISON_JSON MODE:
 Ignore the normal numbered-fact output format. Return exactly one valid JSON object and no Markdown fences.
@@ -191,13 +223,16 @@ Use this schema:
   "comparison_json": {
     "target_compound": "",
     "source_roles": [
-      {"source": "", "role": "route | review/comparison source | background", "claim": "", "evidence": ""}
+      {"source": "", "role": "route | mechanism | review/comparison source | background", "claim": "", "evidence": ""}
     ],
     "direct_routes": [
       {"source": "", "route_phrase": "", "outcome": "", "produces_target": true, "evidence": ""}
     ],
     "review_comparison_sources": [
       {"source": "", "claim": "", "dimensions": [], "evidence": ""}
+    ],
+    "supporting_mechanisms": [
+      {"source": "", "claim": "", "evidence": ""}
     ],
     "dimensions": {
       "isotopic_enrichment": {"requested": false, "evidence_found": false, "evidence": [{"source": "", "claim": ""}]},
@@ -211,11 +246,9 @@ Use this schema:
 Rules:
 - Source metadata and guidance lines may only decide role; they are not paper evidence.
 - A review/comparison source stays role="review/comparison source"; do not rewrite it as an experimental route paper.
-- direct_routes must include only non-review route papers that directly synthesize the target compound.
 - If a review/comparison source describes example routes, summarize them in review_comparison_sources, not in direct_routes.
-- Derivative/formulation/solubility/biological-property papers are background unless they directly synthesize the exact target compound.
-- Preserve exact route-defining phrases from the source. For the L-BPA hybrid route, use "enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis".
-- Preserve each direct route's comparison-relevant outcome separately. If the evidence reports e.e. or optical purity, keep it in outcome; for the L-BPA hybrid route preserve the reported 74% e.e. alkylation outcome and optically pure final L-BPA when retrieved.
+__SYNTHETIC_SCOPE__
+__MECHANISM_RULE__
 - Each dimensions.*.evidence item must bind exactly one atomic claim to exactly one source. Never place two papers' claims in one item and never use a separate multi-source list.
 - Core dimension evidence must come from a route or review/comparison source, never from a source classified as background.
 - Fill every dimension that appears in the question or source evidence.
@@ -229,7 +262,7 @@ Rules:
 - Do not write absence claims such as "does not explicitly provide scalability/cost-effectiveness" when a review/comparison source is selected for those dimensions.
 - central_tradeoff.claim must mention every evidence_found=true dimension, stay qualitative unless the source explicitly provides values, and list only supporting paper(s) in central_tradeoff.sources.
 - When isotopic enrichment is requested and a direct route outcome reports optical purity/e.e., central_tradeoff.claim must explicitly frame high-purity/isotopically enriched material against scalability/cost-effectiveness.
-""".strip()
+""".replace("__SYNTHETIC_SCOPE__", synthetic_scope).replace("__MECHANISM_RULE__", mechanism_rule).strip()
     return """
 【比較題蒸餾格式】
 若問題要求比較，請用下列小節整理事實；沒有資料的小節可省略：

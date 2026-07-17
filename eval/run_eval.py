@@ -132,14 +132,22 @@ def _q_status(row: dict) -> str:
     sel = row.get("paper_selection_recall")
     ret = row.get("retrieval_span_recall")
     gs  = row.get("grounding_score")
+    cr  = row.get("correctness")
+    tf  = row.get("translation_fidelity")
     bad = (
-        (ret is not None and ret < 0.3)
+        (isinstance(cr, (int, float)) and 0 <= cr < 0.5)
+        or (isinstance(tf, (int, float)) and 0 <= tf < 0.5)
+        or (ret is not None and ret < 0.3)
         or (isinstance(gs, (int, float)) and 0 <= gs < 0.3)
     )
     if bad:
         return "❌"
     warn = (
-        (sel is not None and sel < 1.0)
+        (isinstance(cr, (int, float)) and 0 <= cr < 0.75)
+        or (isinstance(tf, (int, float)) and 0 <= tf < 0.75)
+        or (cr is None and row.get("correctness_detail") is not None)
+        or (tf is None and row.get("translation_detail") is not None)
+        or (sel is not None and sel < 1.0)
         or (ret is not None and ret < 0.7)
         or (isinstance(gs, (int, float)) and 0 <= gs < 0.8)
     )
@@ -148,7 +156,7 @@ def _q_status(row: dict) -> str:
 
 def _correctness_candidate(answer: str, artifacts: dict, reference: str = "") -> tuple[str, str]:
     candidate = (artifacts or {}).get("answer_for_judge")
-    if candidate and not any("\u4e00" <= ch <= "\u9fff" for ch in reference or ""):
+    if candidate:
         return candidate, "answer_for_judge"
     return answer, "answer"
 
@@ -191,12 +199,17 @@ def _write_debug_artifacts(label: str, qid: str, question: str, artifacts: dict,
         "stage5_verified": artifacts.get("stage5_verified"),
         "stage6_grounded_answer": artifacts.get("stage6_grounded_answer"),
         "stage6_grounding_report": artifacts.get("stage6_grounding_report"),
+        "stage7_translated_answer": row.get("translated_answer"),
         "answer_for_judge": row.get("answer_for_judge"),
         "final_answer": row.get("answer"),
     }
     for key, value in items.items():
         _write_text_artifact(os.path.join(out_dir, f"{stem}_{key}.txt"), value)
     _write_text_artifact(os.path.join(out_dir, f"{stem}_judge.json"), row.get("correctness_detail"))
+    _write_text_artifact(
+        os.path.join(out_dir, f"{stem}_translation_judge.json"),
+        row.get("translation_detail"),
+    )
     _write_text_artifact(os.path.join(out_dir, f"{stem}_row.json"), row)
     return out_dir
 
@@ -223,9 +236,15 @@ def _write_markdown_report(out: dict, path: str):
         total = s.get("n_questions", 0)
         missing = s.get("n_correctness_na", total - scored)
         L.append(f"| Correctness judge 覆蓋 | {scored}/{total}（N/A {missing}） |")
+    L.append(f"| 平均翻譯忠實度（LLM-judge） | {_fmt(s.get('avg_translation_fidelity'))} |")
+    translated = s.get("n_translation_scored", 0)
+    total = s.get("n_questions", 0)
+    translation_na = s.get("n_translation_na", total - translated)
+    L.append(f"| Translation judge 覆蓋 | {translated}/{total}（N/A {translation_na}） |")
     L.append(f"| 平均 grounding 分數 | {_fmt(s.get('avg_grounding_score'))} |")
     L.append(f"| 平均論文選擇命中率 | {_fmt(s.get('avg_paper_sel_recall'), pct=True)} |")
-    L.append(f"| 平均檢索覆蓋率 | {_fmt(s.get('avg_retrieval_recall'), pct=True)} |")
+    L.append(f"| 平均 retriever candidate 覆蓋率 | {_fmt(s.get('avg_retriever_candidate_recall'), pct=True)} |")
+    L.append(f"| 平均 Stage 2 evidence 覆蓋率 | {_fmt(s.get('avg_stage2_evidence_recall'), pct=True)} |")
     L.append(f"| 平均總延遲 | {_ms_to_s(s.get('avg_total_ms'))} |")
     L.append(f"| 平均 planning 延遲 | {_ms_to_s(s.get('avg_planning_ms'))} |")
     L.append(f"| 平均 retrieval 延遲 | {_ms_to_s(s.get('avg_retrieval_ms'))} |")
@@ -238,15 +257,18 @@ def _write_markdown_report(out: dict, path: str):
 
     L.append("## 逐題速覽")
     L.append("")
-    L.append("| | ID | 類型 | 選擇命中 | 檢索覆蓋 | grounding | 延遲 | 衝突/未支撐 |")
-    L.append("|---|----|------|---------|---------|-----------|------|------|")
+    L.append("| | ID | 類型 | correctness | 翻譯忠實度 | 選擇命中 | candidate recall | Stage 2 recall | grounding | 延遲 | 衝突/未支撐 |")
+    L.append("|---|----|------|-------------|------------|---------|------------------|----------------|-----------|------|------|")
     for r in out.get("rows", []):
         lat = r.get("latency") or {}
         iss = r.get("issues") or {}
         L.append(
             f"| {_q_status(r)} | {r.get('id')} | {r.get('type','')} | "
+            f"{_fmt(r.get('correctness'))} | "
+            f"{_fmt(r.get('translation_fidelity'))} | "
             f"{_fmt(r.get('paper_selection_recall'), pct=True)} | "
-            f"{_fmt(r.get('retrieval_span_recall'), pct=True)} | "
+            f"{_fmt(r.get('retriever_candidate_recall'), pct=True)} | "
+            f"{_fmt(r.get('stage2_evidence_recall'), pct=True)} | "
             f"{_fmt(r.get('grounding_score'))} | "
             f"{_ms_to_s(lat.get('total'))} | "
             f"C{iss.get('conflicts', 0)}/U{iss.get('unsupported', 0)} |"
@@ -272,9 +294,18 @@ def _write_markdown_report(out: dict, path: str):
         )
         if detail.get("reason"):
             L.append(f"- judge reason：{detail['reason']}")
+        translation_detail = r.get("translation_detail") or {}
+        L.append(
+            f"- translation fidelity：{_fmt(r.get('translation_fidelity'))}　"
+            f"raw：{_fmt(translation_detail.get('raw'), suffix='/5')}　"
+            f"judge：`{translation_detail.get('mode', 'N/A')}`"
+        )
+        if translation_detail.get("reason"):
+            L.append(f"- translation reason：{translation_detail['reason']}")
         L.append(
             f"- 論文選擇命中率：{_fmt(r.get('paper_selection_recall'), pct=True)}　"
-            f"檢索覆蓋率：{_fmt(r.get('retrieval_span_recall'), pct=True)}　"
+            f"candidate 覆蓋率：{_fmt(r.get('retriever_candidate_recall'), pct=True)}　"
+            f"Stage 2 evidence 覆蓋率：{_fmt(r.get('stage2_evidence_recall'), pct=True)}　"
             f"grounding：{_fmt(r.get('grounding_score'))}"
         )
         L.append(f"- 延遲：{_ms_to_s((r.get('latency') or {}).get('total'))}　問題標記：{r.get('issues')}")
@@ -284,7 +315,7 @@ def _write_markdown_report(out: dict, path: str):
             ans = ans[:800] + " …（完整內容見 JSON）"
         L.append("**答案預覽**：")
         L.append("")
-        L.append("> " + ans.replace("\n", "\n> "))
+        L.extend(f"> {line}" if line else ">" for line in ans.splitlines())
         L.append("")
         L.append("---")
         L.append("")
@@ -295,15 +326,19 @@ def _write_markdown_report(out: dict, path: str):
 
 def _print_row(row: dict):
     sel = row["paper_selection_recall"]
-    ret = row["retrieval_span_recall"]
+    candidate_ret = row.get("retriever_candidate_recall")
+    ret = row.get("stage2_evidence_recall")
     lat = row["latency"]
     print(f"  論文選擇命中率: {sel if sel is not None else 'N/A（無 gold_papers）'}"
           f"   detected={row['detected_paper']}")
     print(f"  選出論文      : {row['selected_papers']}")
-    print(f"  檢索覆蓋率    : {ret if ret is not None else 'N/A（無 gold_spans）'}")
+    print(f"  candidate recall: {candidate_ret if candidate_ret is not None else 'N/A（無 gold_spans）'}")
+    print(f"  Stage 2 recall : {ret if ret is not None else 'N/A（無 gold_spans或未跑 pipeline）'}")
     cr = row.get("correctness")
     print(f"  正確性(judge) : {cr if cr is not None else 'N/A'}")
     print(f"  judge candidate: {row.get('correctness_candidate_source', 'answer')}")
+    tf = row.get("translation_fidelity")
+    print(f"  翻譯忠實度    : {tf if tf is not None else 'N/A'}")
     print(f"  grounding     : {row['grounding_score']}")
     def _s(k):
         v = lat.get(k)
@@ -324,6 +359,7 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
 
     from main import paper_engines
     from rag.query_pipeline import execute_structured_query
+    import config as cfg
 
     questions = _load_questions()
     if ids:
@@ -355,10 +391,10 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
         sel_recall = metrics.paper_selection_recall(selected, gold_papers)
 
         # 2) 檢索層探測（只在有 gold_spans 時做）
-        ret_recall = None
+        candidate_recall = None
         if gold_spans and gold_papers:
             ret_texts = _probe_retrieval(qtext, gold_papers, paper_engines)
-            ret_recall = metrics.retrieval_span_recall(ret_texts, gold_spans)
+            candidate_recall = metrics.retrieval_span_recall(ret_texts, gold_spans)
 
         # 3) 跑完整 pipeline（--retrieval-only 時跳過，只看選擇/檢索）
         status_lines = []
@@ -376,6 +412,13 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
                 answer = f"[PIPELINE ERROR] {e}"
             wall_s = round(time.time() - t0, 1)
 
+        stage2_recall = None
+        if gold_spans and not retrieval_only and artifacts.get("stage2_evidence"):
+            stage2_recall = metrics.retrieval_span_recall(
+                [artifacts["stage2_evidence"]], gold_spans,
+            )
+        ret_recall = candidate_recall if retrieval_only else stage2_recall
+
         # 4) 正確性 LLM-judge（有 reference_answer 且非 retrieval-only 時）
         correctness, correctness_detail = None, None
         reference = q.get("reference_answer", "")
@@ -392,6 +435,26 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
             correctness_detail = {key: value for key, value in j.items() if key != "score"}
             print(f"  ⚖️  [Judge] correctness={correctness}（{j['raw']}/5, {candidate_source}）：{j['reason'][:80]}")
 
+        # 5) 翻譯忠實度（與英文 canonical draft 的 correctness 分開計分）
+        translated_answer = artifacts.get("stage7_translated_answer")
+        translation_fidelity, translation_detail = None, None
+        if (
+            getattr(cfg, "TRANSLATION_FIDELITY_JUDGE_ENABLED", False)
+            and translated_answer
+            and answer_for_judge
+            and not retrieval_only
+        ):
+            from judge import judge_translation_fidelity
+            translated = judge_translation_fidelity(answer_for_judge, translated_answer)
+            translation_fidelity = translated["score"]
+            translation_detail = {
+                key: value for key, value in translated.items() if key != "score"
+            }
+            print(
+                f"  🌏 [Judge] translation={translation_fidelity}"
+                f"（{translated['raw']}/5）：{translated['reason'][:80]}"
+            )
+
         row = {
             "id": qid,
             "type": q.get("type"),
@@ -400,12 +463,17 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
             "selected_papers": selected,
             "gold_papers": gold_papers,
             "paper_selection_recall": sel_recall,
+            "retriever_candidate_recall": candidate_recall,
+            "stage2_evidence_recall": stage2_recall,
             "retrieval_span_recall": ret_recall,
             "grounding_score": metrics.parse_grounding_score(answer),
             "correctness": correctness,
             "correctness_detail": correctness_detail,
             "correctness_candidate_source": candidate_source,
             "answer_for_judge": answer_for_judge,
+            "translated_answer": translated_answer,
+            "translation_fidelity": translation_fidelity,
+            "translation_detail": translation_detail,
             "knowledge_base": artifacts.get("knowledge_base"),
             "counts": metrics.parse_counts(status_lines),
             "latency": metrics.parse_stage_latencies(status_lines),
@@ -460,7 +528,8 @@ def rejudge_existing(source_label: str, output_label: str = None, ids: str = Non
     if not rows:
         raise ValueError("no matching saved eval rows to rejudge")
 
-    from judge import judge_correctness
+    from judge import judge_correctness, judge_translation_fidelity
+    import config as cfg
 
     artifact_dir = os.path.join(RESULTS_DIR, output_label)
     os.makedirs(artifact_dir, exist_ok=True)
@@ -478,9 +547,24 @@ def rejudge_existing(source_label: str, output_label: str = None, ids: str = Non
         row["correctness"] = result["score"]
         row["correctness_detail"] = {key: value for key, value in result.items() if key != "score"}
         row["correctness_candidate_source"] = "answer_for_judge" if row.get("answer_for_judge") else "answer"
+        translated_answer = row.get("translated_answer")
+        if (
+            getattr(cfg, "TRANSLATION_FIDELITY_JUDGE_ENABLED", False)
+            and translated_answer
+            and candidate
+        ):
+            translated = judge_translation_fidelity(candidate, translated_answer)
+            row["translation_fidelity"] = translated["score"]
+            row["translation_detail"] = {
+                key: value for key, value in translated.items() if key != "score"
+            }
         _write_text_artifact(
             os.path.join(artifact_dir, f"{_safe_file_part(qid)}_judge.json"),
             row["correctness_detail"],
+        )
+        _write_text_artifact(
+            os.path.join(artifact_dir, f"{_safe_file_part(qid)}_translation_judge.json"),
+            row.get("translation_detail"),
         )
         print(
             f"  ⚖️  [Rejudge] {qid}: correctness={result['score']} "

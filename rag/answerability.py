@@ -22,8 +22,9 @@ _SYSTEM = (
     "incomplete or thin — the question can be only partially answered, with gaps.\n"
     "- NOT_ANSWERABLE: the requested information is genuinely ABSENT — the question asks for "
     "value/result X and the facts simply never state X (no amount of synthesis could produce it), "
-    "or the question rests on a false premise the facts contradict. Use this only when the facts "
-    "are merely on the same topic but do not contain the requested thing at all.\n"
+    "Use this only when the facts are merely on the same topic but do not contain the requested "
+    "thing at all. If the facts disprove a false premise AND provide the correct alternative, choose "
+    "ANSWERABLE because the answer can correct the premise.\n"
     "Bias: when unsure between ANSWERABLE and PARTIAL, prefer ANSWERABLE; when unsure between "
     "PARTIAL and NOT_ANSWERABLE, prefer PARTIAL. Reserve NOT_ANSWERABLE for genuine absence."
 )

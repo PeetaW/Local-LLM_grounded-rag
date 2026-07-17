@@ -98,6 +98,7 @@ from rag.query_grounding_flow import (
     _cited_sources_in_sentence,
     _fetch_grounding_chunks,
     run_grounding_check,
+    split_into_sentences,
 )
 from rag.query_prompts import build_synthesis_prompt, build_fallback_prompt
 from rag.query_translation import translate_to_traditional_chinese
@@ -409,6 +410,8 @@ class TestPlanSubQuestions(unittest.TestCase):
         self.assertIn("reports, reviews, or compares high-level synthetic approaches", prompt)
         self.assertIn("isotopic enrichment, scalability, cost-effectiveness, safety", prompt)
         self.assertIn("不要詢問 exhaustive procedural details", prompt)
+        self.assertIn("每個面向至少要有一個聚焦子問題", prompt)
+        self.assertIn("額外建立一個子問題驗證該前提", prompt)
 
     def test_dedupes_tasks_and_drops_all_when_every_paper_is_covered(self):
         papers = ["paper_a", "paper_b"]
@@ -588,9 +591,11 @@ class TestRunSubqueriesParallel(unittest.TestCase):
     def test_comparison_evidence_block_uses_more_snippets(self):
         old_base = getattr(cfg, "STAGE2_EVIDENCE_SNIPPETS_PER_TASK", 2)
         old_compare = getattr(cfg, "COMPARISON_EVIDENCE_SNIPPETS_PER_TASK", 4)
+        old_query_aware = getattr(cfg, "STAGE2_QUERY_AWARE_EVIDENCE_ENABLED", False)
         try:
             cfg.STAGE2_EVIDENCE_SNIPPETS_PER_TASK = 2
             cfg.COMPARISON_EVIDENCE_SNIPPETS_PER_TASK = 4
+            cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = False
             nodes = [f"snippet {i}" for i in range(1, 6)]
 
             normal = _nodes_to_evidence_block(nodes, "What are key steps?", "【PaperA】")
@@ -603,6 +608,29 @@ class TestRunSubqueriesParallel(unittest.TestCase):
         finally:
             cfg.STAGE2_EVIDENCE_SNIPPETS_PER_TASK = old_base
             cfg.COMPARISON_EVIDENCE_SNIPPETS_PER_TASK = old_compare
+            cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = old_query_aware
+
+    def test_query_aware_evidence_selects_relevant_tail_node(self):
+        old = getattr(cfg, "STAGE2_QUERY_AWARE_EVIDENCE_ENABLED", False)
+        try:
+            cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = True
+            nodes = [f"Generic introductory discussion {i}." for i in range(4)]
+            nodes.append(
+                "[摘要：Generated context must not be cited.]\n\n"
+                + "Unrelated background sentence. " * 80
+                + "Raw BPA powder shows no detectable degradation after storage at 55 C for 6 months."
+            )
+            block = _nodes_to_evidence_block(
+                nodes,
+                "What degradation is reported under the storage conditions?",
+                "【PaperA】",
+            )
+            self.assertIn("storage at 55 C for 6 months", block)
+            self.assertNotIn("[摘要：", block)
+            self.assertIn("[Snippet 4]", block)
+            self.assertNotIn("[Snippet 5]", block)
+        finally:
+            cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = old
 
     def test_comparison_snippet_clips_around_dimension_terms(self):
         text = (
@@ -701,6 +729,16 @@ class TestRunSubqueriesParallel(unittest.TestCase):
 # eval.metrics — retrieval timing parse
 # ══════════════════════════════════════════════════════════════════════════════
 class TestEvalMetrics(unittest.TestCase):
+    def test_full_eval_set_uses_structured_english_contracts(self):
+        with open(eval_run.EVAL_SET, "r", encoding="utf-8") as handle:
+            questions = json.load(handle)["questions"]
+        self.assertEqual(len(questions), 12)
+        self.assertTrue(all(question.get("reference_facts") for question in questions))
+        self.assertFalse(any(
+            any("\u4e00" <= char <= "\u9fff" for char in question["reference_answer"])
+            for question in questions
+        ))
+
     def test_parse_retrieval_timing(self):
         lat = eval_metrics.parse_stage_latencies([
             "[retrieval] 完成 rag_found=True elapsed_ms=100",
@@ -720,6 +758,43 @@ class TestEvalMetrics(unittest.TestCase):
         self.assertEqual(summary["avg_correctness"], 0.75)
         self.assertEqual(summary["n_correctness_scored"], 1)
         self.assertEqual(summary["n_correctness_na"], 1)
+
+    def test_summarize_reports_translation_fidelity_separately(self):
+        summary = eval_metrics.summarize([
+            {"correctness": 1.0, "translation_fidelity": 0.5},
+            {"correctness": 0.75, "translation_fidelity": None},
+        ])
+        self.assertEqual(summary["avg_translation_fidelity"], 0.5)
+        self.assertEqual(summary["n_translation_scored"], 1)
+        self.assertEqual(summary["n_translation_na"], 1)
+
+    def test_summarize_separates_candidate_and_stage2_recall(self):
+        summary = eval_metrics.summarize([
+            {"retrieval_span_recall": 0.5, "retriever_candidate_recall": 1.0, "stage2_evidence_recall": 0.5},
+            {"retrieval_span_recall": 1.0, "retriever_candidate_recall": 1.0, "stage2_evidence_recall": 1.0},
+        ])
+        self.assertEqual(summary["avg_retriever_candidate_recall"], 1.0)
+        self.assertEqual(summary["avg_stage2_evidence_recall"], 0.75)
+
+
+class TestSplitIntoSentences(unittest.TestCase):
+    def test_skips_heading_and_splits_english_prose(self):
+        claims = split_into_sentences(
+            "## Direct Paper Evidence\n"
+            "JPH203 binds within the LAT1 substrate-binding pocket. "
+            "Its chloride atom forms a halogen bond with Tyr259."
+        )
+        self.assertEqual(len(claims), 2)
+        self.assertFalse(any("Direct Paper Evidence" in claim for claim in claims))
+
+    def test_keeps_substantive_tradeoff_sentence(self):
+        claims = split_into_sentences(
+            "Comparison scaffold:\n"
+            "- Route A produces optically pure material [PaperA].\n"
+            "Central trade-off: Higher isotope purity increases precursor cost [ReviewA]."
+        )
+        self.assertTrue(any(claim.startswith("Central trade-off:") for claim in claims))
+        self.assertFalse(any(claim == "Comparison scaffold:" for claim in claims))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1231,6 +1306,36 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         finally:
             cfg.STAGE4_ANSWER_VALIDATION_ENABLED = old
 
+    def test_stage4_renderer_uses_strategy_and_mechanism_for_non_synthesis_comparison(self):
+        kb = json.dumps({"comparison_json": {
+            "target_compound": "LAT1",
+            "source_roles": [
+                {"source": "InhibitorA", "role": "route"},
+                {"source": "StructureA", "role": "mechanism"},
+            ],
+            "direct_routes": [{
+                "source": "InhibitorA",
+                "route_phrase": "competitive JPH203 inhibition",
+                "outcome": "blocked LAT1-mediated amino-acid transport",
+            }],
+            "supporting_mechanisms": [{
+                "source": "StructureA",
+                "claim": "JPH203 occupies the LAT1 substrate-binding pocket",
+                "evidence": "JPH203 binds within the traditional substrate-binding pocket",
+            }],
+            "review_comparison_sources": [],
+            "dimensions": {},
+            "central_tradeoff": {"claim": "The mechanisms differ.", "sources": ["InhibitorA"]},
+        }})
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question="How do therapeutic strategies targeting LAT1 differ in mechanism?",
+        )
+        self.assertIn("- Strategy:", answer)
+        self.assertIn("- Mechanism:", answer)
+        self.assertNotIn("synthesis of LAT1", answer)
+
     def test_stage4_direct_render_is_concise_for_high_level_question(self):
         kb = """
         {"comparison_json":{
@@ -1309,6 +1414,7 @@ class TestExecuteStructuredQuery(unittest.TestCase):
     ):
         _setup_cfg(mock_cfg)
         mock_cfg.COMPARISON_JSON_DIRECT_RENDER_ENABLED = True
+        mock_cfg.CITATION_GROUNDING_ENABLED = True
         mock_cfg.EN_DRAFT_PIPELINE = True
         mock_cfg.FINAL_TRANSLATION_ENABLED = False
         mock_detect.return_value = "paper_a"
@@ -1317,22 +1423,32 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         kb = """
         {"comparison_json":{
           "direct_routes":[{"source":"RouteA","route_phrase":"route A","outcome":"high-purity product at high e.e."}],
-          "review_comparison_sources":[{"source":"ReviewA","claim":"compares route scalability"}],
-          "dimensions":{"scalability":{"requested":true,"evidence_found":true,
-            "evidence":[{"source":"ReviewA","claim":"Route A is practical at scale."}]}},
-          "central_tradeoff":{"claim":"High purity must be balanced with scalability.","sources":["ReviewA"]}
+          "review_comparison_sources":[{"source":"ReviewA","claim":"compares route scalability and cost"}],
+          "dimensions":{
+            "isotopic_enrichment":{"requested":true,"evidence_found":true,
+              "evidence":[{"source":"ReviewA","claim":"High-purity isotopically enriched material is required."}]},
+            "scalability":{"requested":true,"evidence_found":true,
+              "evidence":[{"source":"ReviewA","claim":"Route A is practical at scale."}]},
+            "cost_effectiveness":{"requested":true,"evidence_found":true,
+              "evidence":[{"source":"ReviewA","claim":"Enriched precursor material is expensive."}]}
+          },
+          "central_tradeoff":{"claim":"High purity must be balanced with scalability and cost-effectiveness.","sources":["ReviewA"]}
         }}
         """
         mock_run.return_value = [("【paper_a】", kb)]
+        mock_grounding.side_effect = lambda full_text, *args, **kwargs: (full_text, "")
 
         result = pipeline_module.execute_structured_query(
-            "Compare routes for scalability.", {"paper_a": MagicMock()}
+            "Compare routes for isotopic enrichment, scalability, and cost-effectiveness.",
+            {"paper_a": MagicMock()},
         )
 
         self.assertIn("high-purity product at high e.e", result)
         self.assertIn("Route A is practical at scale", result)
         pipeline_module._comparison_json_validation_errors.assert_called()
         mock_settings.llm.stream_complete.assert_not_called()
+        claims = mock_grounding.call_args.kwargs["grounding_claims"]
+        self.assertEqual(claims, split_into_sentences(result))
         mock_translate.assert_not_called()
 
     @patch("rag.query_pipeline.translate_to_traditional_chinese")
@@ -1531,6 +1647,7 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertEqual(artifacts["stage5_verified"], "English draft answer.")
         self.assertEqual(artifacts["stage6_grounded_answer"], "English draft answer.")
         self.assertEqual(artifacts["answer_for_judge"], "English draft answer.")
+        self.assertEqual(artifacts["stage7_translated_answer"], "繁中最終答案")
         self.assertEqual(result, "繁中最終答案")
 
     @patch("rag.query_pipeline.translate_to_traditional_chinese")
@@ -1620,12 +1737,30 @@ class TestRunEvalCorrectnessCandidate(unittest.TestCase):
         self.assertEqual(candidate, "English draft answer")
         self.assertEqual(source, "answer_for_judge")
 
-    def test_uses_final_answer_for_chinese_reference(self):
+    def test_prefers_canonical_draft_even_for_chinese_reference(self):
         candidate, source = eval_run._correctness_candidate(
             "繁中最終答案", {"answer_for_judge": "English draft answer"}, "中文標準答案"
         )
-        self.assertEqual(candidate, "繁中最終答案")
-        self.assertEqual(source, "answer")
+        self.assertEqual(candidate, "English draft answer")
+        self.assertEqual(source, "answer_for_judge")
+
+    def test_status_includes_correctness_and_translation(self):
+        base = {
+            "answer": "ok",
+            "paper_selection_recall": 1.0,
+            "retrieval_span_recall": 1.0,
+            "grounding_score": 1.0,
+        }
+        self.assertEqual(eval_run._q_status({**base, "correctness": 0.25}), "❌")
+        self.assertEqual(eval_run._q_status({**base, "correctness": 0.5}), "⚠️")
+        self.assertEqual(
+            eval_run._q_status({
+                **base,
+                "correctness": 1.0,
+                "translation_fidelity": 0.25,
+            }),
+            "❌",
+        )
 
     def test_writes_debug_artifact_files(self):
         old_enabled = cfg.EVAL_DEBUG_ARTIFACTS_ENABLED
@@ -1633,8 +1768,10 @@ class TestRunEvalCorrectnessCandidate(unittest.TestCase):
             cfg.EVAL_DEBUG_ARTIFACTS_ENABLED = True
             row = {
                 "answer_for_judge": "English draft answer",
+                "translated_answer": "繁中最終答案",
                 "answer": "Final answer",
                 "correctness_detail": {"reason": "ok"},
+                "translation_detail": {"reason": "faithful"},
             }
             m = mock_open()
             with patch.object(eval_run, "RESULTS_DIR", "results"), \
@@ -1658,6 +1795,8 @@ class TestRunEvalCorrectnessCandidate(unittest.TestCase):
             opened_paths = [args[0] for args, _ in m.call_args_list]
             self.assertIn(os.path.join(out_dir, "Q08_stage2_evidence.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage3_generation_meta.txt"), opened_paths)
+            self.assertIn(os.path.join(out_dir, "Q08_stage7_translated_answer.txt"), opened_paths)
+            self.assertIn(os.path.join(out_dir, "Q08_translation_judge.json"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage4_draft.txt"), opened_paths)
         finally:
             cfg.EVAL_DEBUG_ARTIFACTS_ENABLED = old_enabled

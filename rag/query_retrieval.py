@@ -4,6 +4,7 @@
 # Phase B (serial):   LLM answer generation (gemma4 loaded once).
 
 import concurrent.futures
+import re
 import time
 
 import config as cfg
@@ -129,21 +130,98 @@ def _strip_context_summary(text: str) -> str:
     return text
 
 
+_QUERY_STOPWORDS = {
+    "according", "across", "also", "and", "are", "does", "for", "from", "give",
+    "how", "into", "main", "paper", "papers", "reported", "study", "that", "the",
+    "their", "these", "they", "this", "under", "used", "using", "what", "which",
+    "with",
+}
+_VALUE_QUERY_MARKERS = ("value", "values", "data", "parameter", "condition", "dose", "yield")
+_VALUE_EVIDENCE_MARKERS = ("ic50", "km", "vmax", "mol", "mm", "nm", "μm", "°c", "%", "ph")
+_MECHANISM_QUERY_MARKERS = ("mechanism", "bind", "binding", "inhibit", "role", "how")
+_MECHANISM_EVIDENCE_MARKERS = (
+    "bind", "bond", "interact", "inhibit", "occup", "convert", "exchange", "cross-link",
+    "uptake", "efflux", "collapse", "reform", "leads to", "results in",
+)
+_COMPARISON_DIMENSION_TERMS = (
+    "high cost", "cost-effectiveness", "cost effectiveness", "isotopically enriched",
+    "10b", "scalability", "safety", "toxicity", "contamination", "risk", "cost",
+    "multiple routes",
+)
+
+
+def _query_terms(query_text: str) -> set[str]:
+    return {
+        term for term in re.findall(r"[a-z0-9][a-z0-9+.-]*", (query_text or "").lower())
+        if len(term) > 2 and term not in _QUERY_STOPWORDS
+    }
+
+
+def _query_window_score(text: str, query_text: str) -> int:
+    lower = (text or "").lower()
+    query_lower = (query_text or "").lower()
+    score = 3 * sum(term in lower for term in _query_terms(query_text))
+    if any(marker in query_lower for marker in _VALUE_QUERY_MARKERS):
+        score += 4 * bool(re.search(r"\d", lower))
+        score += 2 * sum(marker in lower for marker in _VALUE_EVIDENCE_MARKERS)
+    if any(marker in query_lower for marker in _MECHANISM_QUERY_MARKERS):
+        score += 2 * sum(marker in lower for marker in _MECHANISM_EVIDENCE_MARKERS)
+    score -= min(8, lower.count("doi.org") + lower.count(" et al.") + len(re.findall(r"\(20\d{2}\)", lower)))
+    return score
+
+
+def _sentence_window(text: str, position: int, limit: int) -> str:
+    start = max(0, position - limit // 3)
+    sentence_start = max(text.rfind(marker, max(0, start - 240), start) for marker in (". ", "? ", "! "))
+    if sentence_start >= 0:
+        start = sentence_start + 2
+    end = min(len(text), start + limit)
+    sentence_ends = [
+        pos for marker in (". ", "? ", "! ")
+        if (pos := text.find(marker, end, min(len(text), end + 240))) >= 0
+    ]
+    if sentence_ends:
+        end = min(sentence_ends) + 1
+    return text[start:end].strip()
+
+
+def _query_aware_window(text: str, query_text: str, limit: int) -> str:
+    text = _strip_context_summary(text)
+    if len(text) <= limit:
+        return text
+    lower = text.lower()
+    query_lower = (query_text or "").lower()
+    anchors = list(_query_terms(query_text))
+    if any(marker in query_lower for marker in _VALUE_QUERY_MARKERS):
+        anchors.extend(_VALUE_EVIDENCE_MARKERS)
+    if any(marker in query_lower for marker in _MECHANISM_QUERY_MARKERS):
+        anchors.extend(_MECHANISM_EVIDENCE_MARKERS)
+    positions = {
+        match.start()
+        for anchor in anchors
+        for match in re.finditer(re.escape(anchor), lower)
+    }
+    if not positions:
+        return text[:limit]
+    windows = [_sentence_window(text, position, limit) for position in sorted(positions)]
+    return max(windows, key=lambda window: (_query_window_score(window, query_text), len(window)))
+
+
 def _clip_evidence_snippet(text: str, query_text: str, limit: int = 900) -> str:
     is_comparison = _is_comparison_query(query_text)
     text = _strip_context_summary(text) if is_comparison else " ".join(text.split())
     if len(text) <= limit:
         return text
+    query_aware = getattr(cfg, "STAGE2_QUERY_AWARE_EVIDENCE_ENABLED", False)
+    if query_aware and not (
+        is_comparison and any(term in (query_text or "").lower() for term in _COMPARISON_DIMENSION_TERMS)
+    ):
+        return _query_aware_window(text, query_text, limit)
     if not is_comparison:
         return text[:limit]
 
     lower = text.lower()
-    terms = (
-        "high cost", "cost-effectiveness", "cost effectiveness", "isotopically enriched",
-        "10b", "scalability", "safety", "toxicity", "contamination", "risk",
-        "cost", "multiple routes",
-    )
-    positions = [lower.find(term) for term in terms if lower.find(term) >= 0]
+    positions = [lower.find(term) for term in _COMPARISON_DIMENSION_TERMS if lower.find(term) >= 0]
     if not positions:
         return text[:limit]
     pos = min(positions)
@@ -180,11 +258,18 @@ def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
         if _is_comparison_query(query_text)
         else getattr(cfg, "STAGE2_EVIDENCE_SNIPPETS_PER_TASK", 2)
     )
+    query_aware = getattr(cfg, "STAGE2_QUERY_AWARE_EVIDENCE_ENABLED", False)
+    if query_aware and not _is_comparison_query(query_text):
+        snippet_count = max(4, snippet_count)
 
     selected_nodes = nodes[:snippet_count]
     if (
         _is_comparison_query(query_text)
         and getattr(cfg, "COMPARISON_JSON_DIRECT_RENDER_ENABLED", False)
+        and (
+            not query_aware
+            or any(term in (query_text or "").lower() for term in _COMPARISON_DIMENSION_TERMS)
+        )
     ):
         def _node(nws):
             return getattr(nws, "node", nws)
@@ -223,11 +308,32 @@ def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
         remaining = candidates[len(selected_nodes):]
         remaining = sorted(enumerate(remaining), key=lambda pair: (-_coverage(pair[1]), pair[0]))
         selected_nodes += [nws for _, nws in remaining[:snippet_count - len(selected_nodes)]]
+    elif query_aware:
+        def _content(nws):
+            node = getattr(nws, "node", nws)
+            return node.get_content() if hasattr(node, "get_content") else str(node)
+
+        selected_nodes = [
+            nws for _, nws in sorted(
+                enumerate(nodes),
+                key=lambda pair: (
+                    -_query_window_score(
+                        _query_aware_window(_content(pair[1]), query_text, 1400),
+                        query_text,
+                    ),
+                    pair[0],
+                ),
+            )[:snippet_count]
+        ]
 
     for i, nws in enumerate(selected_nodes, 1):
         node = getattr(nws, "node", nws)
         text = node.get_content() if hasattr(node, "get_content") else str(node)
-        text = _clip_evidence_snippet(text, query_text)
+        limit = 1400 if query_aware and not (
+            _is_comparison_query(query_text)
+            and any(term in (query_text or "").lower() for term in _COMPARISON_DIMENSION_TERMS)
+        ) else 900
+        text = _clip_evidence_snippet(text, query_text, limit=limit)
         lines.append(f"[Snippet {i}] {text}")
     return "\n".join(lines)
 

@@ -8,21 +8,36 @@ import config as cfg
 
 
 def split_into_sentences(text: str) -> list:
-    lines = text.split("\n")
-    joined_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            joined_lines.append("")
+    blocks, current = [], []
+
+    def _flush():
+        if current:
+            blocks.append(" ".join(current))
+            current.clear()
+
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            _flush()
             continue
-        is_new_item = bool(re.match(r"^(\*+\s|-\s|\d+\.\s|\#{1,6}\s|\[)", stripped))
-        if joined_lines and not is_new_item and joined_lines[-1]:
-            joined_lines[-1] += " " + stripped
-        else:
-            joined_lines.append(stripped)
-    text = "\n".join(joined_lines)
-    text = re.sub(r"\*\*|##|###|【.*?】", "", text)
-    sentences = re.split(r"(?<=[。！？\!\?])\s*|\n+", text)
+        if re.match(r"^#{1,6}\s+", line):
+            _flush()
+            continue
+        if re.match(r"^(?:[-*]\s+|\d+[.)]\s+|\[)", line):
+            _flush()
+            line = re.sub(r"^(?:[-*]\s+|\d+[.)]\s+)", "", line)
+        current.append(line)
+    _flush()
+
+    split_pattern = (
+        r"(?<=[。！？!?])\s*|"
+        r"(?<!\be\.g)(?<!\bi\.e)(?<!\bFig)(?<!\bEq)(?<!\bDr)(?<!\bMr)(?<!\bvs)"
+        r"(?<=\.)\s+(?=[A-Z\[])"
+    )
+    sentences = []
+    for block in blocks:
+        block = re.sub(r"\*\*|【.*?】", "", block).strip()
+        sentences.extend(re.split(split_pattern, block, flags=re.IGNORECASE))
     sentences = [s.strip() for s in sentences if len(s.strip()) >= 20]
 
     def _is_non_proposition(sentence: str) -> bool:

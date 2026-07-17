@@ -50,6 +50,18 @@ def query_dimension_keys(query: str) -> set[str]:
     return keys
 
 
+def query_requests_mechanism(query: str) -> bool:
+    text = (query or "").lower()
+    return "mechanism" in text or "mechanistic" in text or "機制" in text
+
+
+def is_synthetic_route_query(query: str) -> bool:
+    text = (query or "").lower()
+    return any(term in text for term in (
+        "synthesi", "synthetic route", "preparation method", "manufactur", "合成", "製備",
+    ))
+
+
 def comparison_json_payload(text: str):
     stripped = (text or "").strip()
     if stripped.startswith("```"):
@@ -211,6 +223,10 @@ def comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
     for field in ("source_roles", "direct_routes", "review_comparison_sources"):
         if not isinstance(comparison.get(field), list):
             errors.append(f"`{field}` must be a list.")
+    mechanisms = comparison.get("supporting_mechanisms", [])
+    if not isinstance(mechanisms, list):
+        errors.append("`supporting_mechanisms` must be a list.")
+        mechanisms = []
 
     dimensions = comparison.get("dimensions")
     if not isinstance(dimensions, dict):
@@ -247,6 +263,27 @@ def comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
         for item in comparison.get("review_comparison_sources", [])
         if isinstance(item, dict) and item.get("source")
     }
+
+    valid_mechanisms = []
+    for item in mechanisms:
+        if not isinstance(item, dict):
+            errors.append("Every supporting mechanism must be an object.")
+            continue
+        source = str(item.get("source", "")).strip()
+        claim = str(item.get("claim", "")).strip()
+        evidence = str(item.get("evidence", "")).strip()
+        if not source or not claim or not evidence:
+            errors.append("Every supporting mechanism requires source, claim, and evidence.")
+            continue
+        if source not in roles_by_source:
+            errors.append(f"Supporting mechanism source `{source}` is missing from source_roles.")
+            continue
+        if source in background_sources:
+            errors.append(f"Supporting mechanism source `{source}` must not have role=background.")
+            continue
+        valid_mechanisms.append(item)
+    if query_requests_mechanism(query) and not valid_mechanisms:
+        errors.append("The question asks for mechanism differences; add source-bound supporting_mechanisms evidence.")
 
     for source in requirements.get("review_sources", []):
         if "review/comparison" not in roles_by_source.get(source, ""):
@@ -371,9 +408,11 @@ def comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
             errors.append(f"Direct route `{source}` must preserve its route-defining phrase.")
         if atomic_required and not str(route.get("outcome", "")).strip():
             errors.append(f"Direct route `{source}` must preserve its reported outcome.")
-        if source in background_sources or any(
-            term in source.lower()
-            for term in ("derivative", "formulation", "solubility", "biological propert")
+        if is_synthetic_route_query(query) and (
+            source in background_sources or any(
+                term in source.lower()
+                for term in ("derivative", "formulation", "solubility", "biological propert")
+            )
         ):
             errors.append("Derivative/formulation/solubility/biological-property source must not be a direct target-compound route.")
 

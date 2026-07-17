@@ -14,6 +14,7 @@ except ModuleNotFoundError:  # Offline self-checks do not need the HTTP client.
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config as cfg
+from rag.query_grounding_flow import split_into_sentences
 
 
 _JUDGE_SYSTEM = (
@@ -37,6 +38,13 @@ _FACT_JUDGE_SYSTEM = (
     "You are a scientific fact auditor. The numbered REFERENCE FACTS are the sole ground truth. "
     "Audit every fact independently against the entire CANDIDATE. A fact may be supported by more "
     "than one candidate passage. Ignore style, language, citations, and extra details. Return JSON only."
+)
+
+_TRANSLATION_JUDGE_SYSTEM = (
+    "You are a scientific translation auditor. The English SOURCE is the sole ground truth and the "
+    "TARGET is intended to be a Traditional Chinese translation. Find semantic errors only. "
+    "A technical term left in English, or shown as Chinese plus English, is semantically faithful and "
+    "MUST NOT be reported as an error. Ignore style, fluency, markdown, and citations. Return JSON only."
 )
 
 
@@ -95,13 +103,16 @@ def _fact_items(reference_facts: list) -> list[dict]:
 
 def _candidate_items(candidate: str) -> list[dict]:
     """Number candidate passages so the judge selects evidence instead of copying it."""
-    items = []
+    texts = split_into_sentences(candidate)
     for line in (candidate or "").splitlines():
-        text = re.sub(r"^(?:[-*]|\d+[.)])\s+", "", line.strip()).strip()
-        short_heading = text.endswith(":") and len(re.findall(r"\w+", text)) <= 3
-        if not text or text == "---" or short_heading:
-            continue
-        items.append({"id": f"C{len(items) + 1}", "text": text})
+        heading = re.sub(r"^(?:[-*]|\d+[.)])\s+", "", line.strip()).strip()
+        if (
+            heading.endswith(":")
+            and len(re.findall(r"\w+", heading)) > 3
+            and heading not in texts
+        ):
+            texts.append(heading)
+    items = [{"id": f"C{i}", "text": text} for i, text in enumerate(texts, 1)]
     if not items and (candidate or "").strip():
         items.append({"id": "C1", "text": candidate.strip()})
     return items
@@ -314,6 +325,10 @@ def _judge_holistic(
         "Output exactly two lines:\nSCORE: <1-5>\nREASON: <one sentence>"
     )
     output, error = _generate(_JUDGE_SYSTEM, prompt, model, base_url, timeout)
+    return _parse_scalar_score(output, error, mode)
+
+
+def _parse_scalar_score(output: str | None, error: str | None, mode: str) -> dict:
     if error:
         return {"score": None, "raw": None, "reason": error, "mode": mode}
     match = re.search(r"SCORE:\s*([1-5])", output or "") or re.search(r"\b([1-5])\s*/\s*5\b", output or "")
@@ -371,8 +386,13 @@ def _judge_structured(question: str, candidate: str, reference: str, reference_f
         if review:
             initial = {item["id"]: item for item in audit}
             for item in review:
-                item["initial_verdict"] = initial[item["id"]]["verdict"]
-                initial[item["id"]] = item
+                original = initial[item["id"]]
+                if item["verdict"] == "covered":
+                    item["initial_verdict"] = original["verdict"]
+                    initial[item["id"]] = item
+                else:
+                    original["review_verdict"] = item["verdict"]
+                    original["review_reason"] = item["reason"]
                 reviewed_ids.append(item["id"])
             audit = [initial[item["id"]] for item in facts]
 
@@ -410,6 +430,134 @@ def judge_correctness(question: str, candidate: str, reference: str,
             timeout,
         )
     return _judge_holistic(question, candidate, reference, model, base_url, timeout)
+
+
+def _translation_items(text: str, prefix: str) -> list[dict]:
+    items = split_into_sentences(text)
+    if not items and (text or "").strip():
+        items = [text.strip()]
+    return [{"id": f"{prefix}{i}", "text": item} for i, item in enumerate(items, 1)]
+
+
+def _validate_translation_audit(data: dict | None, source: str, target: str) -> tuple[list, list]:
+    rows = data.get("errors") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return [], ["top-level 'errors' must be a list"]
+    source_items = _translation_items(source, "S")
+    target_items = _translation_items(target, "T")
+    source_lookup = {item["id"]: item["text"] for item in source_items}
+    target_lookup = {item["id"]: item["text"] for item in target_items}
+    valid, errors = [], []
+    allowed_types = {"mistranslation", "omission", "addition", "number_unit", "negation_relation", "untranslated"}
+    for index, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            errors.append(f"error {index} must be an object")
+            continue
+        kind = str(row.get("type", "")).lower()
+        severity = str(row.get("severity", "")).lower()
+        source_ids = row.get("source_ids", [])
+        target_ids = row.get("target_ids", [])
+        if kind not in allowed_types or severity not in {"minor", "material"}:
+            errors.append(f"error {index} has invalid type or severity")
+            continue
+        if not isinstance(source_ids, list) or not isinstance(target_ids, list):
+            errors.append(f"error {index} sentence ids must be lists")
+            continue
+        if any(value not in source_lookup for value in source_ids) or any(value not in target_lookup for value in target_ids):
+            errors.append(f"error {index} has unknown sentence ids")
+            continue
+        if not source_ids and not target_ids:
+            errors.append(f"error {index} must cite at least one sentence id")
+            continue
+        valid.append({
+            "type": kind,
+            "severity": severity,
+            "source_ids": source_ids,
+            "target_ids": target_ids,
+            "source": [source_lookup[value] for value in source_ids],
+            "target": [target_lookup[value] for value in target_ids],
+            "reason": str(row.get("reason", "")).strip()[:300],
+        })
+    return valid, errors
+
+
+def _translation_prompt(source: str, target: str, correction: str = "") -> str:
+    source_items = _translation_items(source, "S")
+    target_items = _translation_items(target, "T")
+    source_text = "\n".join(f'{item["id"]}: {item["text"]}' for item in source_items)
+    target_text = "\n".join(f'{item["id"]}: {item["text"]}' for item in target_items)
+    repair = f"\nYour previous JSON was invalid: {correction}\n" if correction else ""
+    return (
+        "Report only meaning-changing scientific errors: mistranslation, omission, addition, "
+        "number/unit error, negation/relation error, or a substantially untranslated sentence. "
+        "Do not report retained English technical terms, wording preference, style, or fluency. "
+        "Use severity=minor only when scientific meaning remains intact; otherwise material.\n"
+        f"{repair}\nENGLISH SOURCE SENTENCES:\n{source_text}\n\n"
+        f"TRADITIONAL CHINESE TARGET SENTENCES:\n{target_text}\n\n"
+        "Return exactly this JSON shape and no score:\n"
+        '{"errors":[{"type":"mistranslation|omission|addition|number_unit|negation_relation|untranslated",'
+        '"severity":"minor|material","source_ids":["S1"],"target_ids":["T1"],"reason":"short reason"}]}\n'
+        "Return an empty errors list when the translation is semantically faithful."
+    )
+
+
+def _score_translation_audit(audit: list[dict]) -> tuple[int, float, str]:
+    material = sum(item["severity"] == "material" for item in audit)
+    minor = len(audit) - material
+    if not audit:
+        raw = 5
+    elif material == 0 and minor == 1:
+        raw = 4
+    elif material <= 1:
+        raw = 3
+    elif material <= 3:
+        raw = 2
+    else:
+        raw = 1
+    reason = f"{material} material and {minor} minor semantic errors"
+    if audit and audit[0].get("reason"):
+        reason += f"; {audit[0]['reason']}"
+    return raw, (raw - 1) / 4.0, reason
+
+
+def judge_translation_fidelity(source: str, target: str, model: str = None,
+                               base_url: str = None, timeout: int = 600) -> dict:
+    """Return a deterministic score over a structured translation-error audit."""
+    model = model or getattr(cfg, "JUDGE_MODEL", cfg.VERIFY_MODEL)
+    base_url = base_url or cfg.OLLAMA_BASE_URL
+    if not (source or "").strip() or not (target or "").strip():
+        return {"score": None, "raw": None, "reason": "missing source or translation", "mode": "translation_fidelity_v2"}
+    correction = ""
+    for attempt in range(1, 3):
+        output, error = _generate(
+            _TRANSLATION_JUDGE_SYSTEM,
+            _translation_prompt(source, target, correction),
+            model,
+            base_url,
+            timeout,
+            json_mode=True,
+        )
+        if error:
+            return {"score": None, "raw": None, "reason": error, "mode": "translation_fidelity_v2"}
+        audit, errors = _validate_translation_audit(_json_object(output), source, target)
+        if not errors:
+            raw, score, reason = _score_translation_audit(audit)
+            return {
+                "score": score,
+                "raw": raw,
+                "reason": reason,
+                "mode": "translation_fidelity_v2",
+                "error_audit": audit,
+                "judge_attempts": attempt,
+            }
+        correction = "; ".join(errors)
+    return {
+        "score": None,
+        "raw": None,
+        "reason": f"invalid translation audit: {correction}",
+        "mode": "translation_fidelity_v2",
+        "judge_attempts": 2,
+    }
 
 
 if __name__ == "__main__":
