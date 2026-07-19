@@ -131,7 +131,7 @@ def _strip_context_summary(text: str) -> str:
 
 
 _QUERY_STOPWORDS = {
-    "according", "across", "also", "and", "are", "does", "for", "from", "give",
+    "according", "across", "also", "and", "are", "condition", "conditions", "does", "for", "from", "give",
     "how", "into", "main", "paper", "papers", "reported", "study", "that", "the",
     "their", "these", "they", "this", "under", "used", "using", "what", "which",
     "with",
@@ -141,7 +141,18 @@ _VALUE_EVIDENCE_MARKERS = ("ic50", "km", "vmax", "mol", "mm", "nm", "μm", "°c"
 _MECHANISM_QUERY_MARKERS = ("mechanism", "bind", "binding", "inhibit", "role", "how")
 _MECHANISM_EVIDENCE_MARKERS = (
     "bind", "bond", "interact", "inhibit", "occup", "convert", "exchange", "cross-link",
-    "uptake", "efflux", "collapse", "reform", "leads to", "results in",
+    "uptake", "efflux", "collapse", "reform", "leads to", "results in", "halogen",
+    "hydrophobic", "t-shaped", "substrate-binding",
+)
+_STORAGE_QUERY_MARKERS = ("storage", "stored", "stability", "shelf life")
+_STORAGE_EVIDENCE_MARKERS = (
+    "storage", "stored", "stability", "stable", "month", "year", "temperature-dependent",
+    "in the dark",
+)
+_ANALYTICAL_QUERY_MARKERS = ("impurit", "hplc", "degradation product", "detect")
+_ANALYTICAL_EVIDENCE_MARKERS = (
+    "detected", "detectable", "detection", "elut", "concentration", "retention time",
+    "intermediate",
 )
 _COMPARISON_DIMENSION_TERMS = (
     "high cost", "cost-effectiveness", "cost effectiveness", "isotopically enriched",
@@ -157,6 +168,18 @@ def _query_terms(query_text: str) -> set[str]:
     }
 
 
+def _query_evidence_markers(query_text: str) -> tuple[str, ...]:
+    lower = (query_text or "").lower()
+    markers = []
+    if any(marker in lower for marker in _MECHANISM_QUERY_MARKERS):
+        markers.extend(_MECHANISM_EVIDENCE_MARKERS)
+    if any(marker in lower for marker in _STORAGE_QUERY_MARKERS):
+        markers.extend(_STORAGE_EVIDENCE_MARKERS)
+    if any(marker in lower for marker in _ANALYTICAL_QUERY_MARKERS):
+        markers.extend(_ANALYTICAL_EVIDENCE_MARKERS)
+    return tuple(dict.fromkeys(markers))
+
+
 def _query_window_score(text: str, query_text: str) -> int:
     lower = (text or "").lower()
     query_lower = (query_text or "").lower()
@@ -164,10 +187,49 @@ def _query_window_score(text: str, query_text: str) -> int:
     if any(marker in query_lower for marker in _VALUE_QUERY_MARKERS):
         score += 4 * bool(re.search(r"\d", lower))
         score += 2 * sum(marker in lower for marker in _VALUE_EVIDENCE_MARKERS)
-    if any(marker in query_lower for marker in _MECHANISM_QUERY_MARKERS):
-        score += 2 * sum(marker in lower for marker in _MECHANISM_EVIDENCE_MARKERS)
+    score += 3 * sum(marker in lower for marker in _query_evidence_markers(query_text))
     score -= min(8, lower.count("doi.org") + lower.count(" et al.") + len(re.findall(r"\(20\d{2}\)", lower)))
     return score
+
+
+def _evidence_terms(text: str) -> set[str]:
+    return {
+        term for term in re.findall(r"[a-z0-9]+", (text or "").lower())
+        if term not in _QUERY_STOPWORDS and (len(term) > 2 or term.isdigit())
+    }
+
+
+def _select_query_aware_nodes(nodes, query_text: str, count: int) -> list:
+    def _content(nws):
+        node = getattr(nws, "node", nws)
+        return node.get_content() if hasattr(node, "get_content") else str(node)
+
+    ranked = []
+    for index, nws in enumerate(nodes):
+        window = _query_aware_window(_content(nws), query_text, 1400)
+        ranked.append({
+            "index": index,
+            "node": nws,
+            "score": _query_window_score(window, query_text),
+            "terms": _evidence_terms(window),
+        })
+    ranked.sort(key=lambda item: (-item["score"], item["index"]))
+    if not getattr(cfg, "STAGE2_DIVERSE_EVIDENCE_ENABLED", False) or count < 2:
+        return [item["node"] for item in ranked[:count]]
+
+    selected = [ranked.pop(0)] if ranked else []
+    while ranked and len(selected) < count:
+        def _value(item):
+            overlaps = []
+            for chosen in selected:
+                union = item["terms"] | chosen["terms"]
+                overlaps.append(len(item["terms"] & chosen["terms"]) / len(union) if union else 0.0)
+            redundancy = max(overlaps, default=0.0)
+            # ponytail: fixed MMR penalty; expose a weight only if eval shows one corpus needs tuning.
+            return max(0, item["score"]) * (1.0 - 0.6 * redundancy), -item["index"]
+
+        selected.append(ranked.pop(max(range(len(ranked)), key=lambda i: _value(ranked[i]))))
+    return [item["node"] for item in selected]
 
 
 def _sentence_window(text: str, position: int, limit: int) -> str:
@@ -194,8 +256,7 @@ def _query_aware_window(text: str, query_text: str, limit: int) -> str:
     anchors = list(_query_terms(query_text))
     if any(marker in query_lower for marker in _VALUE_QUERY_MARKERS):
         anchors.extend(_VALUE_EVIDENCE_MARKERS)
-    if any(marker in query_lower for marker in _MECHANISM_QUERY_MARKERS):
-        anchors.extend(_MECHANISM_EVIDENCE_MARKERS)
+    anchors.extend(_query_evidence_markers(query_text))
     positions = {
         match.start()
         for anchor in anchors
@@ -240,7 +301,12 @@ def _clip_evidence_snippet(text: str, query_text: str, limit: int = 900) -> str:
     return text[start:end].rstrip()
 
 
-def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
+def _nodes_to_evidence_block(
+    nodes,
+    query_text: str,
+    label: str = "",
+    snippet_count_override: int | None = None,
+) -> str:
     if nodes is None:
         return "No standalone retriever output was available."
     if not nodes:
@@ -258,9 +324,9 @@ def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
         if _is_comparison_query(query_text)
         else getattr(cfg, "STAGE2_EVIDENCE_SNIPPETS_PER_TASK", 2)
     )
+    if snippet_count_override is not None and not _is_comparison_query(query_text):
+        snippet_count = max(1, int(snippet_count_override))
     query_aware = getattr(cfg, "STAGE2_QUERY_AWARE_EVIDENCE_ENABLED", False)
-    if query_aware and not _is_comparison_query(query_text):
-        snippet_count = max(4, snippet_count)
 
     selected_nodes = nodes[:snippet_count]
     if (
@@ -309,22 +375,7 @@ def _nodes_to_evidence_block(nodes, query_text: str, label: str = "") -> str:
         remaining = sorted(enumerate(remaining), key=lambda pair: (-_coverage(pair[1]), pair[0]))
         selected_nodes += [nws for _, nws in remaining[:snippet_count - len(selected_nodes)]]
     elif query_aware:
-        def _content(nws):
-            node = getattr(nws, "node", nws)
-            return node.get_content() if hasattr(node, "get_content") else str(node)
-
-        selected_nodes = [
-            nws for _, nws in sorted(
-                enumerate(nodes),
-                key=lambda pair: (
-                    -_query_window_score(
-                        _query_aware_window(_content(pair[1]), query_text, 1400),
-                        query_text,
-                    ),
-                    pair[0],
-                ),
-            )[:snippet_count]
-        ]
+        selected_nodes = _select_query_aware_nodes(nodes, query_text, snippet_count)
 
     for i, nws in enumerate(selected_nodes, 1):
         node = getattr(nws, "node", nws)
@@ -389,7 +440,12 @@ def build_subquery_tasks(sub_questions: list, paper_engines_to_use: dict, paper_
     return valid_tasks, prefilled
 
 
-def run_subqueries_parallel(valid_tasks: list, prefilled: dict, on_status=None) -> list:
+def run_subqueries_parallel(
+    valid_tasks: list,
+    prefilled: dict,
+    on_status=None,
+    evidence_snippets_per_task: int | None = None,
+) -> list:
     """
     Two-phase execution to minimise Ollama model-switching overhead:
       Phase A (parallel): embed guard + vector retrieval (bge-m3 stays loaded)
@@ -442,7 +498,12 @@ def run_subqueries_parallel(valid_tasks: list, prefilled: dict, on_status=None) 
                 tag = "（空/無內容）" if is_empty_result(result) else ""
                 print(f"  ✍️  [Phase B] {label} 生成 {len(result)} 字元 {tag}")
             else:
-                result = _nodes_to_evidence_block(nodes, query_text, label)
+                result = _nodes_to_evidence_block(
+                    nodes,
+                    query_text,
+                    label,
+                    snippet_count_override=evidence_snippets_per_task,
+                )
                 print(f"  🧾 [Phase B] {label} evidence block {len(result)} 字元")
             results[task_idx] = (label, result)
         except Exception as e:

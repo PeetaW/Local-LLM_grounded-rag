@@ -92,6 +92,16 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             cfg.STAGE3_COMPARISON_SCHEMA_ENABLED = old
             cfg.COMPARISON_JSON_ENABLED = old_json
 
+    def test_partial_recovery_hint_is_added_to_fact_prompt(self):
+        prompt = _build_user_prompt(
+            "FORMATTED_CHUNKS",
+            "What storage outcome was reported?",
+            recovery_hint="missing the temperature-dependent degradation result",
+        )
+        self.assertIn("RECOVERY PASS", prompt)
+        self.assertIn("missing the temperature-dependent degradation result", prompt)
+        self.assertIn("Preserve experimental setup or storage conditions", prompt)
+
     def test_comparison_json_is_ab_switch(self):
         old_schema = cfg.STAGE3_COMPARISON_SCHEMA_ENABLED
         old_json = cfg.COMPARISON_JSON_ENABLED
@@ -614,6 +624,25 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
 
         self.assertIn("retrieved evidence", result)
         self.assertTrue(any("empty output" in status for status in statuses))
+
+    def test_synthesizer_replaces_chunk_labels_with_paper_sources(self):
+        synth = KnowledgeSynthesizer()
+        synth._generate = MagicMock(
+            return_value="[Fact 1] Storage remained stable. (Source: [Chunk 1], [Chunk 2])"
+        )
+
+        result = synth.synthesize(
+            [
+                {"text": "first storage result", "source": "PaperA"},
+                {"text": "second storage result", "source": "PaperA"},
+            ],
+            query="What storage stability was reported?",
+            on_status=[].append,
+        )
+
+        self.assertNotIn("[Chunk", result)
+        self.assertIn("Source: PaperA", result)
+        self.assertNotIn("PaperA, PaperA", result)
 
     def test_synthesizer_emits_debug_artifacts(self):
         synth = KnowledgeSynthesizer()

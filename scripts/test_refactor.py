@@ -102,6 +102,7 @@ from rag.query_grounding_flow import (
 )
 from rag.query_prompts import build_synthesis_prompt, build_fallback_prompt
 from rag.query_translation import translate_to_traditional_chinese
+from rag.answerability import assess_answerability
 import rag.query_pipeline as pipeline_module
 import metrics as eval_metrics
 import run_eval as eval_run
@@ -627,8 +628,71 @@ class TestRunSubqueriesParallel(unittest.TestCase):
             )
             self.assertIn("storage at 55 C for 6 months", block)
             self.assertNotIn("[摘要：", block)
-            self.assertIn("[Snippet 4]", block)
-            self.assertNotIn("[Snippet 5]", block)
+            self.assertIn("[Snippet 2]", block)
+            self.assertNotIn("[Snippet 3]", block)
+        finally:
+            cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = old
+
+    def test_query_aware_evidence_prioritizes_detected_impurities(self):
+        old = getattr(cfg, "STAGE2_QUERY_AWARE_EVIDENCE_ENABLED", False)
+        try:
+            cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = True
+            nodes = [
+                "The HPLC method used a C18 column and a standard mobile phase.",
+                "The compound was stored in sealed containers for routine testing.",
+                (
+                    "BrPD and FBBA were detected as degradation products and eluted before BPA. "
+                    "BDPA was also detectable at the reported concentration."
+                ),
+            ]
+            block = _nodes_to_evidence_block(
+                nodes,
+                "Which impurities and degradation products were detected by HPLC during storage?",
+                "【PaperA】",
+            )
+            self.assertIn("BrPD and FBBA were detected", block)
+            self.assertIn("[Snippet 2]", block)
+            self.assertNotIn("[Snippet 3]", block)
+        finally:
+            cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = old
+
+    def test_query_aware_evidence_uses_a_complementary_second_snippet(self):
+        old_query_aware = cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED
+        old_diverse = cfg.STAGE2_DIVERSE_EVIDENCE_ENABLED
+        try:
+            cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = True
+            nodes = [
+                "BPA degradation products and impurities were detected during storage. DUPLICATE_A",
+                "BPA degradation products and impurities were detected during storage. DUPLICATE_B",
+                (
+                    "The lyophilized BPA-mannitol drug product showed slow temperature-dependent "
+                    "degradation to phenylalanine, reaching 1% at 40 C over 6 months. COMPLEMENT"
+                ),
+            ]
+            question = "Which impurities and degradation products form during storage?"
+
+            cfg.STAGE2_DIVERSE_EVIDENCE_ENABLED = False
+            control = _nodes_to_evidence_block(nodes, question)
+            self.assertNotIn("COMPLEMENT", control)
+
+            cfg.STAGE2_DIVERSE_EVIDENCE_ENABLED = True
+            diverse = _nodes_to_evidence_block(nodes, question)
+            self.assertIn("COMPLEMENT", diverse)
+            self.assertEqual(diverse.count("[Snippet "), 2)
+        finally:
+            cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = old_query_aware
+            cfg.STAGE2_DIVERSE_EVIDENCE_ENABLED = old_diverse
+
+    def test_evidence_snippet_override_is_used_for_partial_recovery(self):
+        old = cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED
+        try:
+            cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = False
+            block = _nodes_to_evidence_block(
+                ["first evidence", "second evidence", "third evidence"],
+                "What was reported?",
+                snippet_count_override=3,
+            )
+            self.assertIn("[Snippet 3]", block)
         finally:
             cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = old
 
@@ -787,6 +851,13 @@ class TestSplitIntoSentences(unittest.TestCase):
         self.assertEqual(len(claims), 2)
         self.assertFalse(any("Direct Paper Evidence" in claim for claim in claims))
 
+    def test_skips_bold_markdown_headings(self):
+        claims = split_into_sentences(
+            "**Impurities and Degradation Products Identified by HPLC**\n\n"
+            "Raw BPA powder remained stable for 12 months."
+        )
+        self.assertEqual(claims, ["Raw BPA powder remained stable for 12 months."])
+
     def test_keeps_substantive_tradeoff_sentence(self):
         claims = split_into_sentences(
             "Comparison scaffold:\n"
@@ -938,6 +1009,21 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
         q = "UNIQUE_QUESTION_TEXT_FOR_TEST"
         prompt = build_synthesis_prompt("kb", q, "", "strict", "zh")
         self.assertIn(q, prompt)
+
+    def test_query_facet_focus_is_ab_switch(self):
+        old = cfg.QUERY_FACET_FOCUS_ENABLED
+        try:
+            cfg.QUERY_FACET_FOCUS_ENABLED = False
+            prompt = build_synthesis_prompt("kb", "Report stability and impurities.", "", "strict", "en")
+            self.assertNotIn("QUERY FOCUS", prompt)
+
+            cfg.QUERY_FACET_FOCUS_ENABLED = True
+            prompt = build_synthesis_prompt("kb", "Report stability and impurities.", "", "strict", "en")
+            self.assertIn("QUERY FOCUS", prompt)
+            self.assertIn("every distinct item or facet", prompt)
+            self.assertIn("Once all requested facets are covered, stop", prompt)
+        finally:
+            cfg.QUERY_FACET_FOCUS_ENABLED = old
 
     def test_comparison_tradeoff_guard_is_ab_switch(self):
         old = cfg.COMPARISON_TRADEOFF_GUARD_ENABLED
@@ -1126,6 +1212,24 @@ class TestTranslateToTraditionalChinese(unittest.TestCase):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# answerability (mock requests.post)
+# ══════════════════════════════════════════════════════════════════════════════
+class TestAnswerability(unittest.TestCase):
+    @patch("rag.answerability.requests.post")
+    def test_preserves_full_recovery_reason_and_requires_each_value_arm(self, mock_post):
+        reason = "The facts omit the requested value for the preincubation-only comparison arm. " * 4
+        response = MagicMock()
+        response.json.return_value = {"response": f"VERDICT: PARTIAL\nREASON: {reason}"}
+        mock_post.return_value = response
+
+        result = assess_answerability("Give the reported values.", "[Fact 1] One value.")
+
+        self.assertEqual(result, {"verdict": "PARTIAL", "reason": reason.strip()})
+        system = mock_post.call_args.kwargs["json"]["system"]
+        self.assertIn("each requested comparison arm", system)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # query_pipeline — integration (all external calls mocked)
 # ══════════════════════════════════════════════════════════════════════════════
 def _setup_cfg(cfg_mock):
@@ -1134,6 +1238,8 @@ def _setup_cfg(cfg_mock):
     cfg_mock.VERIFY_ENABLED = False
     cfg_mock.CITATION_GROUNDING_ENABLED = False
     cfg_mock.ANSWERABILITY_GATE_ENABLED = False
+    cfg_mock.PARTIAL_ANSWER_RECOVERY_ENABLED = False
+    cfg_mock.STAGE2_LLM_SUBANSWERS_ENABLED = False
     cfg_mock.STAGE4_ANSWER_VALIDATION_ENABLED = False
     cfg_mock.STAGE4_ANSWER_REWRITE_RETRIES = 1
     cfg_mock.COMPARISON_JSON_DIRECT_RENDER_ENABLED = False
@@ -1145,6 +1251,88 @@ def _setup_cfg(cfg_mock):
 
 
 class TestExecuteStructuredQuery(unittest.TestCase):
+    def test_partial_recovery_accepts_only_answerable_expanded_facts(self):
+        artifacts = {}
+        recovered_kb = (
+            "[Fact 1] Partial fact. (Source: PaperA)\n\n"
+            "[Fact 2] Complete storage outcome. (Source: PaperA)"
+        )
+        with (
+            patch.object(cfg, "PARTIAL_ANSWER_RECOVERY_ENABLED", True),
+            patch.object(cfg, "SYNTHESIS_ENABLED", True),
+            patch.object(cfg, "STAGE2_LLM_SUBANSWERS_ENABLED", False),
+            patch.object(cfg, "PARTIAL_RECOVERY_EVIDENCE_SNIPPETS_PER_TASK", 4),
+            patch.object(
+                pipeline_module,
+                "run_subqueries_parallel",
+                return_value=[("【PaperA】", "expanded evidence")],
+            ) as mock_run,
+            patch.object(
+                pipeline_module._synthesizer,
+                "synthesize",
+                return_value=recovered_kb,
+            ) as mock_synthesize,
+            patch(
+                "rag.answerability.assess_answerability",
+                return_value={"verdict": "ANSWERABLE", "reason": "complete"},
+            ),
+        ):
+            result = pipeline_module._attempt_partial_recovery(
+                "What storage outcome was reported?",
+                [(0, "【PaperA】", MagicMock(), "storage outcome")],
+                {},
+                ["【PaperA】\ninitial evidence"],
+                "[Fact 1] Partial fact. (Source: PaperA)",
+                {"verdict": "PARTIAL", "reason": "missing storage outcome"},
+                on_status=[].append,
+                on_artifact=artifacts.__setitem__,
+            )
+
+        self.assertTrue(result["attempted"])
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["knowledge_base"].count("Partial fact"), 1)
+        self.assertIn("Complete storage outcome", result["knowledge_base"])
+        self.assertEqual(mock_run.call_args.kwargs["evidence_snippets_per_task"], 4)
+        self.assertEqual(mock_synthesize.call_args.kwargs["recovery_hint"], "missing storage outcome")
+        self.assertIn("stage2_recovery_evidence", artifacts)
+        self.assertIn("Complete storage outcome", artifacts["stage3_recovery_knowledge_base"])
+        self.assertIn("partial_recovery_assessment", artifacts)
+
+    def test_partial_recovery_keeps_original_when_retry_is_still_partial(self):
+        original_kb = "[Fact 1] Partial fact. (Source: PaperA)"
+        with (
+            patch.object(cfg, "PARTIAL_ANSWER_RECOVERY_ENABLED", True),
+            patch.object(cfg, "SYNTHESIS_ENABLED", True),
+            patch.object(cfg, "STAGE2_LLM_SUBANSWERS_ENABLED", False),
+            patch.object(
+                pipeline_module,
+                "run_subqueries_parallel",
+                return_value=[("【PaperA】", "expanded evidence")],
+            ),
+            patch.object(
+                pipeline_module._synthesizer,
+                "synthesize",
+                return_value="[Fact 1] Still partial. (Source: PaperA)",
+            ),
+            patch(
+                "rag.answerability.assess_answerability",
+                return_value={"verdict": "PARTIAL", "reason": "still incomplete"},
+            ),
+        ):
+            result = pipeline_module._attempt_partial_recovery(
+                "What storage outcome was reported?",
+                [(0, "【PaperA】", MagicMock(), "storage outcome")],
+                {},
+                ["【PaperA】\ninitial evidence"],
+                original_kb,
+                {"verdict": "PARTIAL", "reason": "missing storage outcome"},
+                on_status=[].append,
+            )
+
+        self.assertTrue(result["attempted"])
+        self.assertFalse(result["accepted"])
+        self.assertEqual(result["knowledge_base"], original_kb)
+
     def test_method_fact_renderer_keeps_core_condition_and_excludes_precursors(self):
         kb = """
 [Fact 1] Optically pure L-BPA was synthesized by a hybrid process. (Source: bbb0683)
@@ -1783,7 +1971,10 @@ class TestRunEvalCorrectnessCandidate(unittest.TestCase):
                     "Question text?",
                     {
                         "stage2_evidence": "Evidence block",
+                        "stage2_recovery_evidence": "Expanded evidence block",
                         "stage3_generation_meta": [{"done_reason": "stop"}],
+                        "stage3_recovery_prompt": "Recovery prompt",
+                        "partial_recovery_assessment": "{\"verdict\":\"ANSWERABLE\"}",
                         "stage4_draft": "Draft",
                     },
                     ["[planning] ok"],
@@ -1795,6 +1986,9 @@ class TestRunEvalCorrectnessCandidate(unittest.TestCase):
             opened_paths = [args[0] for args, _ in m.call_args_list]
             self.assertIn(os.path.join(out_dir, "Q08_stage2_evidence.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage3_generation_meta.txt"), opened_paths)
+            self.assertIn(os.path.join(out_dir, "Q08_stage2_recovery_evidence.txt"), opened_paths)
+            self.assertIn(os.path.join(out_dir, "Q08_stage3_recovery_prompt.txt"), opened_paths)
+            self.assertIn(os.path.join(out_dir, "Q08_partial_recovery_assessment.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage7_translated_answer.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_translation_judge.json"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage4_draft.txt"), opened_paths)

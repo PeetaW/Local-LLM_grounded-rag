@@ -23,6 +23,9 @@ def split_into_sentences(text: str) -> list:
         if re.match(r"^#{1,6}\s+", line):
             _flush()
             continue
+        if re.match(r"^\*\*.+\*\*$", line) and not re.search(r"[.!?。！？]\*\*$", line):
+            _flush()
+            continue
         if re.match(r"^(?:[-*]\s+|\d+[.)]\s+|\[)", line):
             _flush()
             line = re.sub(r"^(?:[-*]\s+|\d+[.)]\s+)", "", line)

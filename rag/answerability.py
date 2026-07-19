@@ -15,6 +15,9 @@ _SYSTEM = (
     "SYNTHESIS questions: if the question asks to COMPARE, CONTRAST, or AGGREGATE, judge whether "
     "the underlying per-item INPUTS are present (e.g. the per-route yields/costs needed for a "
     "comparison). The comparison itself need NOT be pre-written — assembling it is the answer step.\n"
+    "VALUE or CONDITION LIST questions: ANSWERABLE requires the facts to contain the requested "
+    "value or condition for each requested comparison arm. If the facts say one arm differs from "
+    "another but omit that other arm's requested value, choose PARTIAL.\n"
     "Choose exactly one verdict:\n"
     "- ANSWERABLE: the facts contain a direct answer, or the full underlying inputs for a synthesis "
     "question. The question can be answered well.\n"
@@ -101,7 +104,7 @@ def assess_answerability(question: str, knowledge_base: str,
     else:
         verdict = m.group(1).upper().replace(" ", "_")
     rm = re.search(r"REASON:\s*(.+)", out, re.S)
-    reason = (rm.group(1).strip()[:200] if rm else out[:160].strip())
+    reason = (rm.group(1).strip() if rm else out.strip())
     return {"verdict": verdict, "reason": reason}
 
 

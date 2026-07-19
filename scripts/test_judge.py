@@ -195,6 +195,42 @@ class TestTranslationJudge(unittest.TestCase):
         self.assertEqual(result["score"], 1.0)
         self.assertEqual(result["error_audit"], [])
 
+    def test_translation_fidelity_discards_identical_number_unit_false_positive(self):
+        client = MagicMock()
+        client.post.return_value = _response({"errors": [{
+            "type": "number_unit",
+            "severity": "material",
+            "source_ids": ["S1"],
+            "target_ids": ["T1"],
+            "reason": "the values were interpreted incorrectly",
+        }]})
+        with (
+            patch.object(judge, "requests", client),
+            patch.object(judge.cfg, "TRANSLATION_EXACT_VALUE_FILTER_ENABLED", True),
+        ):
+            result = judge.judge_translation_fidelity(
+                "The Ki values were 0.37 mM and 0.46 mM.",
+                "Ki 值分別為 0.37 mM 與 0.46 mM。",
+                model="test",
+                base_url="http://test",
+            )
+
+        self.assertEqual(result["score"], 1.0)
+        self.assertEqual(result["error_audit"], [])
+
+        with (
+            patch.object(judge, "requests", client),
+            patch.object(judge.cfg, "TRANSLATION_EXACT_VALUE_FILTER_ENABLED", False),
+        ):
+            control = judge.judge_translation_fidelity(
+                "The Ki values were 0.37 mM and 0.46 mM.",
+                "Ki 值分別為 0.37 mM 與 0.46 mM。",
+                model="test",
+                base_url="http://test",
+            )
+
+        self.assertEqual(control["score"], 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()

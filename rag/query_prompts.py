@@ -34,6 +34,30 @@ def _term_fidelity_zh() -> str:
 """
 
 
+def _query_facet_focus_en() -> str:
+    if not getattr(cfg, "QUERY_FACET_FOCUS_ENABLED", False):
+        return ""
+    return """
+QUERY FOCUS:
+- Explicitly answer every distinct item or facet requested in the original question.
+- Include only facts that directly answer those facets. Do not copy related background, assay details, secondary measurements, mechanisms, or follow-up observations unless the question asks for them.
+- When values are requested, include values that directly measure the requested outcome, not every number in the Known Facts List.
+- Once all requested facets are covered, stop. A complete answer is not an exhaustive transcript of the retrieved facts.
+"""
+
+
+def _query_facet_focus_zh() -> str:
+    if not getattr(cfg, "QUERY_FACET_FOCUS_ENABLED", False):
+        return ""
+    return """
+【問題面向聚焦】
+- 原問題明確要求的每個項目或面向都必須分別回答。
+- 只保留直接回答這些面向的事實；除非問題明確要求，不要抄入相關背景、分析方法細節、次要量測、機制或後續觀察。
+- 問題要求數值時，只列直接量測所問結果的數值，不要抄入事實清單中的所有數字。
+- 所有要求面向回答完畢後即停止；完整不等於逐條轉錄所有檢索事實。
+"""
+
+
 def _comparison_tradeoff_en() -> str:
     if not getattr(cfg, "COMPARISON_TRADEOFF_GUARD_ENABLED", False):
         return ""
@@ -212,6 +236,7 @@ def _reasoning_en(knowledge_base: str, question: str, memory_section: str) -> st
 {_term_fidelity_en()}
 {_method_key_step_en()}
 {_comparison_json_en(knowledge_base)}
+{_query_facet_focus_en()}
 
 ---
 Original question: {question}
@@ -269,6 +294,7 @@ def _reasoning_zh(knowledge_base: str, question: str, memory_section: str) -> st
 {_term_fidelity_zh()}
 {_method_key_step_zh()}
 {_comparison_json_zh(knowledge_base)}
+{_query_facet_focus_zh()}
 
 ---
 原始問題：{question}
@@ -319,6 +345,7 @@ def _strict_en(knowledge_base: str, question: str, memory_section: str) -> str:
 {_term_fidelity_en()}
 {_method_key_step_en()}
 {_comparison_json_en(knowledge_base)}
+{_query_facet_focus_en()}
 
 ---
 Original question: {question}
@@ -344,6 +371,7 @@ def _strict_zh(knowledge_base: str, question: str, memory_section: str) -> str:
 {_term_fidelity_zh()}
 {_method_key_step_zh()}
 {_comparison_json_zh(knowledge_base)}
+{_query_facet_focus_zh()}
 
 ---
 原始問題：{question}

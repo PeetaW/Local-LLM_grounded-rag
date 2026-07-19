@@ -64,6 +64,27 @@ def _fact_list_items(knowledge_base: str) -> list[dict]:
     return items
 
 
+def _merge_fact_lists(original: str, recovered: str) -> str:
+    original_items = _fact_list_items(original)
+    recovered_items = _fact_list_items(recovered)
+    if not original_items or not recovered_items:
+        return "\n\n".join(part.strip() for part in (original, recovered) if part and part.strip())
+
+    merged = {}
+    for item in original_items + recovered_items:
+        key = re.sub(r"[^\w]+", " ", item["claim"].casefold()).strip()
+        if key not in merged:
+            merged[key] = {"claim": item["claim"], "sources": list(item["sources"])}
+        else:
+            merged[key]["sources"].extend(
+                source for source in item["sources"] if source not in merged[key]["sources"]
+            )
+    return "\n\n".join(
+        f"[Fact {index}] {item['claim']} (Source: {', '.join(item['sources'])})"
+        for index, item in enumerate(merged.values(), 1)
+    )
+
+
 def _is_method_fact_query(question: str) -> bool:
     lower = (question or "").lower()
     return (
@@ -512,6 +533,101 @@ def _rewrite_stage4_if_needed(full_text: str, knowledge_base: str, question: str
     return current
 
 
+def _attempt_partial_recovery(
+    question: str,
+    valid_tasks: list,
+    prefilled: dict,
+    sub_answers: list[str],
+    knowledge_base: str,
+    assessment: dict,
+    on_status=None,
+    on_artifact=None,
+) -> dict:
+    outcome = {
+        "attempted": False,
+        "accepted": False,
+        "sub_answers": sub_answers,
+        "knowledge_base": knowledge_base,
+        "assessment": assessment,
+    }
+    is_comparison = any(term in (question or "").lower() for term in _COMPARISON_QUERY_TERMS)
+    if (
+        assessment.get("verdict") != "PARTIAL"
+        or not getattr(cfg, "PARTIAL_ANSWER_RECOVERY_ENABLED", False)
+        or not getattr(cfg, "SYNTHESIS_ENABLED", False)
+        or getattr(cfg, "STAGE2_LLM_SUBANSWERS_ENABLED", False)
+        or is_comparison
+        or not valid_tasks
+    ):
+        return outcome
+
+    def _status(msg):
+        if on_status:
+            on_status(msg)
+        else:
+            print(msg)
+
+    outcome["attempted"] = True
+    started = time.perf_counter()
+    reason = str(assessment.get("reason", "")).strip()
+    _status(f"  [partial-recovery] expanding evidence: {reason[:180]}")
+    try:
+        recovery_results = run_subqueries_parallel(
+            valid_tasks,
+            prefilled,
+            on_status=_status,
+            evidence_snippets_per_task=getattr(
+                cfg, "PARTIAL_RECOVERY_EVIDENCE_SNIPPETS_PER_TASK", 3
+            ),
+        )
+        recovery_sub_answers = [f"{label}\n{result}" for label, result in recovery_results]
+        recovery_text = "\n\n".join(recovery_sub_answers)
+        recovery_chunks = [
+            {"text": answer, "source": extract_paper_name(answer, f"retrieved_chunk_{i}")}
+            for i, answer in enumerate(recovery_sub_answers)
+        ]
+        if on_artifact:
+            on_artifact("stage2_recovery_evidence", recovery_text)
+
+        def _recovery_artifact(name, value):
+            if on_artifact:
+                recovery_name = name.replace("stage3_", "stage3_recovery_", 1)
+                on_artifact(recovery_name, value)
+
+        recovered_kb = _synthesizer.synthesize(
+            chunks=recovery_chunks,
+            query=question,
+            recovery_hint=reason,
+            on_status=on_status,
+            on_artifact=_recovery_artifact if on_artifact else None,
+        )
+        merged_kb = _merge_fact_lists(knowledge_base, recovered_kb)
+        if on_artifact:
+            on_artifact("stage3_recovery_knowledge_base", merged_kb)
+        from rag.answerability import assess_answerability
+        recovered_assessment = assess_answerability(question, merged_kb)
+        outcome["recovered_assessment"] = recovered_assessment
+        outcome["accepted"] = recovered_assessment.get("verdict") == "ANSWERABLE"
+        if outcome["accepted"]:
+            outcome.update({
+                "sub_answers": recovery_sub_answers,
+                "knowledge_base": merged_kb,
+                "assessment": recovered_assessment,
+            })
+        if on_artifact:
+            on_artifact(
+                "partial_recovery_assessment",
+                json.dumps(recovered_assessment, ensure_ascii=False, indent=2),
+            )
+        _status(
+            f"  [partial-recovery] verdict={recovered_assessment.get('verdict')} "
+            f"accepted={outcome['accepted']} elapsed_ms={int((time.perf_counter()-started)*1000)}"
+        )
+    except Exception as exc:
+        _status(f"  [partial-recovery] failed; keeping original facts ({exc})")
+    return outcome
+
+
 # ══════════════════════════════════════════════════════════════════
 #  Non-streaming entry point
 # ══════════════════════════════════════════════════════════════════
@@ -607,6 +723,28 @@ def execute_structured_query(
         _kb_head = " ".join((knowledge_base or "")[:240].split())
         _status(f"[answerability] verdict={_ans['verdict']} abstain={gate_abstain} "
                 f"kb_chars={len(knowledge_base or '')} kb_head={_kb_head} reason={_ans['reason'][:160]}")
+        recovery = _attempt_partial_recovery(
+            question,
+            valid_tasks,
+            prefilled,
+            sub_answers,
+            knowledge_base,
+            _ans,
+            on_status=on_status,
+            on_artifact=on_artifact,
+        )
+        if recovery["accepted"]:
+            if on_artifact:
+                on_artifact("stage2_initial_evidence", "\n\n".join(sub_answers))
+                on_artifact("stage3_initial_knowledge_base", knowledge_base)
+            sub_answers = recovery["sub_answers"]
+            knowledge_base = recovery["knowledge_base"]
+            _ans = recovery["assessment"]
+            gate_abstain, gate_notice = gate_route(_ans["verdict"])
+            if on_artifact:
+                on_artifact("stage2_evidence", "\n\n".join(sub_answers))
+                on_artifact("knowledge_base", knowledge_base)
+                on_artifact("stage3_knowledge_base", knowledge_base)
 
     # ── Stage 4: LLM synthesis ───────────────────────────────────────
     t3 = time.perf_counter()
@@ -857,6 +995,25 @@ def execute_structured_query_stream(
         _ans = assess_answerability(question, knowledge_base)
         gate_abstain, gate_notice = gate_route(_ans["verdict"])
         yield f"[STATUS] [answerability] verdict={_ans['verdict']} abstain={gate_abstain}\n"
+        recovery = _attempt_partial_recovery(
+            question,
+            valid_tasks,
+            prefilled,
+            sub_answers,
+            knowledge_base,
+            _ans,
+            on_status=on_status,
+        )
+        if recovery["attempted"]:
+            yield (
+                f"[STATUS] [partial-recovery] accepted={recovery['accepted']} "
+                f"verdict={recovery.get('recovered_assessment', {}).get('verdict')}\n"
+            )
+        if recovery["accepted"]:
+            sub_answers = recovery["sub_answers"]
+            knowledge_base = recovery["knowledge_base"]
+            _ans = recovery["assessment"]
+            gate_abstain, gate_notice = gate_route(_ans["verdict"])
 
     # ── Stage 4: LLM synthesis ───────────────────────────────────────
     t3 = time.perf_counter()

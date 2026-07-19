@@ -108,6 +108,8 @@ COMPARISON_JSON_DIRECT_RENDER_ENABLED = True
 # A/B：Stage 4 生成後檢查 comparison_json 必要結構；不合格時帶理由重寫一次。
 STAGE4_ANSWER_VALIDATION_ENABLED = True
 STAGE4_ANSWER_REWRITE_RETRIES = 1
+# A/B：一般題逐一回答原問題的明確面向後停止，避免把相關但未被詢問的 Stage 3 facts 全部抄入答案。
+QUERY_FACET_FOCUS_ENABLED = True
 # A/B：Stage 3 事實蒸餾用英文輸出，讓英文 chunks / gold reference / eval judge 維持同語言比對。
 STAGE3_ENGLISH_DISTILLATION_ENABLED = True
 # A/B：方法/key-step 題只摘要核心步驟，不把起始物準備、背景方法或替代/對照路線升格成 key steps。
@@ -127,6 +129,8 @@ JUDGE_MODEL         = VERIFY_MODEL
 STRUCTURED_JUDGE_STABLE_PROTOCOL_ENABLED = True
 # Eval-only：獨立比較英文 canonical draft 與繁中譯文，不讓翻譯錯誤污染核心 correctness。
 TRANSLATION_FIDELITY_JUDGE_ENABLED = True
+# A/B：judge 若指控數值/單位，但引用的英中文數值與單位完全相同，視為誤報。
+TRANSLATION_EXACT_VALUE_FILTER_ENABLED = True
 # Eval debug artifacts：每題輸出 stage2/stage3/stage4/judge 文字檔，方便逐輪檢查 LLM 行為。
 EVAL_DEBUG_ARTIFACTS_ENABLED = True
 
@@ -136,6 +140,8 @@ SUBQUERY_MAX_WORKERS = 4   # 並行子查詢的 thread pool 大小
 STAGE2_LLM_SUBANSWERS_ENABLED = False
 # A/B：從既有 retrieval candidates 選問題相關的完整句子視窗；False 回到固定前兩段/前 900 字。
 STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = True
+# A/B：query-aware 的後續 snippets 優先補上不重複的證據面向；Q01/Q04 實測未改善，且可能漏掉重疊續段。
+STAGE2_DIVERSE_EVIDENCE_ENABLED = False
 STAGE2_EVIDENCE_SNIPPETS_PER_TASK = 2
 COMPARISON_EVIDENCE_SNIPPETS_PER_TASK = 4
 
@@ -166,6 +172,9 @@ SELFCORRECT_ENTAIL_MAX = 0.2
 # NOT_ANSWERABLE）。ANSWERABLE→正常；PARTIAL→生成+軟警告橫幅；NOT_ANSWERABLE→誠實硬棄答（跳 Stage 4-7）。
 # 預設開（baseline_v5 驗證：零誤殺硬棄答、PARTIAL 精準命中最弱兩題 Q07/Q08、Q12 棄答 corr 1.0、總延遲未增）。
 ANSWERABILITY_GATE_ENABLED = True
+# A/B：一般題被判 PARTIAL 時，擴充 evidence 並帶缺口理由重做一次 Stage 3；只有升為 ANSWERABLE 才採用。
+PARTIAL_ANSWER_RECOVERY_ENABLED = True
+PARTIAL_RECOVERY_EVIDENCE_SNIPPETS_PER_TASK = 4
 # English-first pipeline：Stage 4 輸出英文 → Stage 5 英文驗證 → NLI EN-vs-EN。
 # 優點：NLI 從跨語言變單語言（大幅提升 entailment 準確度），Verifier 推論邏輯更穩定
 # 注意：開啟後 NLI_TRANSLATE_TO_EN 會自動跳過（draft 已是英文，不需要再翻）

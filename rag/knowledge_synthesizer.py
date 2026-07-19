@@ -20,7 +20,7 @@ _BASE_SYNTHESIS_SYSTEM_PROMPT = """
 
 嚴格規則：
 1. 只陳述文獻中明確出現的資訊，禁止推論或補充背景知識
-2. 每條事實必須標注來源，格式：（來源：[論文名稱或chunk ID]）
+2. 每條事實必須使用輸入區塊「來源：」後的論文名稱；[Chunk N] 只是定位標籤，不可當成來源
 3. 輸出為編號清單，每條一行，格式：[事實N] 內容（來源：XXX）
 4. 若多個 chunk 描述同一事實，合併為一條並列出所有來源
 5. 使用繁體中文輸出（無論輸入語言）
@@ -295,14 +295,45 @@ def _build_user_prompt(
     formatted: str,
     query: str,
     comparison_json_enabled: bool | None = None,
+    recovery_hint: str = "",
 ) -> str:
     schema = _comparison_schema_instruction(query, comparison_json_enabled=comparison_json_enabled)
     schema_block = f"\n\n{schema}" if schema else ""
+    recovery_block = ""
+    if recovery_hint:
+        recovery_block = (
+            "\n\nRECOVERY PASS:\n"
+            f"- The previous fact list was judged incomplete because: {recovery_hint}\n"
+            "- Re-extract every directly supported result needed to close that gap, including associated "
+            "values, conditions, entities, and outcome direction.\n"
+            "- Preserve experimental setup or storage conditions when the question asks for them; otherwise "
+            "prefer observed results. Do not infer facts absent from the evidence."
+        )
     return (
-        f"參考問題方向（僅供整理聚焦，不影響事實陳述）：{query}{schema_block}\n\n"
+        f"參考問題方向（僅供整理聚焦，不影響事實陳述）：{query}{schema_block}{recovery_block}\n\n"
         f"請將以下論文段落整理為結構化已知事實清單：\n\n"
         f"--- 論文段落開始 ---\n{formatted}\n--- 論文段落結束 ---"
     )
+
+
+def _chunk_source(chunk: dict, index: int) -> str:
+    return str(
+        chunk.get("source")
+        or chunk.get("paper_name")
+        or chunk.get("file_name")
+        or (chunk.get("metadata") or {}).get("file_name")
+        or f"chunk_{index}"
+    )
+
+
+def _canonicalize_chunk_sources(text: str, chunks: list[dict]) -> str:
+    result = text or ""
+    for index, chunk in enumerate(chunks, 1):
+        source = _chunk_source(chunk, index - 1)
+        result = result.replace(f"[Chunk {index}]", source)
+        duplicate = re.compile(rf"{re.escape(source)}(?:\s*,\s*{re.escape(source)})+")
+        result = duplicate.sub(lambda _: source, result)
+    return result
 
 
 def _source_near(text: str, pos: int) -> str:
@@ -421,13 +452,7 @@ class KnowledgeSynthesizer:
         for i, chunk in enumerate(chunks):
             # 相容不同的欄位名稱
             text = chunk.get("text") or chunk.get("content") or str(chunk)
-            source = (
-                chunk.get("source")
-                or chunk.get("paper_name")
-                or chunk.get("file_name")
-                or (chunk.get("metadata") or {}).get("file_name")
-                or f"chunk_{i}"
-            )
+            source = _chunk_source(chunk, i)
             lines.append(f"[Chunk {i+1}] 來源：{source}\n{text}\n---")
         return "\n".join(lines)
 
@@ -435,13 +460,7 @@ class KnowledgeSynthesizer:
     def _fallback_chunks(chunks: list[dict]) -> str:
         lines = []
         for i, chunk in enumerate(chunks):
-            source = (
-                chunk.get("source")
-                or chunk.get("paper_name")
-                or chunk.get("file_name")
-                or (chunk.get("metadata") or {}).get("file_name")
-                or f"chunk_{i}"
-            )
+            source = _chunk_source(chunk, i)
             text = chunk.get("text") or chunk.get("content") or str(chunk)
             lines.append(f"[Chunk {i+1}] 來源：{source}\n{text}")
         return "\n\n".join(lines)
@@ -452,6 +471,7 @@ class KnowledgeSynthesizer:
         query: str = "",
         on_status=None,
         on_artifact=None,
+        recovery_hint: str = "",
     ) -> str:
         """
         將 chunks 轉化為結構化已知事實清單。
@@ -463,7 +483,7 @@ class KnowledgeSynthesizer:
         formatted = self._format_chunks(chunks)
         total_chars = sum(len(c.get("text","")) for c in chunks)
 
-        user_prompt = _build_user_prompt(formatted, query)
+        user_prompt = _build_user_prompt(formatted, query, recovery_hint=recovery_hint)
         if on_artifact:
             on_artifact("stage3_prompt", user_prompt)
 
@@ -505,6 +525,7 @@ class KnowledgeSynthesizer:
             )
             if on_artifact:
                 on_artifact("stage3_raw_output", result)
+            result = _canonicalize_chunk_sources(result, chunks)
             if not (result or "").strip():
                 _status("  ⚠️  [Synthesizer] empty output; using original chunks")
                 result = self._fallback_chunks(chunks)
@@ -527,6 +548,7 @@ class KnowledgeSynthesizer:
                     result = _generate_attempt(plain_prompt, "plain_fallback")
                     if on_artifact:
                         on_artifact("stage3_plain_output", result)
+                    result = _canonicalize_chunk_sources(result, chunks)
                     if not (result or "").strip():
                         _status("  ⚠️  [Synthesizer] plain retry empty; using original chunks")
                         result = self._fallback_chunks(chunks)
@@ -542,6 +564,7 @@ class KnowledgeSynthesizer:
                         )
                         repair_prompt = _comparison_json_repair_prompt(user_prompt, result, errors)
                         candidate = _generate_attempt(repair_prompt, f"json_repair_{attempt + 1}")
+                        candidate = _canonicalize_chunk_sources(candidate, chunks)
                         candidate = _normalize_comparison_json(
                             candidate,
                             query,

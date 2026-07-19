@@ -43,8 +43,11 @@ _FACT_JUDGE_SYSTEM = (
 _TRANSLATION_JUDGE_SYSTEM = (
     "You are a scientific translation auditor. The English SOURCE is the sole ground truth and the "
     "TARGET is intended to be a Traditional Chinese translation. Find semantic errors only. "
+    "Audit the translation literally; never fact-check, reinterpret, or correct the SOURCE. "
     "A technical term left in English, or shown as Chinese plus English, is semantically faithful and "
-    "MUST NOT be reported as an error. Ignore style, fluency, markdown, and citations. Return JSON only."
+    "MUST NOT be reported as an error. If direction words and values are preserved, do not invent an "
+    "error based on how the scientific variable might be interpreted. Ignore style, fluency, markdown, "
+    "and citations. Return JSON only."
 )
 
 
@@ -439,6 +442,16 @@ def _translation_items(text: str, prefix: str) -> list[dict]:
     return [{"id": f"{prefix}{i}", "text": item} for i, item in enumerate(items, 1)]
 
 
+def _number_unit_signature(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    normalized = unicodedata.normalize("NFKC", str(text or "")).lower().replace("μ", "u").replace("µ", "u")
+    numbers = tuple(re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", normalized))
+    units = tuple(re.findall(
+        r"(?<![a-z])(?:%|°\s*[cf]|[numk]?m|kg|mg|ug|g|ml|l|h|hr|hours?|min|minutes?|days?|months?|years?)(?![a-z])",
+        normalized,
+    ))
+    return numbers, units
+
+
 def _validate_translation_audit(data: dict | None, source: str, target: str) -> tuple[list, list]:
     rows = data.get("errors") if isinstance(data, dict) else None
     if not isinstance(rows, list):
@@ -469,6 +482,12 @@ def _validate_translation_audit(data: dict | None, source: str, target: str) -> 
         if not source_ids and not target_ids:
             errors.append(f"error {index} must cite at least one sentence id")
             continue
+        source_text = " ".join(source_lookup[value] for value in source_ids)
+        target_text = " ".join(target_lookup[value] for value in target_ids)
+        if kind == "number_unit" and getattr(cfg, "TRANSLATION_EXACT_VALUE_FILTER_ENABLED", False):
+            source_signature = _number_unit_signature(source_text)
+            if source_signature[0] and source_signature == _number_unit_signature(target_text):
+                continue
         valid.append({
             "type": kind,
             "severity": severity,
