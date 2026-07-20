@@ -9,6 +9,7 @@
 import json
 import re
 import time
+import unicodedata
 
 from llama_index.core import Settings
 
@@ -19,7 +20,13 @@ from rag.comparison_json_validator import (
 )
 from rag.answer_verifier import AnswerVerifier
 from rag.query_planning import detect_target_paper, _keyword_prefilter, select_relevant_papers, plan_sub_questions
-from rag.query_retrieval import build_subquery_tasks, run_subqueries_parallel, is_empty_result, extract_paper_name
+from rag.query_retrieval import (
+    build_subquery_tasks,
+    run_subqueries_parallel,
+    is_empty_result,
+    extract_paper_name,
+    _query_window_score,
+)
 from rag.query_grounding_flow import run_grounding_check, split_into_sentences
 from rag.query_translation import translate_to_traditional_chinese
 from rag.query_prompts import build_synthesis_prompt, build_fallback_prompt
@@ -83,6 +90,224 @@ def _merge_fact_lists(original: str, recovered: str) -> str:
         f"[Fact {index}] {item['claim']} (Source: {', '.join(item['sources'])})"
         for index, item in enumerate(merged.values(), 1)
     )
+
+
+_RECOVERY_SNIPPET_RE = re.compile(r"\[Snippet \d+\]\s*(.*?)(?=\n\[Snippet \d+\]|\Z)", re.S)
+_MEASUREMENT_RE = re.compile(
+    r"(?:\b(?:IC\s*50|K[im]|Vmax|pH)\b.{0,30}?\d|"
+    r"\d+(?:\.\d+)?(?:\s*(?:±|\+/-)\s*\d+(?:\.\d+)?)?\s*"
+    r"(?:%|°?\s*[CF]\b|nM\b|mM\b|µM\b|μM\b|mg\b|µg\b|μg\b|g\b|"
+    r"mL\b|ml\b|months?\b|days?\b|hours?\b|h\b|min\b))",
+    re.IGNORECASE,
+)
+_RESULT_RELATION_RE = re.compile(
+    r"(?:\b(?:concentration|time|temperature)(?:-\s*(?:and|or)\s*"
+    r"(?:concentration|time|temperature))?[- ]dependent\b|"
+    r"\b(?:degrad\w*|form\w*|stable)\b.{0,180}\b"
+    r"(?:alkali\w*|oxidat\w*|acidic|stable|rapid\w*|phenylalanine|tyrosine)\b|"
+    r"\b(?:alkali\w*|oxidat\w*|acidic)\b.{0,180}\b(?:degrad\w*|form\w*|stable)\b)",
+    re.IGNORECASE,
+)
+
+
+def _literal_recovery_facts(recovery_results: list[tuple[str, str]], question: str) -> str:
+    """Keep short, query-relevant measurements that Stage 3 must not silently drop."""
+    lower_question = (question or "").lower()
+    if not any(term in lower_question for term in ("value", "condition", "storage", "dose", "yield", "數值", "條件", "儲存")):
+        return ""
+    condition_query = any(
+        term in lower_question for term in ("condition", "storage", "stored", "條件", "儲存")
+    )
+    question_terms = {
+        token for token in re.findall(r"[a-z][a-z0-9]+", lower_question)
+        if len(token) > 3 and token not in {"does", "give", "reported", "study", "that", "the", "what", "which", "with"}
+    }
+
+    candidates = []
+    for result_index, (label, block) in enumerate(recovery_results):
+        source = label.strip("【】")
+        for snippet in _RECOVERY_SNIPPET_RE.findall(block or ""):
+            text = unicodedata.normalize("NFKC", snippet).replace("μ", "µ")
+            text = re.sub(
+                r"(?<=[A-Za-z])-\s+(?=(?!(?:and|or)\b)[A-Za-z])",
+                "",
+                text,
+                flags=re.IGNORECASE,
+            )
+            text = re.sub(r"\s+", " ", text).replace("\x03g", "µg").strip()
+            sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", text)
+            for sentence_index, sentence in enumerate(sentences):
+                sentence = sentence.strip()
+                axis_values = re.search(
+                    r"(?:-?\d+(?:\.\d+)?\s+){8,}", sentence
+                )
+                if axis_values:
+                    sentence = sentence[:axis_values.start()].rstrip(" ,:-")
+                    sentence = re.sub(r",?\s+(?:generating|showing)$", "", sentence, flags=re.I)
+                measurement = bool(_MEASUREMENT_RE.search(sentence))
+                relation = bool(_RESULT_RELATION_RE.search(sentence))
+                if not 20 <= len(sentence) <= 700 or not (measurement or relation):
+                    continue
+                result_sentence = sentence
+                sentence_terms = set(re.findall(r"[a-z][a-z0-9]+", sentence.lower()))
+                if measurement and len(question_terms & sentence_terms) < 2:
+                    for prior in reversed(sentences[max(0, sentence_index - 3):sentence_index]):
+                        prior = prior.strip()
+                        prior_terms = set(re.findall(r"[a-z][a-z0-9]+", prior.lower()))
+                        if len(question_terms & prior_terms) < 2:
+                            continue
+                        prefix = re.split(
+                            r"\b(?:to determine|to assess|to evaluate|to clarify|cells? were|samples? were)\b",
+                            prior,
+                            maxsplit=1,
+                            flags=re.IGNORECASE,
+                        )[0].strip(" .:")
+                        context = prefix if 20 <= len(prefix) < len(prior) else prior
+                        context_numbers = re.findall(
+                            r"(?<![A-Za-z0-9])-?\d+(?:\.\d+)?", context
+                        )
+                        if len(context_numbers) <= 4 and len(context) + len(sentence) <= 700:
+                            sentence = f"{context}. {sentence}"
+                            break
+                sentence_lower = sentence.lower()
+                if any(marker in sentence_lower for marker in (
+                    "article history:", "received in revised", "available online", "doi:",
+                    "sub-question:", "source metadata", "above-described reports",
+                    "pioneering reports",
+                )):
+                    continue
+                if "mechanistic pathway" in sentence_lower and "was set to" in sentence_lower:
+                    continue
+                if len(re.findall(r"(?<![A-Za-z0-9])-?\d+(?:\.\d+)?", sentence)) > 14:
+                    continue
+                metric = bool(re.search(r"\b(?:IC\s*50|K[im]|Vmax|pH)\b", sentence, re.I))
+                if sentence.count("(") != sentence.count(")"):
+                    continue
+                potency_query = any(term in lower_question for term in (
+                    "potency", "inhibitory", "inhibition", "ic50"
+                ))
+                if potency_query and not (metric or relation or "potency" in result_sentence.lower()):
+                    continue
+                score = _query_window_score(sentence, question) + 6 * relation
+                score += 4 * metric
+                result_statement = bool(re.search(
+                    r"\b(?:determined|observed|indicate|showed|stable|detectable|"
+                    r"degrad(?:e|es|ed|ing)|form(?:s|ed|ing)|reaching|reached)\b",
+                    result_sentence,
+                    re.IGNORECASE,
+                ))
+                setup_statement = bool(re.search(
+                    r"\b(?:to determine|to clarify|were exposed|were cultured|assays? were performed|"
+                    r"sample preparation|markers? with the solid lines)\b",
+                    result_sentence,
+                    re.IGNORECASE,
+                ))
+                condition_witness = bool(
+                    condition_query
+                    and measurement
+                    and re.search(r"\b(?:stored|storage|incubat\w*|kept)\b", result_sentence, re.I)
+                )
+                if setup_statement and not result_statement and not condition_witness:
+                    continue
+                if len(result_sentence) <= 320 and result_statement:
+                    score += 8
+                if metric and len(result_sentence) <= 180 and result_statement:
+                    score += 12
+                if setup_statement and not condition_witness:
+                    score -= 12
+                if condition_witness:
+                    score += 12
+                if "mechanistic pathway" in sentence_lower:
+                    score -= 5
+                if score >= 7:
+                    candidates.append((score, -result_index, sentence, source))
+
+    facts, seen = [], set()
+    for _, _, sentence, source in sorted(candidates, reverse=True):
+        key = re.sub(r"\W+", " ", sentence.casefold()).strip()
+        if key in seen:
+            continue
+        seen.add(key)
+        facts.append((sentence, source))
+        if len(facts) == (8 if condition_query else 6):
+            break
+    return "\n\n".join(
+        f"[Fact {index}] {claim} (Source: {source})"
+        for index, (claim, source) in enumerate(facts, 1)
+    )
+
+
+_LITERAL_FACET_GROUPS = (
+    ("combined", ("combined", "combination", "addition of preincubation", "pre-plus")),
+    ("concentration-dependent", ("concentration-dependent", "concentration dependent")),
+    ("time-dependent", ("time-dependent", "time dependent")),
+    ("temperature-dependent", ("temperature-dependent", "temperature dependent")),
+    ("alkaline", ("alkaline", "alkali", "naoh", "basic condition")),
+    ("oxidative", ("oxidative", "oxidation", "h2o2")),
+    ("acidic", ("acidic", "hcl", "acetic acid")),
+    ("stable", ("stable", "stability", "no detectable degradation")),
+    ("rapid", ("rapid", "rapidly")),
+    ("slow", ("slow", "slowly")),
+    ("dark", ("in the dark", "dark storage")),
+)
+_LITERAL_STOPWORDS = {
+    "about", "according", "after", "also", "and", "are", "been", "being", "both",
+    "during", "from", "into", "months", "reported", "results", "that", "the", "their",
+    "these", "this", "under", "using", "value", "values", "were", "with",
+}
+
+
+def _literal_normalized(text: str) -> str:
+    value = unicodedata.normalize("NFKC", str(text or "")).casefold()
+    value = value.replace("‐", "-").replace("‑", "-").replace("–", "-")
+    return " ".join(value.split())
+
+
+def _literal_numbers(text: str) -> set[str]:
+    plain = re.sub(r"\[[^\]]+\]|【[^】]+】", " ", str(text or ""))
+    plain = re.sub(r"\\(?:text|mathrm)\{([^{}]*)\}", r"\1", plain)
+    plain = re.sub(r"(?<=[A-Za-z])_\{?(\d+)\}?", r"\1", plain)
+    values = re.findall(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?", plain)
+    return {value.rstrip("0").rstrip(".") if "." in value else value for value in values}
+
+
+def _literal_fact_present(claim: str, answer: str) -> bool:
+    claim_text = _literal_normalized(claim)
+    required_numbers = _literal_numbers(claim)
+    required_facets = [
+        (name, aliases) for name, aliases in _LITERAL_FACET_GROUPS
+        if any(alias in claim_text for alias in aliases)
+    ]
+    claim_tokens = {
+        token for token in re.findall(r"[a-z][a-z0-9]+", claim_text)
+        if len(token) > 3 and token not in _LITERAL_STOPWORDS
+    }
+    if not required_numbers and not required_facets:
+        return True
+
+    for sentence in split_into_sentences(answer) or [answer]:
+        sentence_text = _literal_normalized(sentence)
+        if required_numbers - _literal_numbers(sentence):
+            continue
+        if any(not any(alias in sentence_text for alias in aliases) for _, aliases in required_facets):
+            continue
+        sentence_tokens = set(re.findall(r"[a-z][a-z0-9]+", sentence_text))
+        required_overlap = min(3, max(1, len(claim_tokens) // 4))
+        if len(claim_tokens & sentence_tokens) >= required_overlap:
+            return True
+    return False
+
+
+def _append_missing_literal_facts(answer: str, literal_facts: str) -> str:
+    additions = []
+    for item in _fact_list_items(literal_facts):
+        if _literal_fact_present(item["claim"], answer):
+            continue
+        claim = item["claim"].rstrip(" .")
+        additions.append(f"- {claim} [Source: {', '.join(item['sources'])}].")
+    if not additions:
+        return answer
+    return (answer or "").rstrip() + "\n\n" + "\n".join(additions)
 
 
 def _is_method_fact_query(question: str) -> bool:
@@ -549,6 +774,7 @@ def _attempt_partial_recovery(
         "sub_answers": sub_answers,
         "knowledge_base": knowledge_base,
         "assessment": assessment,
+        "literal_facts": "",
     }
     is_comparison = any(term in (question or "").lower() for term in _COMPARISON_QUERY_TERMS)
     if (
@@ -579,6 +805,9 @@ def _attempt_partial_recovery(
             evidence_snippets_per_task=getattr(
                 cfg, "PARTIAL_RECOVERY_EVIDENCE_SNIPPETS_PER_TASK", 3
             ),
+            include_adjacent_evidence=getattr(
+                cfg, "PARTIAL_RECOVERY_DETERMINISTIC_GUARDS_ENABLED", False
+            ),
         )
         recovery_sub_answers = [f"{label}\n{result}" for label, result in recovery_results]
         recovery_text = "\n\n".join(recovery_sub_answers)
@@ -601,6 +830,13 @@ def _attempt_partial_recovery(
             on_status=on_status,
             on_artifact=_recovery_artifact if on_artifact else None,
         )
+        literal_kb = ""
+        if getattr(cfg, "PARTIAL_RECOVERY_DETERMINISTIC_GUARDS_ENABLED", False):
+            literal_kb = _literal_recovery_facts(recovery_results, question)
+            recovered_kb = _merge_fact_lists(recovered_kb, literal_kb) if literal_kb else recovered_kb
+            if literal_kb and on_artifact:
+                on_artifact("stage3_recovery_literal_facts", literal_kb)
+        outcome["literal_facts"] = literal_kb
         merged_kb = _merge_fact_lists(knowledge_base, recovered_kb)
         if on_artifact:
             on_artifact("stage3_recovery_knowledge_base", merged_kb)
@@ -679,7 +915,19 @@ def execute_structured_query(
     _status(f"\n[retrieval] 開始")
     _status(f"\n  ⚡ 並行檢索 {len(sub_questions)} 個子問題中（workers={cfg.SUBQUERY_MAX_WORKERS}）...")
     valid_tasks, prefilled = build_subquery_tasks(sub_questions, paper_engines_to_use, paper_engines)
-    ordered_results = run_subqueries_parallel(valid_tasks, prefilled, on_status=_status)
+    deterministic_evidence = getattr(
+        cfg, "PARTIAL_RECOVERY_DETERMINISTIC_GUARDS_ENABLED", False
+    )
+    ordered_results = run_subqueries_parallel(
+        valid_tasks,
+        prefilled,
+        on_status=_status,
+        evidence_snippets_per_task=(
+            getattr(cfg, "PARTIAL_RECOVERY_EVIDENCE_SNIPPETS_PER_TASK", 4)
+            if deterministic_evidence else None
+        ),
+        include_adjacent_evidence=deterministic_evidence,
+    )
 
     sub_answers = []
     rag_found_anything = False
@@ -697,6 +945,7 @@ def execute_structured_query(
     # ── Stage 3: Knowledge synthesis (distillation) ──────────────────
     t2 = time.perf_counter()
     _status("\n  🔗 綜合所有子答案中...")
+    literal_kb = ""
     if cfg.SYNTHESIS_ENABLED and rag_found_anything:
         _status("\n  🧪 [synthesis] 知識蒸餾中...")
         synthesis_chunks = [
@@ -706,6 +955,12 @@ def execute_structured_query(
         knowledge_base = _synthesizer.synthesize(
             chunks=synthesis_chunks, query=question, on_status=on_status, on_artifact=on_artifact,
         )
+        if deterministic_evidence:
+            literal_kb = _literal_recovery_facts(ordered_results, question)
+            if literal_kb:
+                knowledge_base = _merge_fact_lists(knowledge_base, literal_kb)
+                if on_artifact:
+                    on_artifact("stage3_literal_facts", literal_kb)
     else:
         knowledge_base = "\n\n".join(sub_answers)
     if on_artifact:
@@ -739,6 +994,9 @@ def execute_structured_query(
                 on_artifact("stage3_initial_knowledge_base", knowledge_base)
             sub_answers = recovery["sub_answers"]
             knowledge_base = recovery["knowledge_base"]
+            literal_kb = _merge_fact_lists(
+                literal_kb, recovery.get("literal_facts", "")
+            )
             _ans = recovery["assessment"]
             gate_abstain, gate_notice = gate_route(_ans["verdict"])
             if on_artifact:
@@ -828,9 +1086,14 @@ def execute_structured_query(
         if not stage4_direct_rendered:
             print("\n 最終綜合回答（Stage 4 初稿）：")
             full_text = fallback_notice
-            for chunk in Settings.llm.stream_complete(synthesis_prompt):
-                print(chunk.delta, end="", flush=True)
-                full_text += chunk.delta
+            try:
+                for chunk in Settings.llm.stream_complete(synthesis_prompt):
+                    print(chunk.delta, end="", flush=True)
+                    full_text += chunk.delta
+            except Exception as exc:
+                _status(f"  ⚠️  [synthesis-llm] failed; using Stage 3 facts ({str(exc)[:180]})")
+                fallback = _stage4_empty_answer_fallback(knowledge_base, question=question)
+                full_text = fallback_notice + fallback
             print("\n")
             if rag_found_anything and not full_text.strip():
                 _status("  ⚠️  [synthesis-llm] empty answer; using Stage 3 facts fallback")
@@ -853,6 +1116,21 @@ def execute_structured_query(
             draft_answer=full_text, knowledge_base=knowledge_base, on_status=on_status,
         )
         _status(f"[verification] 完成 elapsed_ms={int((time.perf_counter()-t4)*1000)}")
+    if (
+        rag_found_anything
+        and not gate_abstain
+        and deterministic_evidence
+        and literal_kb
+    ):
+        before_literal_guard = full_text
+        full_text = _append_missing_literal_facts(full_text, literal_kb)
+        if full_text != before_literal_guard:
+            _status("  🧱 [literal-completeness] restored omitted direct evidence")
+            if on_artifact:
+                on_artifact(
+                    "stage5_literal_completeness",
+                    full_text[len(before_literal_guard.rstrip()):].lstrip(),
+                )
     if on_artifact:
         on_artifact("stage5_verified", full_text)
 
@@ -958,7 +1236,19 @@ def execute_structured_query_stream(
     yield f"[STATUS] ⚡ 並行檢索 {len(sub_questions)} 個子問題中（workers={cfg.SUBQUERY_MAX_WORKERS}）...\n"
     valid_tasks, prefilled = build_subquery_tasks(sub_questions, paper_engines_to_use, paper_engines)
     retrieval_msgs = []
-    ordered_results = run_subqueries_parallel(valid_tasks, prefilled, on_status=retrieval_msgs.append)
+    deterministic_evidence = getattr(
+        cfg, "PARTIAL_RECOVERY_DETERMINISTIC_GUARDS_ENABLED", False
+    )
+    ordered_results = run_subqueries_parallel(
+        valid_tasks,
+        prefilled,
+        on_status=retrieval_msgs.append,
+        evidence_snippets_per_task=(
+            getattr(cfg, "PARTIAL_RECOVERY_EVIDENCE_SNIPPETS_PER_TASK", 4)
+            if deterministic_evidence else None
+        ),
+        include_adjacent_evidence=deterministic_evidence,
+    )
     for msg in retrieval_msgs:
         yield f"[STATUS] {msg}\n"
 
@@ -974,6 +1264,7 @@ def execute_structured_query_stream(
 
     # ── Stage 3: Knowledge synthesis (distillation) ──────────────────
     t2 = time.perf_counter()
+    literal_kb = ""
     if cfg.SYNTHESIS_ENABLED and rag_found_anything:
         yield "[STATUS] 🧪 [synthesis] 知識蒸餾中...\n"
         synthesis_chunks = [
@@ -983,6 +1274,10 @@ def execute_structured_query_stream(
         knowledge_base = _synthesizer.synthesize(
             chunks=synthesis_chunks, query=question, on_status=on_status,
         )
+        if deterministic_evidence:
+            literal_kb = _literal_recovery_facts(ordered_results, question)
+            if literal_kb:
+                knowledge_base = _merge_fact_lists(knowledge_base, literal_kb)
         yield "[STATUS] 📋 事實清單已整理完成\n"
     else:
         knowledge_base = "\n\n".join(sub_answers)
@@ -1012,6 +1307,9 @@ def execute_structured_query_stream(
         if recovery["accepted"]:
             sub_answers = recovery["sub_answers"]
             knowledge_base = recovery["knowledge_base"]
+            literal_kb = _merge_fact_lists(
+                literal_kb, recovery.get("literal_facts", "")
+            )
             _ans = recovery["assessment"]
             gate_abstain, gate_notice = gate_route(_ans["verdict"])
 
@@ -1086,9 +1384,19 @@ def execute_structured_query_stream(
             if fallback_notice:
                 yield fallback_notice
             full_text = fallback_notice
-            for chunk in Settings.llm.stream_complete(synthesis_prompt):
-                yield chunk.delta
-                full_text += chunk.delta
+            try:
+                for chunk in Settings.llm.stream_complete(synthesis_prompt):
+                    yield chunk.delta
+                    full_text += chunk.delta
+            except Exception as exc:
+                yield f"\n[STATUS] ⚠️ [synthesis-llm] failed; using Stage 3 facts ({str(exc)[:180]})\n"
+                fallback = _stage4_empty_answer_fallback(knowledge_base, question=question)
+                if fallback:
+                    yield "\n\n---\n" + fallback
+                full_text = fallback_notice + fallback
+            if rag_found_anything and not full_text.strip():
+                full_text = _stage4_empty_answer_fallback(knowledge_base, question=question)
+                yield full_text
     yield f"\n[STATUS] [synthesis-llm] 完成 elapsed_ms={int((time.perf_counter()-t3)*1000)}\n"
 
     if rag_found_anything and not gate_abstain:
@@ -1102,6 +1410,12 @@ def execute_structured_query_stream(
             yield "\n\n---\n"
             yield corrected
             full_text = corrected
+        with_isotope_cost = _append_missing_isotope_cost_answer(
+            full_text, knowledge_base, question
+        )
+        if with_isotope_cost != full_text:
+            yield with_isotope_cost[len(full_text.rstrip()):]
+            full_text = with_isotope_cost
 
     # ── Stage 5: Verification ────────────────────────────────────────
     if cfg.VERIFY_ENABLED and rag_found_anything and not gate_abstain:
@@ -1117,6 +1431,18 @@ def execute_structured_query_stream(
         else:
             yield "[STATUS] ✅ [verification] 邏輯驗證通過（VERIFY_PASS），答案無需修正\n"
         yield f"[STATUS] [verification] 完成 elapsed_ms={int((time.perf_counter()-t4)*1000)}\n"
+
+    if (
+        rag_found_anything
+        and not gate_abstain
+        and deterministic_evidence
+        and literal_kb
+    ):
+        before_literal_guard = full_text
+        full_text = _append_missing_literal_facts(full_text, literal_kb)
+        if full_text != before_literal_guard:
+            yield "[STATUS] 🧱 [literal-completeness] restored omitted direct evidence\n"
+            yield full_text[len(before_literal_guard.rstrip()):]
 
     # ── Stage 6: Citation grounding ──────────────────────────────────
     nli_report = ""

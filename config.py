@@ -29,7 +29,7 @@ LLM_MODEL         = "qwen3.5:27b"
 PLANNING_LLM_MODEL = "qwen2.5:14b"
 VL_MODEL = "qwen3-vl:32b"
 VL_AUTO_RUN = True
-LLM_TIMEOUT       = 28800.0    # 8小時，避免長推理被中斷
+LLM_TIMEOUT       = 900.0      # 15 分鐘；Stage 4 逾時會退回已蒸餾的 Stage 3 facts
 LLM_CONTEXT_WINDOW = 32768
 
 # ── Contextual Summarization 設定 ─────────────────────
@@ -175,6 +175,8 @@ ANSWERABILITY_GATE_ENABLED = True
 # A/B：一般題被判 PARTIAL 時，擴充 evidence 並帶缺口理由重做一次 Stage 3；只有升為 ANSWERABLE 才採用。
 PARTIAL_ANSWER_RECOVERY_ENABLED = True
 PARTIAL_RECOVERY_EVIDENCE_SNIPPETS_PER_TASK = 4
+# A/B：初始檢索及 PARTIAL recovery 擴充 evidence、保留直接命中的事實，並做 deterministic 完整性檢查。
+PARTIAL_RECOVERY_DETERMINISTIC_GUARDS_ENABLED = True
 # English-first pipeline：Stage 4 輸出英文 → Stage 5 英文驗證 → NLI EN-vs-EN。
 # 優點：NLI 從跨語言變單語言（大幅提升 entailment 準確度），Verifier 推論邏輯更穩定
 # 注意：開啟後 NLI_TRANSLATE_TO_EN 會自動跳過（draft 已是英文，不需要再翻）

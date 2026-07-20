@@ -155,6 +155,82 @@ class TestStructuredJudge(unittest.TestCase):
         self.assertEqual(result["mode"], "legacy_holistic_fallback")
         self.assertIn("unknown evidence_ids", result["structured_error"])
 
+    def test_fact_contract_rejects_partial_numeric_and_dependent_coverage(self):
+        facts = judge._fact_items([
+            "JPH203 inhibition is concentration-dependent and time-dependent.",
+            "The drug product reaches about 1% at 40 C over 6 months.",
+        ])
+        candidate = (
+            "JPH203 preincubation significantly augmented inhibition potency. "
+            "The drug product was incubated at 4, 25, and 40 C for several months."
+        )
+        audit, errors = judge._validate_fact_audit(
+            {"facts": [
+                {"id": "F1", "verdict": "covered", "evidence_ids": ["C1"], "reason": "related"},
+                {"id": "F2", "verdict": "covered", "evidence_ids": ["C2"], "reason": "setup"},
+            ]},
+            facts,
+            candidate,
+            stable_protocol=True,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual([item["verdict"] for item in audit], ["missing", "missing"])
+        self.assertEqual([item["judge_verdict"] for item in audit], ["covered", "covered"])
+
+    def test_contract_numbers_ignore_identifier_digits_and_latex_parameter_subscripts(self):
+        plain = "JPH203 preincubation alone had an IC50 of 193 +/- 50 nM."
+        latex = r"JPH203 preincubation alone had an $\text{IC}_{50}$ of $193 \pm 50$ nM."
+
+        self.assertEqual(judge._contract_numbers(plain), {"193", "50"})
+        self.assertEqual(judge._contract_numbers(latex), {"193", "50"})
+
+    def test_fact_contract_requires_same_scope_for_contradiction(self):
+        facts = judge._fact_items([
+            "BPA degrades to tyrosine under alkaline and oxidative conditions, extremely rapidly."
+        ])
+        candidate = "Raw BPA powder remained stable during dry storage at 40 C."
+        audit, errors = judge._validate_fact_audit(
+            {"facts": [{
+                "id": "F1",
+                "verdict": "contradicted",
+                "evidence_ids": ["C1"],
+                "reason": "stable",
+            }]},
+            facts,
+            candidate,
+            stable_protocol=True,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit[0]["verdict"], "missing")
+        self.assertEqual(audit[0]["judge_verdict"], "contradicted")
+
+    def test_fact_contract_requires_condition_and_outcome_scope(self):
+        degradation = judge._apply_fact_contract(
+            "BPA degrades to tyrosine under alkaline and oxidative conditions, extremely rapidly.",
+            "covered",
+            ["A mechanistic pathway shows oxidative degradation of BPA to tyrosine."],
+        )
+        stability = judge._apply_fact_contract(
+            "BPA is stable in the tested acidic and FeCl3 solutions.",
+            "covered",
+            ["BPA was tested in 100 mM HCl and 5% FeCl3."],
+        )
+        standalone = judge._apply_fact_contract(
+            "Preincubation alone has an IC50 of 193 ± 50 nM.",
+            "contradicted",
+            ["With the addition of preincubation, the combined IC50 was 34.2 ± 3.6 nM."],
+        )
+
+        self.assertEqual(degradation[0], "missing")
+        self.assertIn("alkaline", degradation[1])
+        self.assertIn("rapid", degradation[1])
+        self.assertEqual(stability[0], "missing")
+        self.assertIn("stable", stability[1])
+        self.assertEqual(standalone[0], "missing")
+        self.assertIn("standalone", standalone[1])
+
 
 class TestTranslationJudge(unittest.TestCase):
     def test_translation_fidelity_uses_separate_scoring_contract(self):
@@ -178,7 +254,9 @@ class TestTranslationJudge(unittest.TestCase):
         self.assertEqual(result["mode"], "translation_fidelity_v2")
         payload = client.post.call_args.kwargs["json"]
         self.assertIn("technical term left in English", payload["system"])
+        self.assertIn("Taiwan amino-acid names", payload["system"])
         self.assertIn("ENGLISH SOURCE SENTENCES", payload["prompt"])
+        self.assertIn("not a one-to-one mapping", payload["prompt"])
         self.assertEqual(payload["format"], "json")
 
     def test_translation_fidelity_accepts_retained_english_terms(self):
@@ -230,6 +308,83 @@ class TestTranslationJudge(unittest.TestCase):
             )
 
         self.assertEqual(control["score"], 0.5)
+
+    def test_translation_value_filter_ignores_different_citation_syntax(self):
+        source = "The Ki values were 0.37 mM and 0.46 mM [1-s2.0-S1347861320300633-main]."
+        target = "Ki 值分別為 0.37 mM 與 0.46 mM【1-s2.0-S1347861320300633-main】。"
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "number_unit",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": "wrong unit",
+            }]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_accepts_taiwan_terms_and_merged_sentences(self):
+        source = (
+            "Tyrosine is a BPA impurity. "
+            "Approximately 1% of phenylalanine formed at 40 C over 6 months."
+        )
+        target = (
+            "tyrosine (酪胺酸) 是 BPA 雜質，且在 40 C 儲存 6 個月後形成約 1% 的 "
+            "phenylalanine (苯丙胺酸)。"
+        )
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [
+                {
+                    "type": "mistranslation",
+                    "severity": "material",
+                    "source_ids": ["S1"],
+                    "target_ids": ["T1"],
+                    "reason": "Tyrosine is mistranslated as 酪胺酸 instead of 酪氨酸.",
+                },
+                {
+                    "type": "mistranslation",
+                    "severity": "material",
+                    "source_ids": ["S2"],
+                    "target_ids": [],
+                    "reason": "Phenylalanine is mistranslated as 苯丙胺酸 instead of 苯丙氨酸.",
+                },
+                {
+                    "type": "omission",
+                    "severity": "material",
+                    "source_ids": ["S2"],
+                    "target_ids": [],
+                    "reason": (
+                        "The content appears merged into T1, but the source sentence structure "
+                        "implies two distinct elements."
+                    ),
+                },
+            ]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_keeps_actual_semantic_omission(self):
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "omission",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": "The numerical yield of 82% is absent from the target.",
+            }]},
+            "The isolated reaction yield was reported as 82% after purification.",
+            "該反應經純化後的最終產率被描述為相當高，但沒有提供任何具體數值。",
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(audit), 1)
 
 
 if __name__ == "__main__":

@@ -32,6 +32,77 @@ _SYSTEM = (
     "PARTIAL and NOT_ANSWERABLE, prefer PARTIAL. Reserve NOT_ANSWERABLE for genuine absence."
 )
 _VERDICTS = ("ANSWERABLE", "PARTIAL", "NOT_ANSWERABLE")
+_VALUE_QUESTION_MARKERS = ("value", "values", "reported value", "數值", "數據", "值")
+_COMPARISON_ARM_RE = re.compile(
+    r"\b(?:lower|higher|greater|less|more|smaller|larger)\s+than\s+"
+    r"(?:(?:that|those)\s+of\s+)?([^.;(\n]{2,80})",
+    re.IGNORECASE,
+)
+
+
+def _missing_value_arm(question: str, knowledge_base: str) -> str:
+    """Return a comparison arm named in the KB but never given its own value."""
+    if not any(marker in (question or "").lower() for marker in _VALUE_QUESTION_MARKERS):
+        return ""
+
+    lines = []
+    for line in (knowledge_base or "").splitlines():
+        if not line.strip():
+            continue
+        clean = re.sub(
+            r"\((?:Source|來源)\s*[:：].*?\)\s*$",
+            "",
+            " ".join(line.split()),
+            flags=re.IGNORECASE,
+        )
+        lines.append(re.sub(r"^\[(?:Fact|事實)\s*\d+\]\s*", "", clean, flags=re.IGNORECASE))
+    for line in lines:
+        for match in _COMPARISON_ARM_RE.finditer(line):
+            arm = re.sub(r"^(?:the|an?)\s+", "", match.group(1).strip(), flags=re.IGNORECASE)
+            if re.search(r"\d", arm):
+                continue
+            arm_pattern = re.compile(re.escape(arm), re.IGNORECASE)
+            quantified = False
+            for candidate in lines:
+                arm_match = arm_pattern.search(candidate)
+                if not arm_match:
+                    continue
+                before = candidate[max(0, arm_match.start() - 70):arm_match.start()]
+                after = candidate[arm_match.end():arm_match.end() + 70]
+                if re.search(
+                    r"(?:lower|higher|greater|less|more|smaller|larger)\s+than\s+"
+                    r"(?:(?:that|those)\s+of\s+)?$",
+                    before,
+                    re.IGNORECASE,
+                ):
+                    quantified = bool(re.search(r"\d", after))
+                else:
+                    quantified = bool(re.search(r"\d", before[-50:] + after[:50]))
+                if quantified:
+                    break
+            if not quantified and re.search(r"\b(?:alone|only)\b", arm, re.IGNORECASE):
+                arm_core = re.sub(r"\b(?:alone|only)\b", "", arm, flags=re.IGNORECASE).strip()
+                core_pattern = re.compile(re.escape(arm_core), re.IGNORECASE)
+                for candidate in lines:
+                    core_match = core_pattern.search(candidate)
+                    if not core_match:
+                        continue
+                    nearby = candidate[
+                        max(0, core_match.start() - 90):core_match.end() + 90
+                    ]
+                    combined = bool(re.search(
+                        r"\b(?:combined|combination|pre-plus)\b|pre\s*\+\s*co|addition of preincubation",
+                        nearby,
+                        re.IGNORECASE,
+                    ))
+                    if "preincubation" in arm_core.lower() and "co-incubation" in nearby.lower():
+                        combined = True
+                    if not combined and re.search(r"\d", nearby):
+                        quantified = True
+                        break
+            if not quantified:
+                return arm
+    return ""
 
 # Phase 2 路由用的告示文字。
 ABSTAIN_NOTICE = (
@@ -105,6 +176,14 @@ def assess_answerability(question: str, knowledge_base: str,
         verdict = m.group(1).upper().replace(" ", "_")
     rm = re.search(r"REASON:\s*(.+)", out, re.S)
     reason = (rm.group(1).strip() if rm else out.strip())
+    if (
+        verdict == "ANSWERABLE"
+        and getattr(cfg, "PARTIAL_RECOVERY_DETERMINISTIC_GUARDS_ENABLED", False)
+    ):
+        missing_arm = _missing_value_arm(question, knowledge_base)
+        if missing_arm:
+            verdict = "PARTIAL"
+            reason = f"The facts compare against '{missing_arm}' but do not report that arm's requested value."
     return {"verdict": verdict, "reason": reason}
 
 

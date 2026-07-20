@@ -11,6 +11,7 @@
 import re
 import time
 import torch
+import unicodedata
 import config as cfg
 from rag.query_grounding_flow import split_into_sentences, _cited_sources_in_sentence
 
@@ -254,6 +255,7 @@ def _preprocess_for_nli(text: str, citation_sources=()) -> str:
         r'缺失資訊',              # "缺失資訊：..." 或 "*   缺失資訊：..."
         r'\[資訊不足\]',          # "[資訊不足]..." 或 "*   [資訊不足]..."
         r'文獻依據不足，無法確認', # 清除 [資訊不足] 標籤後的殘餘文字
+        r'^Based on the (?:provided|available) (?:data|evidence|information).*?the following information',
     )
     for pat in _META_SKIP:
         if re.search(pat, text):
@@ -320,7 +322,7 @@ _LEXICAL_NEGATIONS = {"no", "not", "never", "without"}
 
 
 def _lexical_tokens(text: str) -> set[str]:
-    raw = (text or "").lower()
+    raw = unicodedata.normalize("NFKC", text or "").lower()
     # PDF extraction often splits one word at a line break ("distil- lation").
     # Keep the original pieces and add the joined form for lexical matching.
     dehyphenated = re.sub(r"(?<=[a-z0-9])-\s+(?=[a-z0-9])", "", raw)
@@ -351,7 +353,14 @@ def _find_lexical_support(
     best = None
     for chunk in chunks:
         text = re.sub(r"\s+", " ", str(chunk.get("text", ""))).strip()
-        sentences = [s for s in re.split(r"(?<=[.!?])\s+", text) if s]
+        sentences = [
+            s for s in re.split(
+                r"(?<!\bFig\.)(?<!\bEq\.)(?<!\bDr\.)(?<!\bMr\.)(?<=[.!?])\s+",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if s
+        ]
         windows = sentences + [
             f"{sentences[i]} {sentences[i + 1]}"
             for i in range(len(sentences) - 1)

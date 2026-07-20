@@ -232,6 +232,49 @@ def _select_query_aware_nodes(nodes, query_text: str, count: int) -> list:
     return [item["node"] for item in selected]
 
 
+def _engine_docstore(engine):
+    retriever = getattr(engine, "retriever", None)
+    for candidate in [retriever, *getattr(retriever, "_retrievers", [])]:
+        index = getattr(candidate, "_index", None) or getattr(candidate, "index", None)
+        docstore = getattr(index, "docstore", None)
+        if docstore is not None:
+            return docstore
+    return None
+
+
+def _best_adjacent_node(engine, selected_nodes, query_text: str):
+    """Pick one query-relevant PREVIOUS/NEXT node from the selected evidence."""
+    docstore = _engine_docstore(engine)
+    if docstore is None:
+        return None
+
+    def _node(value):
+        return getattr(value, "node", value)
+
+    seen = {getattr(_node(value), "node_id", None) for value in selected_nodes}
+    candidates = []
+    for selected_index, value in enumerate(selected_nodes):
+        for relation, related in (getattr(_node(value), "relationships", {}) or {}).items():
+            relation_name = getattr(relation, "name", "").upper()
+            relation_value = str(getattr(relation, "value", relation))
+            if relation_name not in {"PREVIOUS", "NEXT"} and relation_value not in {"2", "3"}:
+                continue
+            node_id = getattr(related, "node_id", None)
+            if not node_id or node_id in seen:
+                continue
+            try:
+                adjacent = docstore.get_node(node_id)
+            except Exception:
+                continue
+            if getattr(adjacent, "metadata", {}).get("source_type") == "image_description":
+                continue
+            text = adjacent.get_content() if hasattr(adjacent, "get_content") else str(adjacent)
+            candidates.append((_query_window_score(_query_aware_window(text, query_text, 1400), query_text), -selected_index, adjacent))
+            seen.add(node_id)
+    # ponytail: one adjacent witness bounds recovery context; add more only if recall still proves it necessary.
+    return max(candidates, key=lambda item: item[:2])[2] if candidates else None
+
+
 def _sentence_window(text: str, position: int, limit: int) -> str:
     start = max(0, position - limit // 3)
     sentence_start = max(text.rfind(marker, max(0, start - 240), start) for marker in (". ", "? ", "! "))
@@ -270,7 +313,9 @@ def _query_aware_window(text: str, query_text: str, limit: int) -> str:
 
 def _clip_evidence_snippet(text: str, query_text: str, limit: int = 900) -> str:
     is_comparison = _is_comparison_query(query_text)
-    text = _strip_context_summary(text) if is_comparison else " ".join(text.split())
+    text = _strip_context_summary(text)
+    if not is_comparison:
+        text = " ".join(text.split())
     if len(text) <= limit:
         return text
     query_aware = getattr(cfg, "STAGE2_QUERY_AWARE_EVIDENCE_ENABLED", False)
@@ -306,6 +351,8 @@ def _nodes_to_evidence_block(
     query_text: str,
     label: str = "",
     snippet_count_override: int | None = None,
+    engine=None,
+    include_adjacent: bool = False,
 ) -> str:
     if nodes is None:
         return "No standalone retriever output was available."
@@ -377,6 +424,11 @@ def _nodes_to_evidence_block(
     elif query_aware:
         selected_nodes = _select_query_aware_nodes(nodes, query_text, snippet_count)
 
+    if include_adjacent:
+        adjacent = _best_adjacent_node(engine, selected_nodes, query_text)
+        if adjacent is not None:
+            selected_nodes.append(adjacent)
+
     for i, nws in enumerate(selected_nodes, 1):
         node = getattr(nws, "node", nws)
         text = node.get_content() if hasattr(node, "get_content") else str(node)
@@ -445,6 +497,7 @@ def run_subqueries_parallel(
     prefilled: dict,
     on_status=None,
     evidence_snippets_per_task: int | None = None,
+    include_adjacent_evidence: bool = False,
 ) -> list:
     """
     Two-phase execution to minimise Ollama model-switching overhead:
@@ -503,6 +556,8 @@ def run_subqueries_parallel(
                     query_text,
                     label,
                     snippet_count_override=evidence_snippets_per_task,
+                    engine=engine,
+                    include_adjacent=include_adjacent_evidence,
                 )
                 print(f"  🧾 [Phase B] {label} evidence block {len(result)} 字元")
             results[task_idx] = (label, result)

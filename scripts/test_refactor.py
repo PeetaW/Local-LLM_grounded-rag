@@ -696,6 +696,49 @@ class TestRunSubqueriesParallel(unittest.TestCase):
         finally:
             cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = old
 
+    def test_partial_recovery_can_add_one_adjacent_witness(self):
+        related = MagicMock()
+        related.node_id = "next-node"
+
+        anchor = MagicMock()
+        anchor.node_id = "anchor-node"
+        anchor.relationships = {"3": related}
+        anchor.metadata = {}
+        anchor.get_content.return_value = "BPA storage setup was evaluated."
+        class AdjacentNode:
+            node_id = "next-node"
+            metadata = {}
+
+            @staticmethod
+            def get_content():
+                return "BPA degraded to phenylalanine, reaching approximately 1% at 40 C over 6 months."
+
+        adjacent = AdjacentNode()
+        wrapped = MagicMock()
+        wrapped.node = anchor
+
+        docstore = MagicMock()
+        docstore.get_node.return_value = adjacent
+        index = MagicMock()
+        index.docstore = docstore
+        child = MagicMock()
+        child._index = index
+        engine = MagicMock()
+        engine.retriever._index = None
+        engine.retriever.index = None
+        engine.retriever._retrievers = [child]
+
+        block = _nodes_to_evidence_block(
+            [wrapped],
+            "Under which storage conditions does BPA degradation occur?",
+            snippet_count_override=1,
+            engine=engine,
+            include_adjacent=True,
+        )
+
+        self.assertIn("approximately 1% at 40 C over 6 months", block)
+        self.assertIn("[Snippet 2]", block)
+
     def test_comparison_snippet_clips_around_dimension_terms(self):
         text = (
             "opening procedural background " * 80
@@ -1228,6 +1271,126 @@ class TestAnswerability(unittest.TestCase):
         system = mock_post.call_args.kwargs["json"]["system"]
         self.assertIn("each requested comparison arm", system)
 
+    @patch("rag.answerability.requests.post")
+    def test_deterministic_guard_downgrades_unquantified_comparison_arm(self, mock_post):
+        response = MagicMock()
+        response.json.return_value = {
+            "response": "VERDICT: ANSWERABLE\nREASON: the combined value is present"
+        }
+        mock_post.return_value = response
+        knowledge_base = (
+            "[Fact 1] The combined IC50 was 34.2 nM, greatly lower than that of "
+            "preincubation alone (Source: 1-s2.0-S1347861320300633-main)"
+        )
+
+        with patch.object(cfg, "PARTIAL_RECOVERY_DETERMINISTIC_GUARDS_ENABLED", True):
+            result = assess_answerability("Give the reported values.", knowledge_base)
+
+        self.assertEqual(result["verdict"], "PARTIAL")
+        self.assertIn("preincubation alone", result["reason"])
+
+    @patch("rag.answerability.requests.post")
+    def test_deterministic_guard_accepts_semantic_standalone_value(self, mock_post):
+        response = MagicMock()
+        response.json.return_value = {
+            "response": "VERDICT: ANSWERABLE\nREASON: all requested values are present"
+        }
+        mock_post.return_value = response
+        knowledge_base = (
+            "[Fact 1] The combined IC50 was lower than that of preincubation alone. "
+            "(Source: PaperA)\n"
+            "[Fact 2] The IC50 for the preincubation inhibitory effects was 193 ± 50 nM. "
+            "(Source: PaperA)"
+        )
+
+        with patch.object(cfg, "PARTIAL_RECOVERY_DETERMINISTIC_GUARDS_ENABLED", True):
+            result = assess_answerability("Give the reported values.", knowledge_base)
+
+        self.assertEqual(result["verdict"], "ANSWERABLE")
+
+    def test_literal_recovery_facts_keep_query_relevant_measurement(self):
+        evidence = [(
+            "【PaperA】",
+            "Retrieved evidence snippets:\n"
+            "[Snippet 1] All three synthetic impurities were detectable at concentrations of "
+            "0.5 \x03g/ml (or 0.1% of the BPA nominal working concentration).\n"
+            "[Snippet 2] Raw BPA remained stable at 55 C for 6 months and 40 C for 12 months.\n"
+            "[Snippet 3] Sample preparation and degradation assays: BPA-mannitol at pH 8 "
+            "was incubated in the dark at 4, 25, and 40 C for several months.\n"
+            "[Snippet 4] BPA-mannitol formed about 1% phenylalanine at 40 C over 6 months.",
+        )]
+
+        facts = pipeline_module._literal_recovery_facts(
+            evidence,
+            "Which BPA impurities form, and under which storage conditions?",
+        )
+
+        self.assertIn("0.5 µg/ml", facts)
+        self.assertIn("0.1%", facts)
+        self.assertIn("pH 8", facts)
+        self.assertIn("incubated in the dark", facts)
+        self.assertIn("1% phenylalanine", facts)
+        self.assertIn("Source: PaperA", facts)
+
+    def test_literal_recovery_keeps_result_relation_and_ignores_footnote_digits(self):
+        evidence = [(
+            "【PaperA】",
+            "Retrieved evidence snippets:\n"
+            "[Snippet 1] Pioneering reports prompted a new mechanistic hypothesis.17\n"
+            "[Snippet 2] Based on the results, the IC50 value for the preincubation inhibitory "
+            "effects was determined as 193 ± 50 nM.\n"
+            "[Snippet 3] These results indicate that JPH203 exerts preincubation inhibitory "
+            "effects in a concentration- and time-dependent manner.",
+        )]
+
+        facts = pipeline_module._literal_recovery_facts(
+            evidence,
+            "How does preincubation change inhibition? Give the reported values.",
+        )
+
+        self.assertIn("193 ± 50 nM", facts)
+        self.assertIn("concentration- and time-dependent", facts)
+        self.assertNotIn("Pioneering reports", facts)
+
+    def test_literal_completeness_appends_only_omitted_direct_facts(self):
+        literal_facts = (
+            "[Fact 1] Raw BPA shows no detectable degradation at 55 C for 6 months. "
+            "(Source: PaperA)\n\n"
+            "[Fact 2] All three impurities are detectable at 0.5 micrograms per millilitre, "
+            "equivalent to 0.1%. (Source: PaperA)\n\n"
+            "[Fact 3] BPA degrades to tyrosine under alkaline and oxidative conditions extremely "
+            "rapidly. (Source: PaperA)"
+        )
+        answer = "Raw BPA shows no detectable degradation at 55 C for 6 months [Source: PaperA]."
+
+        fixed = pipeline_module._append_missing_literal_facts(answer, literal_facts)
+
+        self.assertEqual(fixed.count("Raw BPA shows no detectable degradation"), 1)
+        self.assertIn("0.5 micrograms per millilitre", fixed)
+        self.assertIn("alkaline and oxidative conditions", fixed)
+
+    def test_literal_recovery_removes_chart_axis_without_losing_results(self):
+        evidence = [(
+            "【PaperA】",
+            "Retrieved evidence snippets:\n"
+            "[Snippet 1] BPA degradation to tyrosine was observed under alkali and oxidative "
+            "conditions and occurred extremely rapidly. BPA/mannitol lyophilised drug product "
+            "showed a slow, temperature dependent degradation to phenylalanine, generating "
+            "-0.004 -0.002 0 0.002 0.004 0.006 0.008 0.01 5 10 15 20 25 mAU. "
+            "Mechanistic pathway showing degradation to phenylalanine. approximately 1% of "
+            "phenylalanine at 40 C over 6 months.",
+        )]
+
+        facts = pipeline_module._literal_recovery_facts(
+            evidence,
+            "Which degradation products form, and under which storage conditions?",
+        )
+
+        self.assertIn("alkali and oxidative conditions", facts)
+        self.assertIn("slow, temperature dependent degradation", facts)
+        self.assertIn("approximately 1%", facts)
+        self.assertNotIn("-0.004", facts)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # query_pipeline — integration (all external calls mocked)
@@ -1239,6 +1402,8 @@ def _setup_cfg(cfg_mock):
     cfg_mock.CITATION_GROUNDING_ENABLED = False
     cfg_mock.ANSWERABILITY_GATE_ENABLED = False
     cfg_mock.PARTIAL_ANSWER_RECOVERY_ENABLED = False
+    cfg_mock.PARTIAL_RECOVERY_DETERMINISTIC_GUARDS_ENABLED = False
+    cfg_mock.PARTIAL_RECOVERY_EVIDENCE_SNIPPETS_PER_TASK = 4
     cfg_mock.STAGE2_LLM_SUBANSWERS_ENABLED = False
     cfg_mock.STAGE4_ANSWER_VALIDATION_ENABLED = False
     cfg_mock.STAGE4_ANSWER_REWRITE_RETRIES = 1
@@ -1767,6 +1932,31 @@ class TestExecuteStructuredQuery(unittest.TestCase):
     @patch("rag.query_pipeline.run_subqueries_parallel")
     @patch("rag.query_pipeline.build_subquery_tasks")
     @patch("rag.query_pipeline.plan_sub_questions")
+    @patch("rag.query_pipeline.detect_target_paper")
+    @patch("rag.query_pipeline.cfg")
+    @patch("rag.query_pipeline.Settings")
+    def test_stage4_timeout_uses_stage3_facts(
+        self, mock_settings, mock_cfg,
+        mock_detect, mock_plan, mock_build, mock_run, *_
+    ):
+        _setup_cfg(mock_cfg)
+        mock_detect.return_value = "paper_a"
+        mock_plan.return_value = [{"paper": "paper_a", "sub_q": "Q?"}]
+        mock_build.return_value = ([], {})
+        mock_run.return_value = [("【paper_a】", "retrieved evidence from PaperA")]
+        mock_settings.llm.stream_complete.side_effect = TimeoutError("stage4 stalled")
+
+        result = pipeline_module.execute_structured_query(
+            "What was reported?", {"paper_a": MagicMock()}
+        )
+
+        self.assertIn("retrieved evidence from PaperA", result)
+
+    @patch("rag.query_pipeline.translate_to_traditional_chinese")
+    @patch("rag.query_pipeline.run_grounding_check")
+    @patch("rag.query_pipeline.run_subqueries_parallel")
+    @patch("rag.query_pipeline.build_subquery_tasks")
+    @patch("rag.query_pipeline.plan_sub_questions")
     @patch("rag.query_pipeline.select_relevant_papers")
     @patch("rag.query_pipeline._keyword_prefilter")
     @patch("rag.query_pipeline.detect_target_paper")
@@ -1837,6 +2027,52 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertEqual(artifacts["answer_for_judge"], "English draft answer.")
         self.assertEqual(artifacts["stage7_translated_answer"], "繁中最終答案")
         self.assertEqual(result, "繁中最終答案")
+
+    @patch("rag.query_pipeline.translate_to_traditional_chinese")
+    @patch("rag.query_pipeline.run_grounding_check")
+    @patch("rag.query_pipeline.run_subqueries_parallel")
+    @patch("rag.query_pipeline.build_subquery_tasks")
+    @patch("rag.query_pipeline.plan_sub_questions")
+    @patch("rag.query_pipeline.detect_target_paper")
+    @patch("rag.query_pipeline.cfg")
+    @patch("rag.query_pipeline.Settings")
+    def test_deterministic_initial_evidence_keeps_literal_measurement(
+        self, mock_settings, mock_cfg,
+        mock_detect, mock_plan, mock_build, mock_run,
+        mock_grounding, mock_translate,
+    ):
+        _setup_cfg(mock_cfg)
+        mock_cfg.SYNTHESIS_ENABLED = True
+        mock_cfg.PARTIAL_RECOVERY_DETERMINISTIC_GUARDS_ENABLED = True
+        mock_detect.return_value = "paper_a"
+        mock_plan.return_value = [{"paper": "paper_a", "sub_q": "storage conditions"}]
+        mock_build.return_value = ([], {})
+        mock_run.return_value = [(
+            "【paper_a】",
+            "Retrieved evidence snippets:\n"
+            "[Snippet 1] All three synthetic impurities were detectable at concentrations of "
+            "0.5 µg/ml (or 0.1% of the BPA nominal working concentration).",
+        )]
+        chunk = MagicMock()
+        chunk.delta = "Final answer."
+        mock_settings.llm.stream_complete.return_value = [chunk]
+        artifacts = {}
+
+        with patch.object(
+            pipeline_module._synthesizer,
+            "synthesize",
+            return_value="[Fact 1] BPA has synthetic impurities. (Source: paper_a)",
+        ):
+            pipeline_module.execute_structured_query(
+                "Which BPA impurities are detected and under which storage conditions?",
+                {"paper_a": MagicMock()},
+                on_artifact=artifacts.__setitem__,
+            )
+
+        self.assertTrue(mock_run.call_args.kwargs["include_adjacent_evidence"])
+        self.assertEqual(mock_run.call_args.kwargs["evidence_snippets_per_task"], 4)
+        self.assertIn("0.5 µg/ml", artifacts["stage3_literal_facts"])
+        self.assertIn("0.1%", artifacts["stage3_knowledge_base"])
 
     @patch("rag.query_pipeline.translate_to_traditional_chinese")
     @patch("rag.query_pipeline.run_grounding_check")
@@ -1974,6 +2210,7 @@ class TestRunEvalCorrectnessCandidate(unittest.TestCase):
                         "stage2_recovery_evidence": "Expanded evidence block",
                         "stage3_generation_meta": [{"done_reason": "stop"}],
                         "stage3_recovery_prompt": "Recovery prompt",
+                        "stage3_recovery_literal_facts": "Literal facts",
                         "partial_recovery_assessment": "{\"verdict\":\"ANSWERABLE\"}",
                         "stage4_draft": "Draft",
                     },
@@ -1988,6 +2225,7 @@ class TestRunEvalCorrectnessCandidate(unittest.TestCase):
             self.assertIn(os.path.join(out_dir, "Q08_stage3_generation_meta.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage2_recovery_evidence.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage3_recovery_prompt.txt"), opened_paths)
+            self.assertIn(os.path.join(out_dir, "Q08_stage3_recovery_literal_facts.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_partial_recovery_assessment.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage7_translated_answer.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_translation_judge.json"), opened_paths)

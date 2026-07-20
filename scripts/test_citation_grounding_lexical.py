@@ -11,7 +11,7 @@ try:
 except ModuleNotFoundError:
     sys.modules["torch"] = types.ModuleType("torch")
 
-from rag.citation_grounding import _find_lexical_support
+from rag.citation_grounding import _find_lexical_support, _preprocess_for_nli
 
 
 class TestLexicalGrounding(unittest.TestCase):
@@ -35,6 +35,34 @@ class TestLexicalGrounding(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result[0], "review-1")
         self.assertGreaterEqual(result[1], 0.8)
+
+    def test_matches_scientific_claim_across_fig_abbreviation_and_pdf_ligature(self):
+        claim = (
+            "The addition of preincubation significantly augmented inhibition potency to an "
+            "IC50 of 34.2 ± 3.6 nM in HT-29 cells."
+        )
+        chunks = [{
+            "id": "paper-1",
+            "source": "paper",
+            "text": (
+                "Combination assays were performed using HT-29 cells. As shown in Fig. 5, while "
+                "the IC50 was 99.2 ± 11.0 nM, the addition of preincubation signiﬁcantly "
+                "augmented its inhibition potency (IC50 ¼ 34.2 ± 3.6 nM)."
+            ),
+        }]
+
+        result = _find_lexical_support(claim, chunks, ("paper",))
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], "paper-1")
+
+    def test_skips_non_substantive_source_preamble(self):
+        sentence = (
+            "Based on the provided data from a single source, the following information addresses "
+            "the degradation products and storage stability of BPA."
+        )
+
+        self.assertEqual(_preprocess_for_nli(sentence), "")
 
 
 if __name__ == "__main__":

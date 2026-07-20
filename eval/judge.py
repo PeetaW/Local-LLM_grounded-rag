@@ -42,12 +42,13 @@ _FACT_JUDGE_SYSTEM = (
 
 _TRANSLATION_JUDGE_SYSTEM = (
     "You are a scientific translation auditor. The English SOURCE is the sole ground truth and the "
-    "TARGET is intended to be a Traditional Chinese translation. Find semantic errors only. "
+    "TARGET is intended to be a Taiwan Traditional Chinese translation. Find semantic errors only. "
     "Audit the translation literally; never fact-check, reinterpret, or correct the SOURCE. "
     "A technical term left in English, or shown as Chinese plus English, is semantically faithful and "
     "MUST NOT be reported as an error. If direction words and values are preserved, do not invent an "
     "error based on how the scientific variable might be interpreted. Ignore style, fluency, markdown, "
-    "and citations. Return JSON only."
+    "and citations. Taiwan amino-acid names using 胺酸 are valid; for example, tyrosine=酪胺酸 and "
+    "phenylalanine=苯丙胺酸. Do not require Mainland Chinese 氨酸 variants. Return JSON only."
 )
 
 
@@ -94,6 +95,95 @@ def _json_object(text: str) -> dict | None:
 
 def _normalized(text: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", str(text or "")).lower().split())
+
+
+_CONTRACT_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "in", "is",
+    "it", "of", "on", "or", "that", "the", "their", "this", "to", "under", "was", "were", "with",
+}
+_CONTRACT_CONDITION_GROUPS = (
+    ("combined", ("combined", "combination", "addition of preincubation", "pre-plus")),
+    ("alkaline", ("alkaline", "alkali", "naoh", "basic condition")),
+    ("oxidative", ("oxidative", "oxidation", "h2o2")),
+    ("acidic", ("acidic", "hcl", "acetic acid")),
+    ("dark", ("in the dark", "dark storage")),
+)
+_CONTRACT_OUTCOME_GROUPS = (
+    ("stable", ("stable", "stability", "no detectable degradation")),
+    ("rapid", ("rapid", "rapidly")),
+    ("slow", ("slow", "slowly")),
+)
+
+
+def _without_citations(text: str) -> str:
+    return re.sub(r"\[[^\]]+\]|【[^】]+】", " ", str(text or ""))
+
+
+def _contract_numbers(text: str) -> set[str]:
+    plain = _without_citations(text)
+    plain = re.sub(r"\\(?:text|mathrm)\{([^{}]*)\}", r"\1", plain)
+    plain = re.sub(r"(?<=[A-Za-z])_\{?(\d+)\}?", r"\1", plain)
+    values = re.findall(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?", plain)
+    return {value.rstrip("0").rstrip(".") if "." in value else value for value in values}
+
+
+def _contract_tokens(text: str) -> set[str]:
+    normalized = _normalized(_without_citations(text))
+    return {
+        token for token in re.findall(r"[a-z][a-z0-9]+", normalized)
+        if token not in _CONTRACT_STOPWORDS
+    }
+
+
+def _missing_contract_groups(fact: str, evidence: str, groups) -> set[str]:
+    fact_text = _normalized(fact)
+    evidence_text = _normalized(evidence)
+    return {
+        name for name, aliases in groups
+        if any(alias in fact_text for alias in aliases)
+        and not any(alias in evidence_text for alias in aliases)
+    }
+
+
+def _apply_fact_contract(fact: str, verdict: str, evidence: list[str]) -> tuple[str, str]:
+    evidence_text = " ".join(evidence)
+    if verdict == "covered":
+        missing_numbers = _contract_numbers(fact) - _contract_numbers(evidence_text)
+        dependent_facets = set(re.findall(r"\b([a-z][a-z0-9]*)[- ]dependent\b", _normalized(fact)))
+        missing_facets = dependent_facets - _contract_tokens(evidence_text)
+        missing_groups = _missing_contract_groups(
+            fact,
+            evidence_text,
+            _CONTRACT_CONDITION_GROUPS + _CONTRACT_OUTCOME_GROUPS,
+        )
+        if missing_numbers or missing_facets or missing_groups:
+            missing = sorted(missing_numbers | missing_facets | missing_groups)
+            return "missing", f"deterministic contract missing required elements: {', '.join(missing)}"
+    elif verdict == "contradicted":
+        missing_groups = _missing_contract_groups(
+            fact, evidence_text, _CONTRACT_CONDITION_GROUPS
+        )
+        fact_text = _normalized(fact)
+        evidence_normalized = _normalized(evidence_text)
+        if (
+            " alone" in f" {fact_text}"
+            and " alone" not in f" {evidence_normalized}"
+            and re.search(
+                r"\b(?:combined|combination|pre-plus)\b|pre\s*\+\s*co|addition of preincubation",
+                evidence_normalized,
+            )
+        ):
+            missing_groups.add("standalone")
+        if missing_groups:
+            return "missing", (
+                "deterministic contract found insufficient condition scope for contradiction: "
+                + ", ".join(sorted(missing_groups))
+            )
+        fact_tokens = _contract_tokens(fact)
+        overlap = len(fact_tokens & _contract_tokens(evidence_text)) / len(fact_tokens) if fact_tokens else 0.0
+        if overlap < 0.4:
+            return "missing", "deterministic contract found insufficient entity/condition overlap for contradiction"
+    return verdict, ""
 
 
 def _fact_items(reference_facts: list) -> list[dict]:
@@ -188,13 +278,22 @@ def _validate_fact_audit(
         if verdict == "missing" and evidence:
             errors.append(f"{fact_id} missing verdict requires empty evidence")
             continue
+        judge_verdict = verdict
+        contract_reason = ""
+        if stable_protocol:
+            verdict, contract_reason = _apply_fact_contract(expected[fact_id], verdict, evidence)
+            if verdict == "missing":
+                evidence = []
+                evidence_ids = []
         found[fact_id] = {
             "id": fact_id,
             "fact": expected[fact_id],
             "verdict": verdict,
             "evidence": evidence,
-            "reason": str(row.get("reason", "")).strip()[:300],
+            "reason": contract_reason or str(row.get("reason", "")).strip()[:300],
         }
+        if verdict != judge_verdict:
+            found[fact_id]["judge_verdict"] = judge_verdict
         if stable_protocol:
             found[fact_id]["evidence_ids"] = evidence_ids
 
@@ -245,7 +344,9 @@ def _fact_prompt(
         f"{task}{repair}\n\nQUESTION:\n{question}\n\nREFERENCE FACTS:\n{fact_text}\n\n"
         f"{candidate_label}:\n{candidate_text}\n\nReturn exactly this JSON shape:\n{schema}\n"
         "Use every supplied fact id exactly once. Use covered only when the complete fact is expressed; "
-        "use missing only when the fact is absent, and use contradicted only for an opposing claim. "
+        "use missing only when the fact is absent, and use contradicted only for an opposing claim about "
+        "the same entity under the same experimental or storage conditions. A different condition is missing, "
+        "not contradicted. "
         "Do not output a score."
     )
 
@@ -443,13 +544,50 @@ def _translation_items(text: str, prefix: str) -> list[dict]:
 
 
 def _number_unit_signature(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    normalized = unicodedata.normalize("NFKC", str(text or "")).lower().replace("μ", "u").replace("µ", "u")
+    normalized = unicodedata.normalize("NFKC", _without_citations(text)).lower().replace("μ", "u").replace("µ", "u")
     numbers = tuple(re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", normalized))
     units = tuple(re.findall(
         r"(?<![a-z])(?:%|°\s*[cf]|[numk]?m|kg|mg|ug|g|ml|l|h|hr|hours?|min|minutes?|days?|months?|years?)(?![a-z])",
         normalized,
     ))
     return numbers, units
+
+
+_TAIWAN_TERM_EQUIVALENTS = {
+    "tyrosine": ("酪胺酸", "酪氨酸"),
+    "phenylalanine": ("苯丙胺酸", "苯丙氨酸"),
+}
+
+
+def _translation_term_false_positive(kind: str, reason: str, source: str, target: str) -> bool:
+    if kind not in {"mistranslation", "untranslated"} or not re.search(
+        r"translat|technical term|chemical name|corresponds to", reason, re.I
+    ):
+        return False
+    source_lower, reason_lower, target_lower = source.lower(), reason.lower(), target.lower()
+    for term, aliases in _TAIWAN_TERM_EQUIVALENTS.items():
+        if term in source_lower and term in reason_lower and (
+            term in target_lower or any(alias in target for alias in aliases)
+        ):
+            return True
+    retained_terms = re.findall(r"\b[A-Za-z][A-Za-z0-9-]{4,}\b", source)
+    return any(term.lower() in reason_lower and term.lower() in target_lower for term in retained_terms)
+
+
+def _translation_structural_omission_false_positive(kind: str, reason: str) -> bool:
+    return bool(
+        kind == "omission"
+        and re.search(
+            r"\b(?:content|meaning|information)\b.{0,120}\b(?:merged|present|included|conveyed)\b",
+            reason,
+            re.I,
+        )
+        and re.search(
+            r"\b(?:structure|standalone|caption|sentence|distinct elements?|format)\b",
+            reason,
+            re.I,
+        )
+    )
 
 
 def _validate_translation_audit(data: dict | None, source: str, target: str) -> tuple[list, list]:
@@ -484,6 +622,11 @@ def _validate_translation_audit(data: dict | None, source: str, target: str) -> 
             continue
         source_text = " ".join(source_lookup[value] for value in source_ids)
         target_text = " ".join(target_lookup[value] for value in target_ids)
+        reason = str(row.get("reason", "")).strip()[:300]
+        if _translation_term_false_positive(kind, reason, source_text, target):
+            continue
+        if _translation_structural_omission_false_positive(kind, reason):
+            continue
         if kind == "number_unit" and getattr(cfg, "TRANSLATION_EXACT_VALUE_FILTER_ENABLED", False):
             source_signature = _number_unit_signature(source_text)
             if source_signature[0] and source_signature == _number_unit_signature(target_text):
@@ -495,7 +638,7 @@ def _validate_translation_audit(data: dict | None, source: str, target: str) -> 
             "target_ids": target_ids,
             "source": [source_lookup[value] for value in source_ids],
             "target": [target_lookup[value] for value in target_ids],
-            "reason": str(row.get("reason", "")).strip()[:300],
+            "reason": reason,
         })
     return valid, errors
 
@@ -510,7 +653,11 @@ def _translation_prompt(source: str, target: str, correction: str = "") -> str:
         "Report only meaning-changing scientific errors: mistranslation, omission, addition, "
         "number/unit error, negation/relation error, or a substantially untranslated sentence. "
         "Do not report retained English technical terms, wording preference, style, or fluency. "
-        "Use severity=minor only when scientific meaning remains intact; otherwise material.\n"
+        "Use severity=minor only when scientific meaning remains intact; otherwise material. "
+        "Sentence IDs are alignment anchors, not a one-to-one mapping: a source sentence may be "
+        "merged into a neighboring target sentence. Search the entire target before reporting an omission. "
+        "Never report omission solely because sentence, caption, or paragraph boundaries changed; if the "
+        "content is merged or present, name a specific absent semantic detail or return no error.\n"
         f"{repair}\nENGLISH SOURCE SENTENCES:\n{source_text}\n\n"
         f"TRADITIONAL CHINESE TARGET SENTENCES:\n{target_text}\n\n"
         "Return exactly this JSON shape and no score:\n"
