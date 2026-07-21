@@ -58,6 +58,17 @@ def _query_facet_focus_zh() -> str:
 """
 
 
+def _relation_atomicity_en() -> str:
+    if not getattr(cfg, "FACT_RELATION_ATOMICITY_GUARD_ENABLED", False):
+        return ""
+    return """
+FACT RELATION FIDELITY:
+- Treat separate Known Facts as independent unless a Known Fact explicitly states their relationship.
+- Keep observed results or stability conclusions separate from experimental setup, protocol, and test-condition facts.
+- Do not connect separate facts with "including", "therefore", "thus", "because", or similar relation words merely to make the prose flow.
+"""
+
+
 def _comparison_tradeoff_en() -> str:
     if not getattr(cfg, "COMPARISON_TRADEOFF_GUARD_ENABLED", False):
         return ""
@@ -237,6 +248,7 @@ def _reasoning_en(knowledge_base: str, question: str, memory_section: str) -> st
 {_method_key_step_en()}
 {_comparison_json_en(knowledge_base)}
 {_query_facet_focus_en()}
+{_relation_atomicity_en()}
 
 ---
 Original question: {question}
@@ -346,6 +358,7 @@ def _strict_en(knowledge_base: str, question: str, memory_section: str) -> str:
 {_method_key_step_en()}
 {_comparison_json_en(knowledge_base)}
 {_query_facet_focus_en()}
+{_relation_atomicity_en()}
 
 ---
 Original question: {question}

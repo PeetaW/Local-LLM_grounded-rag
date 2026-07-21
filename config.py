@@ -110,6 +110,10 @@ STAGE4_ANSWER_VALIDATION_ENABLED = True
 STAGE4_ANSWER_REWRITE_RETRIES = 1
 # A/B：一般題逐一回答原問題的明確面向後停止，避免把相關但未被詢問的 Stage 3 facts 全部抄入答案。
 QUERY_FACET_FOCUS_ENABLED = True
+# A/B：Stage 3/4 不把獨立事實誤接成共用的包含、因果或實驗條件範圍。
+FACT_RELATION_ATOMICITY_GUARD_ENABLED = True
+# A/B：non-comparison strict 題使用 evidence-bound fact contract，通過後直接渲染而不再讓 Stage 4 改寫。
+STRUCTURED_FACT_CONTRACT_ENABLED = True
 # A/B：Stage 3 事實蒸餾用英文輸出，讓英文 chunks / gold reference / eval judge 維持同語言比對。
 STAGE3_ENGLISH_DISTILLATION_ENABLED = True
 # A/B：方法/key-step 題只摘要核心步驟，不把起始物準備、背景方法或替代/對照路線升格成 key steps。
@@ -129,6 +133,8 @@ JUDGE_MODEL         = VERIFY_MODEL
 STRUCTURED_JUDGE_STABLE_PROTOCOL_ENABLED = True
 # Eval-only：獨立比較英文 canonical draft 與繁中譯文，不讓翻譯錯誤污染核心 correctness。
 TRANSLATION_FIDELITY_JUDGE_ENABLED = True
+# A/B：fold decrease 依數學語意翻譯成「降至原來約 1/N」，避免「降低 N 倍」歧義。
+TRANSLATION_FOLD_CHANGE_GUARD_ENABLED = True
 # A/B：judge 若指控數值/單位，但引用的英中文數值與單位完全相同，視為誤報。
 TRANSLATION_EXACT_VALUE_FILTER_ENABLED = True
 # Eval debug artifacts：每題輸出 stage2/stage3/stage4/judge 文字檔，方便逐輪檢查 LLM 行為。

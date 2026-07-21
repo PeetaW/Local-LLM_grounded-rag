@@ -19,17 +19,30 @@ from rag.comparison_json_validator import (
     build_comparison_requirements,
     exact_isotope_terms,
 )
+from rag.fact_contract import (
+    bind_fact_list,
+    build_evidence_catalog,
+    validate_fact_contract,
+)
 from rag.knowledge_synthesizer import (
     _build_user_prompt,
     _append_isotope_cost_fact,
     _comparison_json_validation_errors,
     KnowledgeSynthesizer,
     _normalize_comparison_json,
+    _split_protocol_condition_scope,
     _system_prompt,
 )
 
 
 class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
+    def setUp(self):
+        self._structured_fact_contract = cfg.STRUCTURED_FACT_CONTRACT_ENABLED
+        cfg.STRUCTURED_FACT_CONTRACT_ENABLED = False
+
+    def tearDown(self):
+        cfg.STRUCTURED_FACT_CONTRACT_ENABLED = self._structured_fact_contract
+
     def test_generate_captures_ollama_terminal_metadata(self):
         response = MagicMock()
         response.iter_lines.return_value = [
@@ -52,6 +65,133 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         self.assertEqual(metadata["prompt_eval_count"], 123)
         self.assertEqual(metadata["eval_count"], 8192)
         self.assertEqual(metadata["requested_num_ctx"], cfg.STAGE3_NUM_CTX)
+
+    def test_generate_passes_native_json_schema(self):
+        response = MagicMock()
+        response.iter_lines.return_value = [
+            json.dumps({"response": '{"evidence_ids":["E1"]}', "done": True}).encode(),
+        ]
+        schema = {"type": "object", "properties": {"evidence_ids": {"type": "array"}}}
+
+        with patch("rag.knowledge_synthesizer.requests.post", return_value=response) as post:
+            KnowledgeSynthesizer()._generate("prompt", "system", format_schema=schema)
+
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["format"], schema)
+        self.assertEqual(payload["options"]["temperature"], 0.0)
+
+    def test_fact_contract_restores_pdf_interrupted_clause(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] BPA/mannitol drug product slowly degraded to phenylalanine, "
+                "generating 0 1 2 mAU Fig. 2. Chromatographic trace. "
+                "approximately 1% of phenylalanine at 40 C over 6 months. "
+                "Both products were reported as impurities, and while both have low "
+                "*Corresponding author."
+            ),
+        }])
+
+        stitched = [item["text"] for item in catalog if "generating approximately 1%" in item["text"]]
+        self.assertEqual(len(stitched), 1)
+        self.assertIn("drug product slowly degraded", stitched[0])
+        self.assertFalse(any("mAU" in item["text"] for item in catalog))
+        self.assertFalse(any(item["text"].startswith("approximately") for item in catalog))
+        self.assertFalse(any("Corresponding author" in item["text"] for item in catalog))
+
+        figure_prefixed = bind_fact_list(
+            "[Fact 1] (See Fig. 2.) BrPD and FBBA are detected at 256 nm and elute at "
+            "17.3 and 23.7 min respectively. (Source: PaperA)",
+            [{
+                "id": "E1",
+                "source": "PaperA",
+                "text": (
+                    "BrPD and FBBA are detected at 256 nm and elute at "
+                    "17.3 and 23.7 min respectively."
+                ),
+            }],
+        )
+        self.assertEqual(len(figure_prefixed["facts"]), 1)
+
+        unrelated = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] Product A degraded to phenylalanine, generating an unresolved signal. "
+                "A separate storage experiment was then performed. "
+                "approximately 1% of phenylalanine was measured."
+            ),
+        }])
+        self.assertFalse(any("generating approximately 1%" in item["text"] for item in unrelated))
+
+    def test_fact_contract_rejects_cross_sentence_condition_scope(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] BPA in 100 mM HCl was incubated at 55 C for 24 h. "
+                "[Snippet 2] A BPA solution in 6 mM H2O2 was prepared immediately before analysis."
+            ),
+        }])
+        selected = validate_fact_contract({"evidence_ids": ["E1", "E2"]}, catalog)
+        self.assertEqual(len(selected["facts"]), 2)
+        self.assertTrue(all(fact["coverage"] == 1.0 for fact in selected["facts"]))
+
+        bound = bind_fact_list(
+            "\n".join([
+                "[Fact 1] BPA in 100 mM HCl was incubated at 55 C for 24 h. (Source: PaperA)",
+                "[Fact 2] A BPA solution in 6 mM H2O2 was prepared immediately before analysis. (Source: PaperA)",
+                "[Fact 3] BPA in 6 mM H2O2 was incubated at 55 C for 24 h. (Source: PaperA)",
+            ]),
+            catalog,
+        )
+        self.assertEqual(len(bound["facts"]), 2)
+        self.assertEqual(len(bound["rejected"]), 1)
+
+    def test_fact_contract_prefers_complete_fact_over_fragments(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] BPA/mannitol drug product slowly degraded to phenylalanine, "
+                "generating 0 1 2 mAU Fig. 2. Chromatographic trace. "
+                "approximately 1% of phenylalanine at 40 C over 6 months."
+            ),
+        }])
+        bound = bind_fact_list(
+            "\n".join([
+                "[Fact 1] BPA/mannitol drug product slowly degraded to phenylalanine. (Source: PaperA)",
+                "[Fact 2] approximately 1% of phenylalanine at 40 C over 6 months. (Source: PaperA)",
+                "[Fact 3] BPA/mannitol drug product slowly degraded to phenylalanine, generating approximately 1% of phenylalanine at 40 C over 6 months. (Source: PaperA)",
+                "[Fact 4] Mechanistic pathway. approximately 1% of phenylalanine at 40 C over 6 months. (Source: PaperA)",
+            ]),
+            catalog,
+        )
+
+        self.assertEqual(len(bound["facts"]), 1)
+        self.assertIn("drug product slowly degraded", bound["facts"][0]["claim"])
+        self.assertEqual(len(bound["rejected"]), 1)
+
+    def test_synthesizer_structured_contract_is_ab_switch(self):
+        cfg.STRUCTURED_FACT_CONTRACT_ENABLED = True
+        synth = KnowledgeSynthesizer()
+        synth._generate = MagicMock(return_value=json.dumps({"evidence_ids": ["E1", "E2"]}))
+        artifacts = {}
+
+        result = synth.synthesize(
+            [{
+                "source": "PaperA",
+                "text": (
+                    "[Snippet 1] Preincubation alone gave an IC50 of 193 nM. "
+                    "[Snippet 2] Combined treatment lowered the IC50 to 34.2 nM."
+                ),
+            }],
+            query="How did preincubation change inhibitory potency?",
+            on_status=[].append,
+            on_artifact=artifacts.__setitem__,
+        )
+
+        self.assertIn("[Fact 1] Preincubation alone gave an IC50 of 193 nM", result)
+        self.assertIn("[Fact 2] Combined treatment lowered the IC50 to 34.2 nM", result)
+        self.assertIn("evidence_ids", synth._generate.call_args.kwargs["format_schema"]["properties"])
+        self.assertIn('"schema": "fact_contract_v1"', artifacts["stage3_fact_contract"])
 
     def test_comparison_schema_is_ab_switch(self):
         old = cfg.STAGE3_COMPARISON_SCHEMA_ENABLED
@@ -176,6 +316,25 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             self.assertNotIn("使用繁體中文輸出", prompt)
         finally:
             cfg.STAGE3_ENGLISH_DISTILLATION_ENABLED = old
+
+    def test_protocol_condition_scope_guard_splits_separate_sample(self):
+        old = cfg.FACT_RELATION_ATOMICITY_GUARD_ENABLED
+        raw = (
+            "[Fact 11] Forced degradation tests for BPA were performed using 100 mM NaOH, "
+            "100 mM HCl or 5% FeCl3 incubated at 55 °C for 24 h, and a solution in 6 mM "
+            "H2O2 (Source: PaperA)"
+        )
+        try:
+            cfg.FACT_RELATION_ATOMICITY_GUARD_ENABLED = True
+            fixed = _split_protocol_condition_scope(raw)
+            self.assertIn("[Fact 1] Forced degradation tests for BPA were performed", fixed)
+            self.assertIn("[Fact 2] Forced degradation tests for BPA also used", fixed)
+            self.assertNotIn("24 h, and a solution", fixed)
+
+            cfg.FACT_RELATION_ATOMICITY_GUARD_ENABLED = False
+            self.assertEqual(_split_protocol_condition_scope(raw), raw)
+        finally:
+            cfg.FACT_RELATION_ATOMICITY_GUARD_ENABLED = old
 
     def test_comparison_json_normalizer_accepts_fenced_json(self):
         raw = '```json\n{"comparison_json":{"dimensions":{"safety":{"present":true}}}}\n```'

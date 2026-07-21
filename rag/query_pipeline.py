@@ -30,6 +30,12 @@ from rag.query_retrieval import (
 from rag.query_grounding_flow import run_grounding_check, split_into_sentences
 from rag.query_translation import translate_to_traditional_chinese
 from rag.query_prompts import build_synthesis_prompt, build_fallback_prompt
+from rag.fact_contract import (
+    bind_fact_list,
+    build_evidence_catalog,
+    contract_is_usable,
+    render_fact_contract,
+)
 
 _synthesizer = KnowledgeSynthesizer()
 _verifier    = AnswerVerifier()
@@ -90,6 +96,21 @@ def _merge_fact_lists(original: str, recovered: str) -> str:
         f"[Fact {index}] {item['claim']} (Source: {', '.join(item['sources'])})"
         for index, item in enumerate(merged.values(), 1)
     )
+
+
+def _render_validated_fact_contract(
+    knowledge_base: str,
+    sub_answers: list[str],
+) -> tuple[str, list[str], dict]:
+    chunks = [
+        {"text": answer, "source": extract_paper_name(answer, f"retrieved_chunk_{index}")}
+        for index, answer in enumerate(sub_answers)
+    ]
+    contract = bind_fact_list(knowledge_base, build_evidence_catalog(chunks))
+    if not contract_is_usable(contract):
+        return "", [], contract
+    answer, claims = render_fact_contract(contract)
+    return answer, claims, contract
 
 
 _RECOVERY_SNIPPET_RE = re.compile(r"\[Snippet \d+\]\s*(.*?)(?=\n\[Snippet \d+\]|\Z)", re.S)
@@ -736,6 +757,43 @@ def _append_missing_isotope_cost_answer(answer: str, knowledge_base: str, questi
     return (answer or "").rstrip() + "\n\n" + sentence
 
 
+_STABILITY_RESULT_RE = re.compile(
+    r"\b(?:is|are|was|were|remains?|remained)\s+stable\b"
+    r"|\b(?:shows?|showed|exhibits?|exhibited)\s+no\s+(?:detectable\s+)?degradation\b"
+    r"|\bno\s+(?:detectable\s+)?degradation\s+(?:is\s+|was\s+)?observed\b",
+    re.IGNORECASE,
+)
+_STABILITY_PROTOCOL_JOIN_RE = re.compile(
+    r",\s+including\s+"
+    r"(?P<subject>(?:forced\s+)?(?:degradation\s+)?(?:tests?|assays?|experiments?))\s+"
+    r"(?P<verb>performed|conducted)\b",
+    re.IGNORECASE,
+)
+
+
+def _separate_stability_protocol_clause(answer: str) -> str:
+    """Split an observed stability result from a protocol accidentally attached to it."""
+    if not getattr(cfg, "FACT_RELATION_ATOMICITY_GUARD_ENABLED", False):
+        return answer
+
+    text = answer or ""
+
+    def _replace(match: re.Match) -> str:
+        sentence_start = 0
+        for marker in (". ", "? ", "! ", "\n"):
+            boundary = text.rfind(marker, 0, match.start())
+            if boundary >= 0:
+                sentence_start = max(sentence_start, boundary + len(marker))
+        if not _STABILITY_RESULT_RE.search(text[sentence_start:match.start()]):
+            return match.group(0)
+
+        subject = match.group("subject")
+        auxiliary = "were" if subject.lower().endswith("s") else "was"
+        return f". {subject[:1].upper() + subject[1:]} {auxiliary} {match.group('verb')}"
+
+    return _STABILITY_PROTOCOL_JOIN_RE.sub(_replace, text)
+
+
 def _rewrite_stage4_if_needed(full_text: str, knowledge_base: str, question: str, on_status=None) -> str:
     def _status(msg):
         if on_status:
@@ -1008,6 +1066,7 @@ def execute_structured_query(
     t3 = time.perf_counter()
     synthesis_prompt = ""
     stage4_direct_rendered = False
+    fact_contract_direct = False
     direct_render_text = ""
     direct_grounding_claims = []
     direct_render_meta = {}
@@ -1044,11 +1103,33 @@ def execute_structured_query(
             )
             if direct_answer:
                 synthesis_prompt = "[deterministic method fact-list renderer]"
+        if (
+            not direct_answer
+            and rag_found_anything
+            and cfg.EN_DRAFT_PIPELINE
+            and cfg.REASONING_MODE == "strict"
+            and getattr(cfg, "STRUCTURED_FACT_CONTRACT_ENABLED", False)
+            and not _is_method_fact_query(question)
+            and not any(term in question.lower() for term in _COMPARISON_QUERY_TERMS)
+        ):
+            direct_answer, direct_grounding_claims, direct_render_meta = _render_validated_fact_contract(
+                knowledge_base,
+                sub_answers,
+            )
+            if direct_answer:
+                fact_contract_direct = True
+                synthesis_prompt = "[deterministic evidence-bound fact renderer]"
         if direct_answer:
             stage4_direct_rendered = True
             full_text = direct_answer
             direct_render_text = direct_answer
-            if direct_render_meta:
+            if direct_render_meta.get("schema") == "fact_contract_v1":
+                _status(
+                    "  🧱 [synthesis-llm] evidence-bound fact contract → deterministic render "
+                    f"accepted={len(direct_render_meta['facts'])} "
+                    f"rejected={len(direct_render_meta['rejected'])}"
+                )
+            elif direct_render_meta:
                 _status(
                     "  🧱 [synthesis-llm] method fact_list → deterministic render "
                     f"selected={','.join(direct_render_meta['selected_fact_ids'])} "
@@ -1078,7 +1159,9 @@ def execute_structured_query(
                 )
         if on_artifact:
             on_artifact("stage4_prompt", synthesis_prompt)
-            if direct_render_meta:
+            if direct_render_meta.get("schema") == "fact_contract_v1":
+                on_artifact("stage4_fact_contract", json.dumps(direct_render_meta, ensure_ascii=False, indent=2))
+            elif direct_render_meta:
                 on_artifact("stage4_fact_requirements", json.dumps(direct_render_meta, ensure_ascii=False, indent=2))
             if direct_grounding_claims:
                 on_artifact("stage4_grounding_claims", "\n".join(direct_grounding_claims))
@@ -1102,14 +1185,18 @@ def execute_structured_query(
         on_artifact("stage4_draft", full_text)
     _status(f"[synthesis-llm] 完成 elapsed_ms={int((time.perf_counter()-t3)*1000)}")
 
-    if rag_found_anything and not gate_abstain:
+    if rag_found_anything and not gate_abstain and not fact_contract_direct:
         full_text = _rewrite_stage4_if_needed(full_text, knowledge_base, question, on_status=on_status)
         full_text = _append_missing_isotope_cost_answer(full_text, knowledge_base, question)
+        atomic_text = _separate_stability_protocol_clause(full_text)
+        if atomic_text != full_text:
+            _status("  🧱 [stage4-atomicity] separated a stability result from its protocol")
+            full_text = atomic_text
     if on_artifact:
         on_artifact("stage4_validated", full_text)
 
     # ── Stage 5: Verification ────────────────────────────────────────
-    if cfg.VERIFY_ENABLED and rag_found_anything and not gate_abstain:
+    if cfg.VERIFY_ENABLED and rag_found_anything and not gate_abstain and not fact_contract_direct:
         t4 = time.perf_counter()
         _status("\n  🔍 [verification] Stage 5: 邏輯自洽驗證中...")
         full_text = _verifier.verify_and_correct(
@@ -1119,6 +1206,7 @@ def execute_structured_query(
     if (
         rag_found_anything
         and not gate_abstain
+        and not fact_contract_direct
         and deterministic_evidence
         and literal_kb
     ):
@@ -1131,6 +1219,11 @@ def execute_structured_query(
                     "stage5_literal_completeness",
                     full_text[len(before_literal_guard.rstrip()):].lstrip(),
                 )
+    if not fact_contract_direct:
+        atomic_text = _separate_stability_protocol_clause(full_text)
+        if atomic_text != full_text:
+            _status("  🧱 [stage4-atomicity] restored result/protocol separation after verification")
+            full_text = atomic_text
     if on_artifact:
         on_artifact("stage5_verified", full_text)
 
@@ -1317,6 +1410,7 @@ def execute_structured_query_stream(
     t3 = time.perf_counter()
     direct_render_text = ""
     direct_grounding_claims = []
+    fact_contract_direct = False
     if gate_abstain:
         yield "[STATUS] 🚪 [answerability] NOT_ANSWERABLE → 誠實棄答，跳過生成\n"
         yield gate_notice
@@ -1349,11 +1443,31 @@ def execute_structured_query_stream(
                 question,
                 sub_questions,
             )
+        if (
+            not direct_answer
+            and rag_found_anything
+            and cfg.EN_DRAFT_PIPELINE
+            and cfg.REASONING_MODE == "strict"
+            and getattr(cfg, "STRUCTURED_FACT_CONTRACT_ENABLED", False)
+            and not _is_method_fact_query(question)
+            and not any(term in question.lower() for term in _COMPARISON_QUERY_TERMS)
+        ):
+            direct_answer, direct_grounding_claims, direct_render_meta = _render_validated_fact_contract(
+                knowledge_base,
+                sub_answers,
+            )
+            fact_contract_direct = bool(direct_answer)
 
         if direct_answer:
             full_text = direct_answer
             direct_render_text = direct_answer
-            if direct_render_meta:
+            if direct_render_meta.get("schema") == "fact_contract_v1":
+                yield (
+                    "[STATUS] 🧱 evidence-bound fact contract → deterministic render "
+                    f"accepted={len(direct_render_meta['facts'])} "
+                    f"rejected={len(direct_render_meta['rejected'])}\n"
+                )
+            elif direct_render_meta:
                 yield (
                     "[STATUS] 🧱 method fact_list → deterministic render "
                     f"selected={','.join(direct_render_meta['selected_fact_ids'])}\n"
@@ -1399,7 +1513,7 @@ def execute_structured_query_stream(
                 yield full_text
     yield f"\n[STATUS] [synthesis-llm] 完成 elapsed_ms={int((time.perf_counter()-t3)*1000)}\n"
 
-    if rag_found_anything and not gate_abstain:
+    if rag_found_anything and not gate_abstain and not fact_contract_direct:
         rewrite_msgs = []
         corrected = _rewrite_stage4_if_needed(
             full_text, knowledge_base, question, on_status=lambda msg: rewrite_msgs.append(msg)
@@ -1416,9 +1530,15 @@ def execute_structured_query_stream(
         if with_isotope_cost != full_text:
             yield with_isotope_cost[len(full_text.rstrip()):]
             full_text = with_isotope_cost
+        atomic_text = _separate_stability_protocol_clause(full_text)
+        if atomic_text != full_text:
+            yield "[STATUS] 🧱 [stage4-atomicity] separated a stability result from its protocol\n"
+            yield "\n\n---\n"
+            yield atomic_text
+            full_text = atomic_text
 
     # ── Stage 5: Verification ────────────────────────────────────────
-    if cfg.VERIFY_ENABLED and rag_found_anything and not gate_abstain:
+    if cfg.VERIFY_ENABLED and rag_found_anything and not gate_abstain and not fact_contract_direct:
         t4 = time.perf_counter()
         yield "[STATUS] 🔍 [verification] Stage 5: 邏輯自洽驗證中...\n"
         corrected = _verifier.verify_and_correct(
@@ -1435,6 +1555,7 @@ def execute_structured_query_stream(
     if (
         rag_found_anything
         and not gate_abstain
+        and not fact_contract_direct
         and deterministic_evidence
         and literal_kb
     ):
@@ -1443,6 +1564,14 @@ def execute_structured_query_stream(
         if full_text != before_literal_guard:
             yield "[STATUS] 🧱 [literal-completeness] restored omitted direct evidence\n"
             yield full_text[len(before_literal_guard.rstrip()):]
+
+    if not fact_contract_direct:
+        atomic_text = _separate_stability_protocol_clause(full_text)
+        if atomic_text != full_text:
+            yield "[STATUS] 🧱 [stage4-atomicity] restored result/protocol separation after verification\n"
+            yield "\n\n---\n"
+            yield atomic_text
+            full_text = atomic_text
 
     # ── Stage 6: Citation grounding ──────────────────────────────────
     nli_report = ""

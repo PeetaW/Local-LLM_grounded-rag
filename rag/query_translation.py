@@ -18,6 +18,17 @@ def _term_fidelity_rules() -> str:
     )
 
 
+def _fold_change_rules() -> str:
+    if not getattr(cfg, "TRANSLATION_FOLD_CHANGE_GUARD_ENABLED", False):
+        return ""
+    return (
+        "- Preserve the mathematical meaning of fold changes. Translate an N-fold decrease or reduction "
+        "as 'decreased to approximately 1/N of the original' (for example, 'a three-fold decrease' → "
+        "'降至原來約三分之一'), never as the ambiguous '降低 N 倍'. Translate an N-fold increase as "
+        "'increased to N times the original'.\n"
+    )
+
+
 def translate_to_traditional_chinese(text: str, on_status=None) -> str:
     """
     Translate an academic answer from English to Traditional Chinese.
@@ -41,9 +52,11 @@ def translate_to_traditional_chinese(text: str, on_status=None) -> str:
         "  '## [Cross-Literature Inference]' → '## 【跨文獻推論】'\n"
         "  '## [Knowledge Extension and Speculation]' → '## 【知識延伸與推測】'\n"
         "- Paper name labels [Paper Name] → 【Paper Name】 (keep the name itself unchanged)\n"
-        "- Preserve all numbers, units (wt%, °C, rpm, g, mL, h), and chemical formulas exactly.\n"
+        "- Preserve all numbers, units (wt%, °C, rpm, g, mL, h), and chemical formulas exactly; "
+        "for fold changes, preserve the quantitative meaning according to the rule below.\n"
         "- Keep label tags unchanged: [Fact N], [Insufficient Evidence], [Unverified], VERIFY_PASS, VERIFY_FAIL.\n"
         f"{_term_fidelity_rules()}"
+        f"{_fold_change_rules()}"
         "- Do not add any explanation, preamble, or markdown fence.\n\n"
         f"Answer to translate:\n{text}"
     )

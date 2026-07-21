@@ -1033,6 +1033,21 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
         self.assertNotIn("## [Cross-Literature Inference]", prompt)
         self.assertIn("Only use the content from the above data", prompt)
 
+    def test_relation_atomicity_is_shared_ab_switch(self):
+        old = cfg.FACT_RELATION_ATOMICITY_GUARD_ENABLED
+        try:
+            cfg.FACT_RELATION_ATOMICITY_GUARD_ENABLED = True
+            for mode in ("reasoning", "strict"):
+                prompt = build_synthesis_prompt("kb", "q", "", mode, "en")
+                self.assertIn("FACT RELATION FIDELITY", prompt)
+                self.assertIn("Keep observed results or stability conclusions separate", prompt)
+
+            cfg.FACT_RELATION_ATOMICITY_GUARD_ENABLED = False
+            prompt = build_synthesis_prompt("kb", "q", "", "strict", "en")
+            self.assertNotIn("FACT RELATION FIDELITY", prompt)
+        finally:
+            cfg.FACT_RELATION_ATOMICITY_GUARD_ENABLED = old
+
     def test_strict_zh_citation_only(self):
         prompt = build_synthesis_prompt("kb", "q", "", "strict", "zh")
         self.assertNotIn("## 【跨文獻推論】", prompt)
@@ -1237,6 +1252,28 @@ class TestTranslateToTraditionalChinese(unittest.TestCase):
             cfg.TERM_FIDELITY_GUARD_ENABLED = old
 
     @patch("requests.post")
+    def test_fold_change_rule_is_unambiguous_ab_switch(self, mock_post):
+        old = cfg.TRANSLATION_FOLD_CHANGE_GUARD_ENABLED
+        try:
+            mock_resp = MagicMock()
+            mock_resp.ok = True
+            mock_resp.json.return_value = {"response": "繁體中文翻譯結果"}
+            mock_post.return_value = mock_resp
+
+            cfg.TRANSLATION_FOLD_CHANGE_GUARD_ENABLED = True
+            translate_to_traditional_chinese("A three-fold IC50 decrease was observed.")
+            prompt = mock_post.call_args.kwargs["json"]["prompt"]
+            self.assertIn("降至原來約三分之一", prompt)
+            self.assertIn("never as the ambiguous '降低 N 倍'", prompt)
+
+            cfg.TRANSLATION_FOLD_CHANGE_GUARD_ENABLED = False
+            translate_to_traditional_chinese("A three-fold IC50 decrease was observed.")
+            prompt = mock_post.call_args.kwargs["json"]["prompt"]
+            self.assertNotIn("降至原來約三分之一", prompt)
+        finally:
+            cfg.TRANSLATION_FOLD_CHANGE_GUARD_ENABLED = old
+
+    @patch("requests.post")
     def test_returns_original_on_connection_error(self, mock_post):
         mock_post.side_effect = Exception("connection refused")
         original = "English fallback text"
@@ -1407,6 +1444,8 @@ def _setup_cfg(cfg_mock):
     cfg_mock.STAGE2_LLM_SUBANSWERS_ENABLED = False
     cfg_mock.STAGE4_ANSWER_VALIDATION_ENABLED = False
     cfg_mock.STAGE4_ANSWER_REWRITE_RETRIES = 1
+    cfg_mock.FACT_RELATION_ATOMICITY_GUARD_ENABLED = False
+    cfg_mock.STRUCTURED_FACT_CONTRACT_ENABLED = False
     cfg_mock.COMPARISON_JSON_DIRECT_RENDER_ENABLED = False
     cfg_mock.METHOD_FACT_LIST_DIRECT_RENDER_ENABLED = False
     cfg_mock.EN_DRAFT_PIPELINE = False
@@ -1415,7 +1454,50 @@ def _setup_cfg(cfg_mock):
     cfg_mock.SUBQUERY_MAX_WORKERS = 1
 
 
+class TestStage4RelationAtomicity(unittest.TestCase):
+    def test_splits_stability_result_from_forced_degradation_protocol(self):
+        old = cfg.FACT_RELATION_ATOMICITY_GUARD_ENABLED
+        try:
+            cfg.FACT_RELATION_ATOMICITY_GUARD_ENABLED = True
+            answer = (
+                "BPA is stable in acidic and FeCl3 solutions [Paper A], including forced "
+                "degradation tests performed using 100 mM HCl at 55 C for 24 h [Paper A]."
+            )
+            fixed = pipeline_module._separate_stability_protocol_clause(answer)
+            self.assertIn("solutions [Paper A]. Forced degradation tests were performed", fixed)
+
+            legitimate = (
+                "The study used several analyses, including forced degradation tests "
+                "performed at 55 C."
+            )
+            self.assertEqual(
+                pipeline_module._separate_stability_protocol_clause(legitimate),
+                legitimate,
+            )
+        finally:
+            cfg.FACT_RELATION_ATOMICITY_GUARD_ENABLED = old
+
+
 class TestExecuteStructuredQuery(unittest.TestCase):
+    def test_fact_contract_renderer_rejects_cross_sentence_scope(self):
+        answer, claims, audit = pipeline_module._render_validated_fact_contract(
+            "\n".join([
+                "[Fact 1] BPA in 100 mM HCl was incubated at 55 C for 24 h. (Source: PaperA)",
+                "[Fact 2] A BPA solution in 6 mM H2O2 was prepared immediately before analysis. (Source: PaperA)",
+                "[Fact 3] BPA in 6 mM H2O2 was incubated at 55 C for 24 h. (Source: PaperA)",
+            ]),
+            [
+                "【PaperA】\n[Snippet 1] BPA in 100 mM HCl was incubated at 55 C for 24 h. "
+                "[Snippet 2] A BPA solution in 6 mM H2O2 was prepared immediately before analysis."
+            ],
+        )
+
+        self.assertIn("100 mM HCl", answer)
+        self.assertIn("prepared immediately before analysis", answer)
+        self.assertNotIn("H2O2 was incubated at 55 C", answer)
+        self.assertEqual(len(claims), 2)
+        self.assertEqual(len(audit["rejected"]), 1)
+
     def test_partial_recovery_accepts_only_answerable_expanded_facts(self):
         artifacts = {}
         recovered_kb = (
@@ -1854,6 +1936,62 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertTrue(any("THF at -78°C" in claim for claim in claims))
         mock_translate.assert_not_called()
 
+    @patch("rag.query_pipeline.translate_to_traditional_chinese")
+    @patch("rag.query_pipeline.run_grounding_check")
+    @patch("rag.query_pipeline.run_subqueries_parallel")
+    @patch("rag.query_pipeline.build_subquery_tasks")
+    @patch("rag.query_pipeline.plan_sub_questions")
+    @patch("rag.query_pipeline.detect_target_paper")
+    @patch("rag.query_pipeline.cfg")
+    @patch("rag.query_pipeline.Settings")
+    def test_fact_contract_ab_branch_skips_stage4_and_verifier(
+        self, mock_settings, mock_cfg,
+        mock_detect, mock_plan, mock_build, mock_run,
+        mock_grounding, mock_translate,
+    ):
+        _setup_cfg(mock_cfg)
+        mock_cfg.SYNTHESIS_ENABLED = True
+        mock_cfg.STRUCTURED_FACT_CONTRACT_ENABLED = True
+        mock_cfg.EN_DRAFT_PIPELINE = True
+        mock_cfg.FINAL_TRANSLATION_ENABLED = False
+        mock_cfg.VERIFY_ENABLED = True
+        mock_cfg.CITATION_GROUNDING_ENABLED = True
+        mock_detect.return_value = "PaperA"
+        mock_plan.return_value = [{"paper": "PaperA", "sub_q": "Report storage outcomes."}]
+        mock_build.return_value = ([], {})
+        mock_run.return_value = [(
+            "【PaperA】",
+            "Retrieved evidence snippets:\n"
+            "[Snippet 1] Raw BPA remained stable at 55 C for 6 months.\n"
+            "[Snippet 2] Drug product formed phenylalanine at 40 C over 6 months.",
+        )]
+        kb = (
+            "[Fact 1] Raw BPA remained stable at 55 C for 6 months. (Source: PaperA)\n\n"
+            "[Fact 2] Drug product formed phenylalanine at 40 C over 6 months. (Source: PaperA)"
+        )
+        artifacts = {}
+        mock_grounding.side_effect = lambda full_text, *args, **kwargs: (full_text, "")
+
+        with (
+            patch.object(pipeline_module._synthesizer, "synthesize", return_value=kb),
+            patch.object(pipeline_module, "_rewrite_stage4_if_needed") as rewrite,
+            patch.object(pipeline_module._verifier, "verify_and_correct") as verify,
+        ):
+            result = pipeline_module.execute_structured_query(
+                "What storage outcomes were reported?",
+                {"PaperA": MagicMock()},
+                on_artifact=artifacts.__setitem__,
+            )
+
+        self.assertIn("Raw BPA remained stable", result)
+        self.assertIn("Drug product formed phenylalanine", result)
+        mock_settings.llm.stream_complete.assert_not_called()
+        rewrite.assert_not_called()
+        verify.assert_not_called()
+        self.assertIn('"schema": "fact_contract_v1"', artifacts["stage4_fact_contract"])
+        self.assertEqual(len(mock_grounding.call_args.kwargs["grounding_claims"]), 2)
+        mock_translate.assert_not_called()
+
     def test_stage4_appends_missing_isotope_cost_fact(self):
         answer = "Central trade-off: purity and isotopic enrichment versus scalability and cost-effectiveness."
         kb = (
@@ -2209,9 +2347,13 @@ class TestRunEvalCorrectnessCandidate(unittest.TestCase):
                         "stage2_evidence": "Evidence block",
                         "stage2_recovery_evidence": "Expanded evidence block",
                         "stage3_generation_meta": [{"done_reason": "stop"}],
+                        "stage3_fact_contract": "Stage 3 contract",
                         "stage3_recovery_prompt": "Recovery prompt",
+                        "stage3_recovery_fact_contract": "Recovery contract",
                         "stage3_recovery_literal_facts": "Literal facts",
                         "partial_recovery_assessment": "{\"verdict\":\"ANSWERABLE\"}",
+                        "stage4_fact_contract": "Stage 4 contract",
+                        "stage4_grounding_claims": "Grounding claims",
                         "stage4_draft": "Draft",
                     },
                     ["[planning] ok"],
@@ -2223,13 +2365,17 @@ class TestRunEvalCorrectnessCandidate(unittest.TestCase):
             opened_paths = [args[0] for args, _ in m.call_args_list]
             self.assertIn(os.path.join(out_dir, "Q08_stage2_evidence.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage3_generation_meta.txt"), opened_paths)
+            self.assertIn(os.path.join(out_dir, "Q08_stage3_fact_contract.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage2_recovery_evidence.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage3_recovery_prompt.txt"), opened_paths)
+            self.assertIn(os.path.join(out_dir, "Q08_stage3_recovery_fact_contract.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage3_recovery_literal_facts.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_partial_recovery_assessment.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage7_translated_answer.txt"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_translation_judge.json"), opened_paths)
             self.assertIn(os.path.join(out_dir, "Q08_stage4_draft.txt"), opened_paths)
+            self.assertIn(os.path.join(out_dir, "Q08_stage4_fact_contract.txt"), opened_paths)
+            self.assertIn(os.path.join(out_dir, "Q08_stage4_grounding_claims.txt"), opened_paths)
         finally:
             cfg.EVAL_DEBUG_ARTIFACTS_ENABLED = old_enabled
 

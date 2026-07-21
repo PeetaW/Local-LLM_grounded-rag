@@ -4,6 +4,14 @@ import logging
 import re
 import requests
 import config as cfg
+from rag.fact_contract import (
+    build_evidence_catalog,
+    fact_contract_prompt,
+    fact_contract_schema,
+    fact_list_from_contract,
+    parse_fact_contract,
+    validate_fact_contract,
+)
 from rag.comparison_json_validator import (
     attach_comparison_requirements,
     build_comparison_requirements,
@@ -48,8 +56,68 @@ def _system_prompt() -> str:
             "5. Output in English. Preserve exact source wording for technical terms, route-defining phrases, values, and comparison dimensions.",
         )
     if getattr(cfg, "TERM_FIDELITY_GUARD_ENABLED", False):
-        return prompt + _TERM_FIDELITY_RULES
+        prompt += _TERM_FIDELITY_RULES
     return prompt
+
+
+_FACT_CONTRACT_SYSTEM_PROMPT = (
+    "You select direct academic evidence IDs using the required JSON schema. "
+    "Never infer relationships or return anything except the selected IDs."
+)
+
+
+_FACT_LINE_RE = re.compile(
+    r"^\s*\[(?P<label>Fact|事實)\s*\d+\]\s*(?P<claim>.*?)\s*"
+    r"(?P<source>\((?:Source|來源)\s*[:：]\s*.*\))\s*\.?\s*$",
+    re.IGNORECASE,
+)
+_PROTOCOL_SCOPE_JOIN_RE = re.compile(
+    r"^(?P<subject>.+?)\s+(?P<aux>were|was)\s+(?P<verb>performed|conducted)\s+using\s+"
+    r"(?P<primary>.+?\b(?:incubated|stored|heated|treated)\s+at\s+.+?\s+for\s+[^,.;]+)"
+    r",\s+and\s+(?P<separate>(?:a|an)\s+.+)$",
+    re.IGNORECASE,
+)
+
+
+def _split_protocol_condition_scope(text: str) -> str:
+    """Keep a trailing separate sample outside the preceding time/temperature scope."""
+    if not getattr(cfg, "FACT_RELATION_ATOMICITY_GUARD_ENABLED", False):
+        return text
+
+    parsed = []
+    changed = False
+    for line in (text or "").splitlines():
+        fact = _FACT_LINE_RE.match(line)
+        if not fact:
+            parsed.append((None, line))
+            continue
+        scope = _PROTOCOL_SCOPE_JOIN_RE.match(fact.group("claim"))
+        if not scope:
+            parsed.append((fact, [fact.group("claim")]))
+            continue
+        first = (
+            f"{scope.group('subject')} {scope.group('aux')} {scope.group('verb')} using "
+            f"{scope.group('primary')}"
+        )
+        second = f"{scope.group('subject')} also used {scope.group('separate')}"
+        parsed.append((fact, [first, second]))
+        changed = True
+
+    if not changed:
+        return text
+
+    lines = []
+    fact_number = 0
+    for fact, value in parsed:
+        if fact is None:
+            lines.append(value)
+            continue
+        for claim in value:
+            fact_number += 1
+            lines.append(
+                f"[{fact.group('label').title()} {fact_number}] {claim} {fact.group('source')}"
+            )
+    return "\n".join(lines)
 
 
 def _is_comparison_query(query: str) -> bool:
@@ -387,21 +455,30 @@ class KnowledgeSynthesizer:
         self.base_url = ollama_base_url or cfg.OLLAMA_BASE_URL
         self.timeout = timeout
 
-    def _generate(self, prompt: str, system_prompt: str, metadata: dict | None = None) -> str:
+    def _generate(
+        self,
+        prompt: str,
+        system_prompt: str,
+        metadata: dict | None = None,
+        format_schema: dict | None = None,
+    ) -> str:
         options = {
-            "temperature": 0.1,
+            "temperature": 0.0 if format_schema else 0.1,
             "num_predict": 8192,
             "num_ctx": cfg.STAGE3_NUM_CTX,
         }
+        payload = {
+            "model": self.model,
+            "system": system_prompt,
+            "prompt": prompt,
+            "stream": True,
+            "options": options,
+        }
+        if format_schema:
+            payload["format"] = format_schema
         resp = requests.post(
             f"{self.base_url}/api/generate",
-            json={
-                "model":  self.model,
-                "system": system_prompt,
-                "prompt": prompt,
-                "stream": True,
-                "options": options,
-            },
+            json=payload,
             timeout=self.timeout,
             stream=True,
         )
@@ -480,10 +557,26 @@ class KnowledgeSynthesizer:
         if not chunks:
             return "（無檢索結果）"
 
+        comparison_json_mode = getattr(cfg, "COMPARISON_JSON_ENABLED", False) and _is_comparison_query(query)
+        contract_catalog = build_evidence_catalog([
+            {"source": _chunk_source(chunk, index), "text": chunk.get("text") or chunk.get("content") or str(chunk)}
+            for index, chunk in enumerate(chunks)
+        ])
+        fact_contract_mode = bool(
+            getattr(cfg, "STRUCTURED_FACT_CONTRACT_ENABLED", False)
+            and getattr(cfg, "EN_DRAFT_PIPELINE", False)
+            and getattr(cfg, "REASONING_MODE", "strict") == "strict"
+            and not comparison_json_mode
+            and contract_catalog
+        )
         formatted = self._format_chunks(chunks)
         total_chars = sum(len(c.get("text","")) for c in chunks)
 
-        user_prompt = _build_user_prompt(formatted, query, recovery_hint=recovery_hint)
+        user_prompt = (
+            fact_contract_prompt(contract_catalog, query, recovery_hint=recovery_hint)
+            if fact_contract_mode
+            else _build_user_prompt(formatted, query, recovery_hint=recovery_hint)
+        )
         if on_artifact:
             on_artifact("stage3_prompt", user_prompt)
 
@@ -495,9 +588,19 @@ class KnowledgeSynthesizer:
 
         generation_meta = []
 
-        def _generate_attempt(prompt: str, attempt: str) -> str:
+        def _generate_attempt(
+            prompt: str,
+            attempt: str,
+            format_schema: dict | None = None,
+            system_prompt: str | None = None,
+        ) -> str:
             meta = {"attempt": attempt}
-            output = self._generate(prompt, _system_prompt(), metadata=meta)
+            output = self._generate(
+                prompt,
+                system_prompt or _system_prompt(),
+                metadata=meta,
+                format_schema=format_schema,
+            )
             generation_meta.append(meta)
             if on_artifact:
                 on_artifact("stage3_generation_meta", generation_meta)
@@ -514,22 +617,39 @@ class KnowledgeSynthesizer:
             len(chunks), total_chars, query[:50]
         )
         t0 = time.time()
-        comparison_json_mode = getattr(cfg, "COMPARISON_JSON_ENABLED", False) and _is_comparison_query(query)
         comparison_requirements = (
             build_comparison_requirements(query, chunks) if comparison_json_mode else {}
         )
 
         try:
             result = _generate_attempt(
-                user_prompt, "comparison_json" if comparison_json_mode else "fact_list"
+                user_prompt,
+                "fact_contract" if fact_contract_mode else (
+                    "comparison_json" if comparison_json_mode else "fact_list"
+                ),
+                format_schema=fact_contract_schema(contract_catalog) if fact_contract_mode else None,
+                system_prompt=_FACT_CONTRACT_SYSTEM_PROMPT if fact_contract_mode else None,
             )
             if on_artifact:
                 on_artifact("stage3_raw_output", result)
-            result = _canonicalize_chunk_sources(result, chunks)
+            if fact_contract_mode:
+                contract = validate_fact_contract(parse_fact_contract(result), contract_catalog)
+                if on_artifact:
+                    on_artifact("stage3_fact_contract", json.dumps(contract, ensure_ascii=False, indent=2))
+                result = fact_list_from_contract(contract)
+                if contract["rejected"]:
+                    _status(
+                        "  🧱 [fact-contract] "
+                        f"accepted={len(contract['facts'])} rejected={len(contract['rejected'])}"
+                    )
+            else:
+                result = _canonicalize_chunk_sources(result, chunks)
             if not (result or "").strip():
                 _status("  ⚠️  [Synthesizer] empty output; using original chunks")
                 result = self._fallback_chunks(chunks)
-            if comparison_json_mode and '"comparison_json"' in result:
+            if fact_contract_mode:
+                pass
+            elif comparison_json_mode and '"comparison_json"' in result:
                 result = _normalize_comparison_json(
                     result,
                     query,
@@ -586,6 +706,11 @@ class KnowledgeSynthesizer:
                     _status("  ✅ [comparison-json] validation passed")
             else:
                 result = _append_isotope_cost_fact(result, formatted, query)
+
+            scoped_result = _split_protocol_condition_scope(result)
+            if scoped_result != result:
+                _status("  🧱 [stage3-atomicity] separated an independent protocol sample")
+                result = scoped_result
 
             elapsed = time.time() - t0
             logger.info(
