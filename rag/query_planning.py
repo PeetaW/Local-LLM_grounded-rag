@@ -6,6 +6,8 @@ import re
 import json
 from collections import Counter
 
+import config as cfg
+
 
 # 共用檔名樣板：ScienceDirect / 期刊 PDF 常見的非識別性片段。
 # 問題裡出現這些字（如 "main findings"）不該觸發單篇鎖定。
@@ -13,6 +15,51 @@ _FILENAME_BOILERPLATE = {
     "main", "s2.0", "article", "supplement", "supplementary",
     "info", "full", "text", "pdf",
 }
+_METHOD_QUERY_HINTS = (
+    "method", "process", "procedure", "protocol", "synthesis", "synthesize",
+    "preparation", "protection", "reaction route", "key step",
+)
+_COMPARISON_QUERY_HINTS = (
+    "compare", "comparison", "across the papers", "different routes",
+    "scalability", "cost-effectiveness", "trade-off",
+)
+
+
+def _add_method_retrieval_facet(
+    question: str,
+    paper_names: list,
+    sub_questions: list[dict],
+) -> list[dict]:
+    lower = (question or "").lower()
+    if (
+        not getattr(cfg, "METHOD_RETRIEVAL_FACET_GUARD_ENABLED", False)
+        or not any(term in lower for term in _METHOD_QUERY_HINTS)
+        or any(term in lower for term in _COMPARISON_QUERY_HINTS)
+    ):
+        return sub_questions
+
+    existing_text = " ".join(
+        str(item.get("sub_q", "")).lower()
+        for item in sub_questions
+        if isinstance(item, dict)
+    )
+    if all(term in existing_text for term in ("yield", "temperature", "control")):
+        return sub_questions
+
+    specific = list(dict.fromkeys(
+        str(item.get("paper", "")).strip()
+        for item in sub_questions
+        if isinstance(item, dict) and str(item.get("paper", "")).strip() not in {"", "ALL"}
+    ))
+    paper = specific[0] if len(specific) == 1 else (
+        paper_names[0] if len(paper_names) == 1 else "ALL"
+    )
+    facet = (
+        "For the method or protocol in the user question, what exact reactants or reagents, "
+        "solvent, catalyst loading, temperature, reaction time, optimized yield, and "
+        "control or comparison outcomes are reported?"
+    )
+    return [*sub_questions, {"paper": paper, "sub_q": facet}]
 
 
 def detect_target_paper(question: str, paper_names: list) -> str | None:
@@ -223,7 +270,11 @@ def plan_sub_questions(question: str, paper_names: list) -> list:
             specific_papers = {sq.get("paper") for sq in deduped if sq.get("paper") != "ALL"}
             if set(paper_names).issubset(specific_papers):
                 deduped = [sq for sq in deduped if sq.get("paper") != "ALL"]
-            sub_questions = deduped
+            sub_questions = _add_method_retrieval_facet(
+                question,
+                paper_names,
+                deduped,
+            )
 
             print(f"  → 子問題內容：{[sq.get('sub_q', '')[:200] for sq in sub_questions]}")
             return sub_questions
@@ -233,4 +284,8 @@ def plan_sub_questions(question: str, paper_names: list) -> list:
                 print("       重試中...")
 
     print("       改為對所有論文問同一問題")
-    return [{"paper": "ALL", "sub_q": question}]
+    return _add_method_retrieval_facet(
+        question,
+        paper_names,
+        [{"paper": "ALL", "sub_q": question}],
+    )

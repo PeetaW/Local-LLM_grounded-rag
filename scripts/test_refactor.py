@@ -432,6 +432,31 @@ class TestPlanSubQuestions(unittest.TestCase):
 
         self.assertEqual([sq["paper"] for sq in result], papers)
 
+    def test_method_protocol_gets_deterministic_retrieval_facet(self):
+        papers = ["paper_a"]
+        meta = {"paper_a": {"short_desc": "desc", "main_topic": "topic"}}
+        raw = json.dumps([{
+            "paper": "paper_a",
+            "sub_q": "What is the solvent-free N-Boc protection protocol?",
+        }])
+
+        with (
+            patch.object(cfg, "METHOD_RETRIEVAL_FACET_GUARD_ENABLED", True),
+            patch("rag.metadata_manager.load_metadata", return_value=meta),
+            patch("rag.llm_client.planning_llm") as mock_llm,
+        ):
+            mock_llm.model = "planner"
+            mock_llm.complete.return_value = self._llm_resp(raw)
+            result = plan_sub_questions(
+                "What is the solvent-free N-Boc protection protocol and its reaction conditions?",
+                papers,
+            )
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[1]["paper"], "paper_a")
+        self.assertIn("optimized yield", result[1]["sub_q"])
+        self.assertIn("control or comparison outcomes", result[1]["sub_q"])
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # query_retrieval — is_empty_result (pure)
@@ -1370,15 +1395,22 @@ class TestAnswerability(unittest.TestCase):
         self.assertIn("Source: PaperA", facts)
 
     def test_literal_recovery_keeps_result_relation_and_ignores_footnote_digits(self):
-        evidence = [(
-            "【PaperA】",
-            "Retrieved evidence snippets:\n"
-            "[Snippet 1] Pioneering reports prompted a new mechanistic hypothesis.17\n"
-            "[Snippet 2] Based on the results, the IC50 value for the preincubation inhibitory "
-            "effects was determined as 193 ± 50 nM.\n"
-            "[Snippet 3] These results indicate that JPH203 exerts preincubation inhibitory "
-            "effects in a concentration- and time-dependent manner.",
-        )]
+        evidence = [
+            (
+                "【PaperA】",
+                "Retrieved evidence snippets:\n"
+                "[Snippet 1] Pioneering reports prompted a new mechanistic hypothesis.17\n"
+                "[Snippet 2] Preincubation inhibitory effects of JPH203 on LAT1 function. "
+                "Based on the results, the IC50 value was determined as 193 ± 50 nM.\n"
+                "[Snippet 3] These results indicate that JPH203 exerts preincubation inhibitory "
+                "effects in a concentration- and time-dependent manner.",
+            ),
+            (
+                "【PaperB】",
+                "Retrieved evidence snippets:\n"
+                "[Snippet 1] PCL has less acidic degradation products than polylactide.",
+            ),
+        ]
 
         facts = pipeline_module._literal_recovery_facts(
             evidence,
@@ -1386,8 +1418,17 @@ class TestAnswerability(unittest.TestCase):
         )
 
         self.assertIn("193 ± 50 nM", facts)
+        self.assertNotIn("LAT1 function. Based on the results", facts)
         self.assertIn("concentration- and time-dependent", facts)
         self.assertNotIn("Pioneering reports", facts)
+        self.assertNotIn("PCL", facts)
+        contract = pipeline_module.bind_fact_list(
+            facts,
+            pipeline_module.build_evidence_catalog([
+                {"source": "PaperA", "text": evidence[0][1]},
+            ]),
+        )
+        self.assertTrue(any("193 ± 50 nM" in fact["claim"] for fact in contract["facts"]))
 
     def test_literal_completeness_appends_only_omitted_direct_facts(self):
         literal_facts = (
@@ -1770,6 +1811,49 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertIn("- Strategy:", answer)
         self.assertIn("- Mechanism:", answer)
         self.assertNotIn("synthesis of LAT1", answer)
+
+        old = cfg.STAGE4_ANSWER_VALIDATION_ENABLED
+        try:
+            cfg.STAGE4_ANSWER_VALIDATION_ENABLED = True
+            self.assertEqual(
+                pipeline_module._stage4_answer_validation_issues(
+                    answer,
+                    kb,
+                    "How do therapeutic strategies targeting LAT1 differ in mechanism?",
+                ),
+                "",
+            )
+        finally:
+            cfg.STAGE4_ANSWER_VALIDATION_ENABLED = old
+
+    def test_stage4_renderer_splits_semicolon_dimension_claims(self):
+        kb = json.dumps({"comparison_json": {
+            "source_roles": [{"source": "ReviewA", "role": "review/comparison source"}],
+            "direct_routes": [],
+            "review_comparison_sources": [{"source": "ReviewA", "dimensions": ["cost-effectiveness"]}],
+            "dimensions": {
+                "cost_effectiveness": {
+                    "requested": True,
+                    "evidence_found": True,
+                    "evidence": [{
+                        "source": "ReviewA",
+                        "claim": (
+                            "The major cost comes from isotope starting material; "
+                            "10B costs over 1000 times normal boric acid."
+                        ),
+                    }],
+                },
+            },
+            "central_tradeoff": {"claim": "10B is expensive.", "sources": ["ReviewA"]},
+        }})
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question="Compare cost-effectiveness.",
+        )
+
+        self.assertIn("isotope starting material [ReviewA].", answer)
+        self.assertIn("10B costs over 1000 times normal boric acid [ReviewA].", answer)
 
     def test_stage4_direct_render_is_concise_for_high_level_question(self):
         kb = """

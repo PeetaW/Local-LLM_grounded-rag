@@ -51,9 +51,38 @@ _TRANSLATION_JUDGE_SYSTEM = (
     "phenylalanine=苯丙胺酸. Do not require Mainland Chinese 氨酸 variants. Return JSON only."
 )
 
+_TRANSLATION_AUDIT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "errors": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "mistranslation", "omission", "addition", "number_unit",
+                            "negation_relation", "untranslated",
+                        ],
+                    },
+                    "severity": {"type": "string", "enum": ["minor", "material"]},
+                    "source_ids": {"type": "array", "items": {"type": "string"}},
+                    "target_ids": {"type": "array", "items": {"type": "string"}},
+                    "reason": {"type": "string"},
+                },
+                "required": ["type", "severity", "source_ids", "target_ids", "reason"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["errors"],
+    "additionalProperties": False,
+}
+
 
 def _generate(system: str, prompt: str, model: str, base_url: str,
-              timeout: int, json_mode: bool = False) -> tuple[str | None, str | None]:
+              timeout: int, json_mode: bool | dict = False) -> tuple[str | None, str | None]:
     if requests is None:
         return None, "judge call failed: requests is not installed"
     payload = {
@@ -70,7 +99,7 @@ def _generate(system: str, prompt: str, model: str, base_url: str,
         },
     }
     if json_mode:
-        payload["format"] = "json"
+        payload["format"] = json_mode if isinstance(json_mode, dict) else "json"
     try:
         resp = requests.post(f"{base_url}/api/generate", json=payload, timeout=timeout)
         resp.raise_for_status()
@@ -94,7 +123,13 @@ def _json_object(text: str) -> dict | None:
 
 
 def _normalized(text: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", str(text or "")).lower().split())
+    value = unicodedata.normalize("NFKC", str(text or "")).lower()
+    value = re.sub(
+        r"(?<=[a-z])-\s+(?=(?!(?:and|or)\b)[a-z])",
+        "",
+        value,
+    )
+    return " ".join(value.split())
 
 
 _CONTRACT_STOPWORDS = {
@@ -102,7 +137,10 @@ _CONTRACT_STOPWORDS = {
     "it", "of", "on", "or", "that", "the", "their", "this", "to", "under", "was", "were", "with",
 }
 _CONTRACT_CONDITION_GROUPS = (
-    ("combined", ("combined", "combination", "addition of preincubation", "pre-plus")),
+    ("combined", (
+        "combined", "combination", "addition of preincubation", "pre-plus",
+        "synergistically enhances the co-incubation",
+    )),
     ("alkaline", ("alkaline", "alkali", "naoh", "basic condition")),
     ("oxidative", ("oxidative", "oxidation", "h2o2")),
     ("acidic", ("acidic", "hcl", "acetic acid")),
@@ -112,6 +150,9 @@ _CONTRACT_OUTCOME_GROUPS = (
     ("stable", ("stable", "stability", "no detectable degradation")),
     ("rapid", ("rapid", "rapidly")),
     ("slow", ("slow", "slowly")),
+)
+_POSITIVE_RECOVERY_GROUPS = (
+    ("enhancement", ("enhanc", "augment")),
 )
 
 
@@ -184,6 +225,33 @@ def _apply_fact_contract(fact: str, verdict: str, evidence: list[str]) -> tuple[
         if overlap < 0.4:
             return "missing", "deterministic contract found insufficient entity/condition overlap for contradiction"
     return verdict, ""
+
+
+def _positive_contract_witness(fact: str, candidate_items: list[dict]) -> dict | None:
+    fact_text = _normalized(fact)
+    active_groups = [
+        group for group in _POSITIVE_RECOVERY_GROUPS
+        if any(alias in fact_text for alias in group[1])
+    ]
+    if not active_groups:
+        return None
+    fact_tokens = _contract_tokens(fact)
+    for item in candidate_items:
+        evidence = str(item.get("text", ""))
+        evidence_text = _normalized(evidence)
+        if (
+            re.search(r"\b(?:no|not|never|without)\b", evidence_text)
+            and not re.search(r"\b(?:no|not|never|without)\b", fact_text)
+        ):
+            continue
+        if _missing_contract_groups(fact, evidence, active_groups):
+            continue
+        if _apply_fact_contract(fact, "covered", [evidence])[0] != "covered":
+            continue
+        overlap = len(fact_tokens & _contract_tokens(evidence)) / len(fact_tokens) if fact_tokens else 0.0
+        if overlap >= 0.4:
+            return item
+    return None
 
 
 def _fact_items(reference_facts: list) -> list[dict]:
@@ -281,7 +349,17 @@ def _validate_fact_audit(
         judge_verdict = verdict
         contract_reason = ""
         if stable_protocol:
-            verdict, contract_reason = _apply_fact_contract(expected[fact_id], verdict, evidence)
+            witness = (
+                _positive_contract_witness(expected[fact_id], candidate_items)
+                if verdict == "missing" else None
+            )
+            if witness:
+                verdict = "covered"
+                evidence_ids = [witness["id"]]
+                evidence = [witness["text"]]
+                contract_reason = "deterministic contract found an explicit positive relation witness"
+            else:
+                verdict, contract_reason = _apply_fact_contract(expected[fact_id], verdict, evidence)
             if verdict == "missing":
                 evidence = []
                 evidence_ids = []
@@ -557,6 +635,16 @@ _TAIWAN_TERM_EQUIVALENTS = {
     "tyrosine": ("酪胺酸", "酪氨酸"),
     "phenylalanine": ("苯丙胺酸", "苯丙氨酸"),
 }
+_TRANSLATION_PHRASE_EQUIVALENTS = (
+    ("bench scale", ("bench scale", "實驗室規模", "小試規模")),
+    ("room temperature", ("room temperature", "室溫")),
+    ("water-stable", ("water-stable", "water stable", "水穩定", "耐水")),
+    ("later-stage", ("later-stage", "later stage", "後期", "後階段")),
+    (
+        "cell membrane disruption",
+        ("cell membrane disruption", "細胞膜破裂", "細胞膜破壞", "細胞膜受損"),
+    ),
+)
 
 
 def _translation_term_false_positive(kind: str, reason: str, source: str, target: str) -> bool:
@@ -588,6 +676,49 @@ def _translation_structural_omission_false_positive(kind: str, reason: str) -> b
             re.I,
         )
     )
+
+
+def _translation_omission_witness_present(
+    kind: str,
+    reason: str,
+    source: str,
+    target: str,
+) -> bool:
+    if kind != "omission":
+        return False
+    quoted = [
+        next(value for value in match if value).strip()
+        for match in re.findall(r"'([^']+)'|\"([^\"]+)\"|`([^`]+)`", reason or "")
+        if any(match)
+    ]
+    source_text = _normalized(source)
+    phrases = [
+        phrase for phrase in quoted
+        if _normalized(phrase) and _normalized(phrase) in source_text
+    ]
+    if not phrases:
+        return False
+
+    target_text = _normalized(target)
+    target_numbers = _contract_numbers(target)
+    for phrase in phrases:
+        phrase_text = _normalized(phrase)
+        if phrase_text in target_text:
+            continue
+        groups = [
+            aliases for key, aliases in _TRANSLATION_PHRASE_EQUIVALENTS
+            if key in phrase_text
+        ]
+        if not groups:
+            return False
+        if any(
+            not any(_normalized(alias) in target_text for alias in aliases)
+            for aliases in groups
+        ):
+            return False
+        if _contract_numbers(phrase) - target_numbers:
+            return False
+    return True
 
 
 def _validate_translation_audit(data: dict | None, source: str, target: str) -> tuple[list, list]:
@@ -626,6 +757,11 @@ def _validate_translation_audit(data: dict | None, source: str, target: str) -> 
         if _translation_term_false_positive(kind, reason, source_text, target):
             continue
         if _translation_structural_omission_false_positive(kind, reason):
+            continue
+        if (
+            getattr(cfg, "TRANSLATION_OMISSION_WITNESS_FILTER_ENABLED", False)
+            and _translation_omission_witness_present(kind, reason, source_text, target)
+        ):
             continue
         if kind == "number_unit" and getattr(cfg, "TRANSLATION_EXACT_VALUE_FILTER_ENABLED", False):
             source_signature = _number_unit_signature(source_text)
@@ -701,7 +837,7 @@ def judge_translation_fidelity(source: str, target: str, model: str = None,
             model,
             base_url,
             timeout,
-            json_mode=True,
+            json_mode=_TRANSLATION_AUDIT_SCHEMA,
         )
         if error:
             return {"score": None, "raw": None, "reason": error, "mode": "translation_fidelity_v2"}

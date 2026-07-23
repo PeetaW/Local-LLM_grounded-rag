@@ -114,6 +114,10 @@ QUERY_FACET_FOCUS_ENABLED = True
 FACT_RELATION_ATOMICITY_GUARD_ENABLED = True
 # A/B：non-comparison strict 題使用 evidence-bound fact contract，通過後直接渲染而不再讓 Stage 4 改寫。
 STRUCTURED_FACT_CONTRACT_ENABLED = True
+# A/B：Stage 3 selector 同時看 planner 子問題，避免原始高層問句漏掉條件、數值或機制面向。
+FACT_CONTRACT_PLANNER_FOCUS_ENABLED = True
+# A/B：selector 漏掉 planner 明示 facet 時，只從既有 evidence catalog 補入直接命中的原句。
+FACT_CONTRACT_FACET_COMPLETION_ENABLED = True
 # A/B：Stage 3 事實蒸餾用英文輸出，讓英文 chunks / gold reference / eval judge 維持同語言比對。
 STAGE3_ENGLISH_DISTILLATION_ENABLED = True
 # A/B：方法/key-step 題只摘要核心步驟，不把起始物準備、背景方法或替代/對照路線升格成 key steps。
@@ -137,6 +141,8 @@ TRANSLATION_FIDELITY_JUDGE_ENABLED = True
 TRANSLATION_FOLD_CHANGE_GUARD_ENABLED = True
 # A/B：judge 若指控數值/單位，但引用的英中文數值與單位完全相同，視為誤報。
 TRANSLATION_EXACT_VALUE_FILTER_ENABLED = True
+# A/B：judge 指控 omission 時，若其點名的語意 witness 已存在於全文譯文，丟棄該誤報。
+TRANSLATION_OMISSION_WITNESS_FILTER_ENABLED = True
 # Eval debug artifacts：每題輸出 stage2/stage3/stage4/judge 文字檔，方便逐輪檢查 LLM 行為。
 EVAL_DEBUG_ARTIFACTS_ENABLED = True
 
@@ -148,6 +154,8 @@ STAGE2_LLM_SUBANSWERS_ENABLED = False
 STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = True
 # A/B：query-aware 的後續 snippets 優先補上不重複的證據面向；Q01/Q04 實測未改善，且可能漏掉重疊續段。
 STAGE2_DIVERSE_EVIDENCE_ENABLED = False
+# A/B：方法/實驗 protocol 額外檢索 optimized conditions、yield 與 control outcomes。
+METHOD_RETRIEVAL_FACET_GUARD_ENABLED = True
 STAGE2_EVIDENCE_SNIPPETS_PER_TASK = 2
 COMPARISON_EVIDENCE_SNIPPETS_PER_TASK = 4
 

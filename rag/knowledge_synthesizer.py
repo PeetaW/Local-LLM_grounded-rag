@@ -6,6 +6,7 @@ import requests
 import config as cfg
 from rag.fact_contract import (
     build_evidence_catalog,
+    complete_fact_contract,
     fact_contract_prompt,
     fact_contract_schema,
     fact_list_from_contract,
@@ -174,7 +175,7 @@ def _normalize_comparison_json(
     query_dims = _query_dimension_keys(query)
     for key in ("isotopic_enrichment", "scalability", "cost_effectiveness", "safety"):
         item = dimensions.setdefault(key, {})
-        item["requested"] = key in query_dims or bool(item.get("requested", False))
+        item["requested"] = key in query_dims
         item.setdefault("text", "")
         item["sources"] = item.get("sources") if isinstance(item.get("sources"), list) else []
         raw_atomic = [
@@ -202,6 +203,32 @@ def _normalize_comparison_json(
             route for route in comparison.get("direct_routes", [])
             if not isinstance(route, dict) or route.get("source") not in review_sources
         ]
+    direct_route_sources = {
+        str(route.get("source", "")).strip()
+        for route in comparison.get("direct_routes", [])
+        if isinstance(route, dict) and route.get("source")
+    }
+    known_role_sources = set()
+    for item in source_roles:
+        if not isinstance(item, dict) or not item.get("source"):
+            continue
+        source = str(item["source"]).strip()
+        known_role_sources.add(source)
+        role = str(item.get("role", "")).lower()
+        if (
+            source in direct_route_sources
+            and "review/comparison" not in role
+            and "background" not in role
+        ):
+            item["role"] = "route"
+    for source in sorted(direct_route_sources - known_role_sources):
+        source_roles.append({
+            "source": source,
+            "role": "route",
+            "claim": "",
+            "evidence": "",
+        })
+    comparison["source_roles"] = source_roles
     tradeoff = comparison.get("central_tradeoff", "")
     if isinstance(tradeoff, str):
         sources = [
@@ -549,6 +576,7 @@ class KnowledgeSynthesizer:
         on_status=None,
         on_artifact=None,
         recovery_hint: str = "",
+        focus_questions: list[str] | None = None,
     ) -> str:
         """
         將 chunks 轉化為結構化已知事實清單。
@@ -572,8 +600,18 @@ class KnowledgeSynthesizer:
         formatted = self._format_chunks(chunks)
         total_chars = sum(len(c.get("text","")) for c in chunks)
 
+        contract_focus = (
+            focus_questions
+            if getattr(cfg, "FACT_CONTRACT_PLANNER_FOCUS_ENABLED", False)
+            else None
+        )
         user_prompt = (
-            fact_contract_prompt(contract_catalog, query, recovery_hint=recovery_hint)
+            fact_contract_prompt(
+                contract_catalog,
+                query,
+                recovery_hint=recovery_hint,
+                focus_questions=contract_focus,
+            )
             if fact_contract_mode
             else _build_user_prompt(formatted, query, recovery_hint=recovery_hint)
         )
@@ -634,9 +672,20 @@ class KnowledgeSynthesizer:
                 on_artifact("stage3_raw_output", result)
             if fact_contract_mode:
                 contract = validate_fact_contract(parse_fact_contract(result), contract_catalog)
+                if getattr(cfg, "FACT_CONTRACT_FACET_COMPLETION_ENABLED", False):
+                    contract = complete_fact_contract(
+                        contract,
+                        contract_catalog,
+                        [query, *(contract_focus or []), recovery_hint],
+                    )
                 if on_artifact:
                     on_artifact("stage3_fact_contract", json.dumps(contract, ensure_ascii=False, indent=2))
                 result = fact_list_from_contract(contract)
+                if contract.get("supplemented_evidence_ids"):
+                    _status(
+                        "  🧩 [fact-contract] deterministic facet completion: "
+                        + ",".join(contract["supplemented_evidence_ids"])
+                    )
                 if contract["rejected"]:
                     _status(
                         "  🧱 [fact-contract] "

@@ -157,7 +157,7 @@ def _literal_recovery_facts(recovery_results: list[tuple[str, str]], question: s
             )
             text = re.sub(r"\s+", " ", text).replace("\x03g", "µg").strip()
             sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", text)
-            for sentence_index, sentence in enumerate(sentences):
+            for sentence in sentences:
                 sentence = sentence.strip()
                 axis_values = re.search(
                     r"(?:-?\d+(?:\.\d+)?\s+){8,}", sentence
@@ -169,27 +169,9 @@ def _literal_recovery_facts(recovery_results: list[tuple[str, str]], question: s
                 relation = bool(_RESULT_RELATION_RE.search(sentence))
                 if not 20 <= len(sentence) <= 700 or not (measurement or relation):
                     continue
-                result_sentence = sentence
                 sentence_terms = set(re.findall(r"[a-z][a-z0-9]+", sentence.lower()))
-                if measurement and len(question_terms & sentence_terms) < 2:
-                    for prior in reversed(sentences[max(0, sentence_index - 3):sentence_index]):
-                        prior = prior.strip()
-                        prior_terms = set(re.findall(r"[a-z][a-z0-9]+", prior.lower()))
-                        if len(question_terms & prior_terms) < 2:
-                            continue
-                        prefix = re.split(
-                            r"\b(?:to determine|to assess|to evaluate|to clarify|cells? were|samples? were)\b",
-                            prior,
-                            maxsplit=1,
-                            flags=re.IGNORECASE,
-                        )[0].strip(" .:")
-                        context = prefix if 20 <= len(prefix) < len(prior) else prior
-                        context_numbers = re.findall(
-                            r"(?<![A-Za-z0-9])-?\d+(?:\.\d+)?", context
-                        )
-                        if len(context_numbers) <= 4 and len(context) + len(sentence) <= 700:
-                            sentence = f"{context}. {sentence}"
-                            break
+                if relation and not measurement and not (question_terms & sentence_terms):
+                    continue
                 sentence_lower = sentence.lower()
                 if any(marker in sentence_lower for marker in (
                     "article history:", "received in revised", "available online", "doi:",
@@ -207,32 +189,32 @@ def _literal_recovery_facts(recovery_results: list[tuple[str, str]], question: s
                 potency_query = any(term in lower_question for term in (
                     "potency", "inhibitory", "inhibition", "ic50"
                 ))
-                if potency_query and not (metric or relation or "potency" in result_sentence.lower()):
+                if potency_query and not (metric or relation or "potency" in sentence.lower()):
                     continue
                 score = _query_window_score(sentence, question) + 6 * relation
                 score += 4 * metric
                 result_statement = bool(re.search(
                     r"\b(?:determined|observed|indicate|showed|stable|detectable|"
                     r"degrad(?:e|es|ed|ing)|form(?:s|ed|ing)|reaching|reached)\b",
-                    result_sentence,
+                    sentence,
                     re.IGNORECASE,
                 ))
                 setup_statement = bool(re.search(
                     r"\b(?:to determine|to clarify|were exposed|were cultured|assays? were performed|"
                     r"sample preparation|markers? with the solid lines)\b",
-                    result_sentence,
+                    sentence,
                     re.IGNORECASE,
                 ))
                 condition_witness = bool(
                     condition_query
                     and measurement
-                    and re.search(r"\b(?:stored|storage|incubat\w*|kept)\b", result_sentence, re.I)
+                    and re.search(r"\b(?:stored|storage|incubat\w*|kept)\b", sentence, re.I)
                 )
                 if setup_statement and not result_statement and not condition_witness:
                     continue
-                if len(result_sentence) <= 320 and result_statement:
+                if len(sentence) <= 320 and result_statement:
                     score += 8
-                if metric and len(result_sentence) <= 180 and result_statement:
+                if metric and len(sentence) <= 180 and result_statement:
                     score += 12
                 if setup_statement and not condition_witness:
                     score -= 12
@@ -513,6 +495,10 @@ def _stage4_answer_validation_issues(answer: str, knowledge_base: str, question:
             break
 
     dimensions = comparison.get("dimensions") if isinstance(comparison.get("dimensions"), dict) else {}
+    requested_dimensions = [
+        key for key, item in dimensions.items()
+        if isinstance(item, dict) and item.get("requested")
+    ]
     dim_terms = {
         "isotopic_enrichment": ("isotopic enrichment", "10b", "boron-10"),
         "scalability": ("scalability", "scalable", "scale-up", "route efficiency", "practical synthesis"),
@@ -537,10 +523,23 @@ def _stage4_answer_validation_issues(answer: str, knowledge_base: str, question:
             "Stage4Validation | Missing high-purity framing | The Central trade-off must explicitly say high-purity/isotopically enriched L-BPA or high-purity isotopically enriched material."
         )
 
-    if "central trade-off" not in lower and "core trade-off" not in lower:
+    if (
+        requested_dimensions
+        and "central trade-off" not in lower
+        and "core trade-off" not in lower
+    ):
         issues.append("Stage4Validation | Missing central trade-off | Add one concise Central trade-off sentence using the requested dimensions.")
 
     return "VERIFY_FAIL\n" + "\n".join(f"- {issue}" for issue in issues) if issues else ""
+
+
+def _atomic_dimension_claims(claim: str) -> list[str]:
+    parts = [
+        value.strip().rstrip(".")
+        for value in re.split(r";\s+(?=[A-Z0-9])", claim or "")
+        if value.strip()
+    ]
+    return parts if len(parts) > 1 and all(len(value.split()) >= 4 for value in parts) else [claim]
 
 
 def _stage4_empty_answer_fallback(
@@ -698,11 +697,14 @@ def _stage4_empty_answer_fallback(
         for entry in evidence:
             source = str(entry["source"]).strip()
             claim = str(entry["claim"]).strip().rstrip(".")
-            claim_key = (source.lower(), claim.lower())
-            if claim_key in seen_claims:
-                continue
-            seen_claims.add(claim_key)
-            dimension_lines.append(f"- {labels[key]}: {claim} [{source}].")
+            for atomic_claim in _atomic_dimension_claims(claim):
+                claim_key = (source.lower(), atomic_claim.lower())
+                if claim_key in seen_claims:
+                    continue
+                seen_claims.add(claim_key)
+                dimension_lines.append(
+                    f"- {labels[key]}: {atomic_claim} [{source}]."
+                )
         if evidence:
             continue
         text = str(item.get("text", "")).strip()
@@ -885,6 +887,7 @@ def _attempt_partial_recovery(
             chunks=recovery_chunks,
             query=question,
             recovery_hint=reason,
+            focus_questions=[task[3] for task in valid_tasks],
             on_status=on_status,
             on_artifact=_recovery_artifact if on_artifact else None,
         )
@@ -1011,7 +1014,11 @@ def execute_structured_query(
             for i, ans in enumerate(sub_answers)
         ]
         knowledge_base = _synthesizer.synthesize(
-            chunks=synthesis_chunks, query=question, on_status=on_status, on_artifact=on_artifact,
+            chunks=synthesis_chunks,
+            query=question,
+            focus_questions=[item.get("sub_q", "") for item in sub_questions],
+            on_status=on_status,
+            on_artifact=on_artifact,
         )
         if deterministic_evidence:
             literal_kb = _literal_recovery_facts(ordered_results, question)
@@ -1365,7 +1372,10 @@ def execute_structured_query_stream(
             for i, ans in enumerate(sub_answers)
         ]
         knowledge_base = _synthesizer.synthesize(
-            chunks=synthesis_chunks, query=question, on_status=on_status,
+            chunks=synthesis_chunks,
+            query=question,
+            focus_questions=[item.get("sub_q", "") for item in sub_questions],
+            on_status=on_status,
         )
         if deterministic_evidence:
             literal_kb = _literal_recovery_facts(ordered_results, question)

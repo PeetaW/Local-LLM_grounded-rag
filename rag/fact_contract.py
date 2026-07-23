@@ -28,9 +28,18 @@ _PDF_INTERRUPTION_RE = re.compile(
     re.IGNORECASE,
 )
 _BROKEN_FRAGMENT_RE = re.compile(
-    r"[.!?]\s+(?:approximately|about|roughly|nearly|up\s+to|at\s+least|at\s+most|\d)",
+    r"(?<!\bvs)[.!?]\s+(?:approximately|about|roughly|nearly|up\s+to|at\s+least|at\s+most|\d)",
     re.IGNORECASE,
 )
+_INLINE_REFERENCE_RE = re.compile(
+    r"\b(?:fig(?:ure)?s?|eq(?:uation)?s?|table)\.?\s+(?=\d)",
+    re.IGNORECASE,
+)
+_FOCUS_STOPWORDS = _STOPWORDS | {
+    "according", "answer", "describe", "detail", "explain", "finding", "findings",
+    "give", "given", "how", "include", "including", "key", "main", "paper", "papers",
+    "question", "report", "reported", "specific", "study", "used", "using", "what",
+}
 
 
 def _plain(text: str) -> str:
@@ -55,7 +64,7 @@ def _tokens(text: str) -> set[str]:
 
 
 def _numbers(text: str) -> set[str]:
-    return set(re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", _plain(text)))
+    return set(re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?!\w|\.\d)", _plain(text)))
 
 
 def _sentence_blocks(text: str) -> list[str]:
@@ -110,7 +119,7 @@ def build_evidence_catalog(chunks: list[dict]) -> list[dict]:
             block = re.sub(r"\x03(?=g(?:/|\b))", "µ", block)
             clean = re.sub(r"\s+", " ", block).strip()
             sentences = re.split(
-                r"(?<!\bFig\.)(?<!\bEq\.)(?<!\bDr\.)(?<!\bMr\.)(?<=[.!?])\s+",
+                r"(?<!\bFig\.)(?<!\bEq\.)(?<!\bDr\.)(?<!\bMr\.)(?<!\bvs\.)(?<=[.!?])\s+",
                 clean,
                 flags=re.IGNORECASE,
             )
@@ -166,17 +175,34 @@ def fact_contract_schema(catalog: list[dict]) -> dict:
     }
 
 
-def fact_contract_prompt(catalog: list[dict], query: str, recovery_hint: str = "") -> str:
+def fact_contract_prompt(
+    catalog: list[dict],
+    query: str,
+    recovery_hint: str = "",
+    focus_questions: list[str] | None = None,
+) -> str:
     recovery = f"\nRecovery focus: {recovery_hint}\n" if recovery_hint else ""
+    focus = [
+        str(value).strip()
+        for value in (focus_questions or [])
+        if str(value).strip() and str(value).strip() != (query or "").strip()
+    ]
+    focus_block = ""
+    if focus:
+        focus_block = "\nPlanned coverage facets:\n" + "\n".join(
+            f"- {value}" for value in dict.fromkeys(focus)
+        )
     return f"""Select all and only the evidence IDs needed to answer the question.
 
 Question: {query}
-{recovery}
+{recovery}{focus_block}
 
 Rules:
 - Return evidence_ids only; the application will restore source and text.
 - Select direct evidence, not background or inferred relationships.
 - Include every sentence needed for requested values, conditions, outcomes, and comparisons.
+- Treat each planned coverage facet as a checklist; do not return until every directly supported facet has evidence.
+- For a mechanism, role, key-step, or supporting-data facet, prefer the concrete relation, operation, or result over a generic summary.
 - Prefer one concise complete sentence over its incomplete or noisy fragments.
 - Omit background that does not answer the question.
 
@@ -197,7 +223,8 @@ def parse_fact_contract(text: str) -> dict | None:
 
 
 def _support_score(claim: str, evidence: str) -> tuple[float, str]:
-    if _BROKEN_FRAGMENT_RE.search(_plain(claim)):
+    fragment_scan = _INLINE_REFERENCE_RE.sub("", _plain(claim))
+    if _BROKEN_FRAGMENT_RE.search(fragment_scan):
         return 0.0, "claim contains a broken evidence fragment"
     claim_tokens = _tokens(claim)
     evidence_tokens = _tokens(evidence)
@@ -249,6 +276,92 @@ def validate_fact_contract(data: dict | None, catalog: list[dict]) -> dict:
         })
 
     return _contract_report(accepted, rejected, catalog)
+
+
+def complete_fact_contract(
+    contract: dict,
+    catalog: list[dict],
+    focus_questions: list[str] | None,
+    max_per_focus: int = 2,
+) -> dict:
+    """Add direct evidence for explicit planner facets omitted by the selector."""
+    if not focus_questions or max_per_focus < 1:
+        return contract
+
+    selected_ids = {
+        fact.get("evidence_id")
+        for fact in contract.get("facts", [])
+        if fact.get("evidence_id")
+    }
+    selected_tokens = set().union(*(
+        _tokens(fact.get("evidence", fact.get("claim", "")))
+        for fact in contract.get("facts", [])
+    )) if contract.get("facts") else set()
+    additions = []
+
+    for focus in focus_questions:
+        focus_tokens = _tokens(focus) - _FOCUS_STOPWORDS
+        uncovered = focus_tokens - selected_tokens
+        if not uncovered:
+            continue
+
+        ranked = []
+        wants_values = bool(re.search(
+            r"\b(?:amount|concentration|condition|dose|temperature|time|value|yield)\b",
+            focus,
+            re.IGNORECASE,
+        ))
+        wants_relation = bool(re.search(
+            r"\b(?:how|mechanism|role|relationship|why)\b",
+            focus,
+            re.IGNORECASE,
+        ))
+        for index, item in enumerate(catalog):
+            if item["id"] in selected_ids:
+                continue
+            item_tokens = _tokens(item["text"])
+            overlap = uncovered & item_tokens
+            if not overlap:
+                continue
+            score = 10 * len(overlap) + len(focus_tokens & item_tokens)
+            if wants_values and _numbers(item["text"]):
+                score += 4
+            if wants_relation and re.search(
+                r"\b(?:because|caus\w*|due to|exchange|interact\w*|result\w* from|through|via)\b",
+                item["text"],
+                re.IGNORECASE,
+            ):
+                score += 4
+            ranked.append((score, -index, item, item_tokens))
+
+        added_for_focus = 0
+        for _, _, item, item_tokens in sorted(ranked, reverse=True):
+            if item["id"] in selected_ids:
+                continue
+            additions.append({
+                "claim": item["text"].rstrip(" ."),
+                "source": item["source"],
+                "evidence_id": item["id"],
+                "evidence": item["text"],
+                "coverage": 1.0,
+            })
+            selected_ids.add(item["id"])
+            selected_tokens.update(item_tokens)
+            added_for_focus += 1
+            if added_for_focus >= max_per_focus:
+                break
+
+    if not additions:
+        return contract
+    completed = _contract_report(
+        list(contract.get("facts", [])) + additions,
+        list(contract.get("rejected", [])),
+        catalog,
+    )
+    completed["supplemented_evidence_ids"] = [
+        item["evidence_id"] for item in additions
+    ]
+    return completed
 
 
 def _deduplicate_facts(facts: list[dict]) -> list[dict]:

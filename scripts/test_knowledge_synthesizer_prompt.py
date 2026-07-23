@@ -22,6 +22,8 @@ from rag.comparison_json_validator import (
 from rag.fact_contract import (
     bind_fact_list,
     build_evidence_catalog,
+    complete_fact_contract,
+    fact_contract_prompt,
     validate_fact_contract,
 )
 from rag.knowledge_synthesizer import (
@@ -145,6 +147,71 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         )
         self.assertEqual(len(bound["facts"]), 2)
         self.assertEqual(len(bound["rejected"]), 1)
+
+    def test_fact_contract_keeps_vs_comparison_values_together(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] Combined treatment lowered the IC50 "
+                "(34.2 ± 3.6 nM vs. 99.2 ± 11.0 nM)."
+            ),
+        }])
+
+        self.assertEqual(len(catalog), 1)
+        self.assertIn("vs. 99.2 ± 11.0 nM", catalog[0]["text"])
+        bound = bind_fact_list(
+            "[Fact 1] Combined treatment lowered the IC50 "
+            "(34.2 ± 3.6 nM vs. 99.2 ± 11.0 nM). (Source: PaperA)",
+            catalog,
+        )
+        self.assertEqual(len(bound["facts"]), 1)
+
+    def test_fact_contract_keeps_inline_figure_references(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] JPH203 binds within the substrate-binding pocket (Fig. 1b). "
+                "The hydrophobic tail occupies a defined pocket (Fig. 1c). "
+                "JPH203 resembles previously determined LAT1 inhibitors (Fig. 1b, c)13."
+            ),
+        }])
+        bound = bind_fact_list(
+            "\n".join([
+                "[Fact 1] JPH203 binds within the substrate-binding pocket (Fig. 1b). (Source: PaperA)",
+                "[Fact 2] The hydrophobic tail occupies a defined pocket (Fig. 1c). (Source: PaperA)",
+                "[Fact 3] JPH203 resembles previously determined LAT1 inhibitors (Fig. 1b, c)13 (Source: PaperA)",
+            ]),
+            catalog,
+        )
+
+        self.assertEqual(len(bound["facts"]), 3)
+        self.assertEqual(bound["rejected"], [])
+
+    def test_fact_contract_completes_uncovered_planner_facet(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] The boroxine forms a water-stable hydrogel. "
+                "The boroxine selectively binds fluoride with stronger affinity than phenylboronic acid."
+            ),
+        }])
+        contract = validate_fact_contract({"evidence_ids": ["E1"]}, catalog)
+        completed = complete_fact_contract(
+            contract,
+            catalog,
+            ["What role does fluoride binding play in hydrogel formation?"],
+        )
+
+        self.assertEqual(completed["supplemented_evidence_ids"], ["E2"])
+        self.assertIn("selectively binds fluoride", completed["facts"][1]["claim"])
+
+        prompt = fact_contract_prompt(
+            catalog,
+            "What is the reported structure?",
+            focus_questions=["What role does fluoride binding play?"],
+        )
+        self.assertIn("Planned coverage facets", prompt)
+        self.assertIn("fluoride binding", prompt)
 
     def test_fact_contract_prefers_complete_fact_over_fragments(self):
         catalog = build_evidence_catalog([{
@@ -373,6 +440,48 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         self.assertTrue(comparison["dimensions"]["cost_effectiveness"]["requested"])
         self.assertTrue(comparison["dimensions"]["isotopic_enrichment"]["requested"])
         self.assertIsInstance(comparison["central_tradeoff"], dict)
+
+    def test_comparison_normalizer_rejects_model_requested_drift_and_repairs_route_role(self):
+        raw = json.dumps({
+            "comparison_json": {
+                "source_roles": [{
+                    "source": "TherapyA",
+                    "role": "mechanism",
+                    "claim": "inhibits a transporter",
+                    "evidence": "direct evidence",
+                }],
+                "direct_routes": [{
+                    "source": "TherapyA",
+                    "route_phrase": "transporter inhibition",
+                    "outcome": "reduced uptake",
+                }],
+                "supporting_mechanisms": [{
+                    "source": "TherapyA",
+                    "claim": "The therapy blocks transporter-mediated uptake.",
+                    "evidence": "The therapy reduced transporter-mediated uptake.",
+                }],
+                "dimensions": {
+                    "isotopic_enrichment": {
+                        "requested": True,
+                        "evidence_found": True,
+                        "evidence": [{"source": "TherapyA", "claim": "10B was measured."}],
+                    },
+                },
+                "central_tradeoff": {"claim": "The mechanisms differ.", "sources": ["TherapyA"]},
+            },
+        })
+        normalized = json.loads(_normalize_comparison_json(
+            raw,
+            "How do therapeutic strategies targeting LAT1 differ in mechanism?",
+        ))
+        comparison = normalized["comparison_json"]
+
+        self.assertFalse(comparison["dimensions"]["isotopic_enrichment"]["requested"])
+        self.assertEqual(comparison["source_roles"][0]["role"], "route")
+        self.assertFalse(_comparison_json_validation_errors(
+            json.dumps(normalized),
+            "How do therapeutic strategies targeting LAT1 differ in mechanism?",
+        ))
 
     def test_comparison_json_validator_flags_repairable_errors(self):
         raw = """

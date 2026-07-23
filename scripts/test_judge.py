@@ -222,6 +222,11 @@ class TestStructuredJudge(unittest.TestCase):
             "contradicted",
             ["With the addition of preincubation, the combined IC50 was 34.2 ± 3.6 nM."],
         )
+        cooperative = judge._apply_fact_contract(
+            "The lower combined IC50 shows that preincubation significantly enhances potency.",
+            "covered",
+            ["The preincubation effect synergistically enhances the co-incubation inhibitory effects."],
+        )
 
         self.assertEqual(degradation[0], "missing")
         self.assertIn("alkaline", degradation[1])
@@ -230,6 +235,34 @@ class TestStructuredJudge(unittest.TestCase):
         self.assertIn("stable", stability[1])
         self.assertEqual(standalone[0], "missing")
         self.assertIn("standalone", standalone[1])
+        self.assertEqual(cooperative[0], "covered")
+
+    def test_fact_contract_recovers_only_explicit_positive_relation(self):
+        facts = judge._fact_items([
+            "The lower combined IC50 shows that preincubation significantly enhances JPH203 inhibitory potency."
+        ])
+        numeric_only = "The combined IC50 was 34.2 nM versus 99.2 nM for co-incubation alone."
+        candidate = numeric_only + " " + (
+            "While the co-incubation IC50 was 99.2 nM, the addition of preincubation "
+            "signifi- cantly augmented its inhibition potency (IC50 34.2 nM)."
+        )
+        missing = {"facts": [{
+            "id": "F1", "verdict": "missing", "evidence_ids": [], "reason": "not explicit",
+        }]}
+
+        audit, errors = judge._validate_fact_audit(
+            missing, facts, candidate, stable_protocol=True,
+        )
+        inferred, inferred_errors = judge._validate_fact_audit(
+            missing, facts, numeric_only, stable_protocol=True,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit[0]["verdict"], "covered")
+        self.assertEqual(audit[0]["judge_verdict"], "missing")
+        self.assertEqual(audit[0]["evidence_ids"], ["C2"])
+        self.assertEqual(inferred_errors, [])
+        self.assertEqual(inferred[0]["verdict"], "missing")
 
 
 class TestTranslationJudge(unittest.TestCase):
@@ -257,7 +290,8 @@ class TestTranslationJudge(unittest.TestCase):
         self.assertIn("Taiwan amino-acid names", payload["system"])
         self.assertIn("ENGLISH SOURCE SENTENCES", payload["prompt"])
         self.assertIn("not a one-to-one mapping", payload["prompt"])
-        self.assertEqual(payload["format"], "json")
+        self.assertEqual(payload["format"]["required"], ["errors"])
+        self.assertEqual(payload["format"]["properties"]["errors"]["type"], "array")
 
     def test_translation_fidelity_accepts_retained_english_terms(self):
         client = MagicMock()
@@ -385,6 +419,60 @@ class TestTranslationJudge(unittest.TestCase):
 
         self.assertEqual(errors, [])
         self.assertEqual(len(audit), 1)
+
+    def test_translation_audit_discards_omission_when_named_witness_exists(self):
+        source = (
+            "Boc protection can be removed with TFA within 5-10 min at room temperature "
+            "on a bench scale. The treatment is followed by later-stage cell membrane disruption."
+        )
+        target = (
+            "Boc 保護可在實驗室規模 (bench scale) 下使用 TFA，於室溫 5-10 min 內去除。"
+            "此處理隨後在後期導致細胞膜破裂。"
+        )
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [
+                {
+                    "type": "omission",
+                    "severity": "material",
+                    "source_ids": ["S1"],
+                    "target_ids": ["T1"],
+                    "reason": "The phrase 'in 5-10 min at room temperature on a bench scale' is omitted.",
+                },
+                {
+                    "type": "omission",
+                    "severity": "material",
+                    "source_ids": ["S2"],
+                    "target_ids": ["T1"],
+                    "reason": "The detail 'later-stage cell membrane disruption' is omitted.",
+                },
+            ]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_uses_only_source_side_quoted_witnesses(self):
+        source = "Strategy: `Ono` reports intramolecular boroxine formation [Ono]."
+        target = "策略：【Ono】報導了分子內 boroxine 形成 [Ono]。"
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "omission",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": (
+                    "The source subject 'Ono' is omitted because the target starts "
+                    "directly with '報導了...'."
+                ),
+            }]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
 
 
 if __name__ == "__main__":
