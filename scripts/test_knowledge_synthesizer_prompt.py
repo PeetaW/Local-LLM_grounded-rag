@@ -22,8 +22,10 @@ from rag.comparison_json_validator import (
 from rag.fact_contract import (
     bind_fact_list,
     build_evidence_catalog,
+    build_fact_contract_requirements,
     complete_fact_contract,
     fact_contract_prompt,
+    fact_contract_schema,
     validate_fact_contract,
 )
 from rag.knowledge_synthesizer import (
@@ -213,6 +215,83 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         self.assertIn("Planned coverage facets", prompt)
         self.assertIn("fluoride binding", prompt)
 
+    def test_fact_contract_completes_each_method_requirement(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] The route produced L-BPA in 78% yield. "
+                "Benzaldehyde and glycine methyl ester were reacted in THF at -78 C, "
+                "affording intermediate 4 in 74% e.e. "
+                "The intermediate was converted to its methyl ester with HCl and then "
+                "hydrolyzed with chymotrypsin, yielding optically pure L-BPA."
+            ),
+        }])
+        requirements = build_fact_contract_requirements(
+            "Describe the key steps in the synthesis method.",
+            ["Report exact reactants, conditions, optimized yield, and product outcome."],
+        )
+        contract = validate_fact_contract({"evidence_ids": ["E1"]}, catalog)
+        completed = complete_fact_contract(contract, catalog, requirements)
+
+        claims = " ".join(item["claim"] for item in completed["facts"])
+        self.assertIn("Benzaldehyde and glycine methyl ester", claims)
+        self.assertIn("hydrolyzed with chymotrypsin", claims)
+        self.assertTrue(all(
+            item["covered"]
+            for item in completed["requirement_coverage"]
+            if item["available_count"]
+        ))
+
+        schema = fact_contract_schema(catalog, requirements)
+        self.assertIn("requirement_evidence", schema["properties"])
+        self.assertEqual(
+            schema["properties"]["requirement_evidence"]["required"],
+            [item["id"] for item in requirements],
+        )
+
+    def test_retrieval_only_control_facet_does_not_expand_answer_contract(self):
+        requirements = build_fact_contract_requirements(
+            "Describe the key steps in the synthesis method.",
+            ["Report exact conditions, outcomes, and control or comparison outcomes."],
+        )
+
+        self.assertNotIn("control", {item["kind"] for item in requirements})
+
+    def test_fact_contract_relation_requirements_keep_both_mechanism_witnesses(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] The boroxine forms a water-stable hydrogel. "
+                "Fluoride exchange breaks the dynamic boroxine cross-links and collapses the gel. "
+                "Adding THF reconstructs the boroxine network and reforms the hydrogel."
+            ),
+        }])
+        requirements = build_fact_contract_requirements(
+            "How does fluoride binding control hydrogel collapse and reformation?"
+        )
+        contract = validate_fact_contract({"evidence_ids": ["E1"]}, catalog)
+        completed = complete_fact_contract(contract, catalog, requirements)
+        claims = " ".join(item["claim"] for item in completed["facts"])
+
+        self.assertIn("collapses the gel", claims)
+        self.assertIn("reforms the hydrogel", claims)
+
+    def test_fact_contract_keeps_unit_clauses_and_rejects_catalog_fragments(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] The reaction furnished 2.83 g. 10.0 mmol of product after "
+                "30 min. and was cooled to room temperature. "
+                "Supporting details are shown in Supplementary Fig. "
+                "Department of Chemistry, Example University."
+            ),
+        }])
+        texts = [item["text"] for item in catalog]
+
+        self.assertTrue(any("2.83 g. 10.0 mmol" in text and "30 min. and" in text for text in texts))
+        self.assertFalse(any("Supplementary Fig" in text for text in texts))
+        self.assertFalse(any("Department of Chemistry" in text for text in texts))
+
     def test_fact_contract_prefers_complete_fact_over_fragments(self):
         catalog = build_evidence_catalog([{
             "source": "PaperA",
@@ -239,7 +318,10 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
     def test_synthesizer_structured_contract_is_ab_switch(self):
         cfg.STRUCTURED_FACT_CONTRACT_ENABLED = True
         synth = KnowledgeSynthesizer()
-        synth._generate = MagicMock(return_value=json.dumps({"evidence_ids": ["E1", "E2"]}))
+        synth._generate = MagicMock(return_value=json.dumps({
+            "evidence_ids": ["E1", "E2"],
+            "requirement_evidence": {"R1": ["E1", "E2"]},
+        }))
         artifacts = {}
 
         result = synth.synthesize(
@@ -258,6 +340,7 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         self.assertIn("[Fact 1] Preincubation alone gave an IC50 of 193 nM", result)
         self.assertIn("[Fact 2] Combined treatment lowered the IC50 to 34.2 nM", result)
         self.assertIn("evidence_ids", synth._generate.call_args.kwargs["format_schema"]["properties"])
+        self.assertIn("requirement_evidence", synth._generate.call_args.kwargs["format_schema"]["properties"])
         self.assertIn('"schema": "fact_contract_v1"', artifacts["stage3_fact_contract"])
 
     def test_comparison_schema_is_ab_switch(self):

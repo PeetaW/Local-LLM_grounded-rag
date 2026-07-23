@@ -76,6 +76,7 @@ def init_llm_and_embedding():
         timeout=300.0,           # 規劃任務不需要長 timeout
         http_client=http_client,
         context_window=16384,
+        temperature=0.0,
     )
 
     Settings.embed_model = OllamaEmbedding(

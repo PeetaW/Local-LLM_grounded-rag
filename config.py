@@ -156,6 +156,8 @@ STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = True
 STAGE2_DIVERSE_EVIDENCE_ENABLED = False
 # A/B：方法/實驗 protocol 額外檢索 optimized conditions、yield 與 control outcomes。
 METHOD_RETRIEVAL_FACET_GUARD_ENABLED = True
+# A/B：療效/支持數據題額外檢索 survival、tumor burden、accumulation/retention 等量化結果。
+OUTCOME_RETRIEVAL_FACET_GUARD_ENABLED = True
 STAGE2_EVIDENCE_SNIPPETS_PER_TASK = 2
 COMPARISON_EVIDENCE_SNIPPETS_PER_TASK = 4
 

@@ -6,6 +6,7 @@ import requests
 import config as cfg
 from rag.fact_contract import (
     build_evidence_catalog,
+    build_fact_contract_requirements,
     complete_fact_contract,
     fact_contract_prompt,
     fact_contract_schema,
@@ -62,8 +63,8 @@ def _system_prompt() -> str:
 
 
 _FACT_CONTRACT_SYSTEM_PROMPT = (
-    "You select direct academic evidence IDs using the required JSON schema. "
-    "Never infer relationships or return anything except the selected IDs."
+    "You select direct academic evidence IDs grouped by the required atomic coverage schema. "
+    "Never infer relationships or return anything except the required JSON."
 )
 
 
@@ -605,12 +606,20 @@ class KnowledgeSynthesizer:
             if getattr(cfg, "FACT_CONTRACT_PLANNER_FOCUS_ENABLED", False)
             else None
         )
+        contract_requirements = (
+            build_fact_contract_requirements(
+                query,
+                [*(contract_focus or []), recovery_hint],
+            )
+            if fact_contract_mode else []
+        )
         user_prompt = (
             fact_contract_prompt(
                 contract_catalog,
                 query,
                 recovery_hint=recovery_hint,
                 focus_questions=contract_focus,
+                requirements=contract_requirements,
             )
             if fact_contract_mode
             else _build_user_prompt(formatted, query, recovery_hint=recovery_hint)
@@ -665,18 +674,25 @@ class KnowledgeSynthesizer:
                 "fact_contract" if fact_contract_mode else (
                     "comparison_json" if comparison_json_mode else "fact_list"
                 ),
-                format_schema=fact_contract_schema(contract_catalog) if fact_contract_mode else None,
+                format_schema=(
+                    fact_contract_schema(contract_catalog, contract_requirements)
+                    if fact_contract_mode else None
+                ),
                 system_prompt=_FACT_CONTRACT_SYSTEM_PROMPT if fact_contract_mode else None,
             )
             if on_artifact:
                 on_artifact("stage3_raw_output", result)
             if fact_contract_mode:
-                contract = validate_fact_contract(parse_fact_contract(result), contract_catalog)
+                contract = validate_fact_contract(
+                    parse_fact_contract(result),
+                    contract_catalog,
+                    contract_requirements,
+                )
                 if getattr(cfg, "FACT_CONTRACT_FACET_COMPLETION_ENABLED", False):
                     contract = complete_fact_contract(
                         contract,
                         contract_catalog,
-                        [query, *(contract_focus or []), recovery_hint],
+                        contract_requirements,
                     )
                 if on_artifact:
                     on_artifact("stage3_fact_contract", json.dumps(contract, ensure_ascii=False, indent=2))

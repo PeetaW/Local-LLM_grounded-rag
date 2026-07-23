@@ -90,7 +90,7 @@ from rag.query_planning import (
 from rag.query_retrieval import (
     is_empty_result, extract_paper_name,
     build_subquery_tasks, run_subqueries_parallel, _nodes_to_evidence_block,
-    _clip_evidence_snippet,
+    _clip_evidence_snippet, _query_aware_window,
 )
 from rag.query_grounding_flow import (
     _extract_direct_citation_section,
@@ -380,6 +380,34 @@ class TestSelectRelevantPapers(unittest.TestCase):
                 result = select_relevant_papers("question", papers)
         self.assertEqual(result, ["paper_b"])
 
+    def test_comparison_selection_drops_redundant_supplement(self):
+        parent = "LAT1 ChemComm 2026"
+        supplement = "LAT1 ChemComm 2026SI"
+        other = "s41421-024-00697-6"
+        papers = [parent, supplement, other]
+        meta = {
+            paper: {"short_desc": "LAT1 transporter evidence", "keywords": ["LAT1"]}
+            for paper in papers
+        }
+        captured = {}
+
+        def complete(prompt):
+            captured["prompt"] = prompt
+            return self._llm_resp(json.dumps([parent, other]))
+
+        with (
+            patch("rag.metadata_manager.load_metadata", return_value=meta),
+            patch("rag.llm_client.planning_llm") as mock_llm,
+        ):
+            mock_llm.complete.side_effect = complete
+            result = select_relevant_papers(
+                "Compare LAT1 with other transporters across the literature.",
+                papers,
+            )
+
+        self.assertEqual(result, [parent, other])
+        self.assertNotIn(f"- {supplement}：", captured["prompt"])
+
 
 class TestPlanSubQuestions(unittest.TestCase):
     def _llm_resp(self, text):
@@ -456,6 +484,30 @@ class TestPlanSubQuestions(unittest.TestCase):
         self.assertEqual(result[1]["paper"], "paper_a")
         self.assertIn("optimized yield", result[1]["sub_q"])
         self.assertIn("control or comparison outcomes", result[1]["sub_q"])
+
+    def test_therapeutic_effect_gets_quantitative_outcome_facet(self):
+        papers = ["paper_a"]
+        meta = {"paper_a": {"short_desc": "desc", "main_topic": "topic"}}
+        raw = json.dumps([{
+            "paper": "paper_a",
+            "sub_q": "What therapeutic effect was observed?",
+        }])
+
+        with (
+            patch.object(cfg, "OUTCOME_RETRIEVAL_FACET_GUARD_ENABLED", True),
+            patch("rag.metadata_manager.load_metadata", return_value=meta),
+            patch("rag.llm_client.planning_llm") as mock_llm,
+        ):
+            mock_llm.model = "planner"
+            mock_llm.complete.return_value = self._llm_resp(raw)
+            result = plan_sub_questions(
+                "What therapeutic effect and supporting data were reported?",
+                papers,
+            )
+
+        self.assertEqual(len(result), 2)
+        self.assertIn("survival time", result[1]["sub_q"])
+        self.assertIn("treatment and control groups", result[1]["sub_q"])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -680,6 +732,24 @@ class TestRunSubqueriesParallel(unittest.TestCase):
             self.assertNotIn("[Snippet 3]", block)
         finally:
             cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED = old
+
+    def test_query_aware_value_window_carries_preceding_numeric_result(self):
+        text = (
+            "Introductory background without reported values. " * 15
+            + "Under solvent-free conditions, 0.2 equivalents of catalyst for 60 min "
+            "gave an optimized yield of 95%. "
+            + "Encouraged by this outcome, the optimized reaction conditions, catalyst loading, "
+            "and reaction time were applied across a broad substrate scope. "
+            + "Additional substrate descriptions followed. " * 15
+        )
+        window = _query_aware_window(
+            text,
+            "What optimized reaction conditions, catalyst loading, reaction time, and yield were reported?",
+            240,
+        )
+
+        self.assertIn("optimized yield of 95%", window)
+        self.assertIn("optimized reaction conditions", window)
 
     def test_query_aware_evidence_uses_a_complementary_second_snippet(self):
         old_query_aware = cfg.STAGE2_QUERY_AWARE_EVIDENCE_ENABLED
@@ -1641,19 +1711,20 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertIn("chymotrypsin", answer)
         self.assertNotIn("commercially available", answer)
         self.assertNotIn("79%", answer)
-        self.assertIn("conditions", audit["requirements"])
+        self.assertNotIn("conditions", audit["requirements"])
         self.assertEqual(audit["missing_requirements"], [])
         self.assertTrue(all(claim.startswith("- ") and "[bbb0683]" in claim for claim in claims))
 
-    def test_method_fact_renderer_falls_back_when_required_condition_is_missing(self):
+    def test_method_fact_renderer_ignores_retrieval_only_condition_facet(self):
         answer, claims, audit = pipeline_module._render_method_fact_list(
             "[Fact 1] Compound A was synthesized by a method that gave product B. (Source: PaperA)",
             "What method is used and what are its key steps?",
             [{"paper": "PaperA", "sub_q": "Report the experimental conditions and temperature."}],
         )
 
-        self.assertEqual((answer, claims), ("", []))
-        self.assertEqual(audit["missing_requirements"], ["conditions"])
+        self.assertIn("Compound A was synthesized", answer)
+        self.assertTrue(claims)
+        self.assertEqual(audit["missing_requirements"], [])
 
     def test_stage4_validator_flags_bad_comparison_answer(self):
         old = cfg.STAGE4_ANSWER_VALIDATION_ENABLED
@@ -1730,7 +1801,7 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             {"source":"FormulationA","role":"background"}
           ],
           "direct_routes":[{"source":"bbb0683","route_phrase":"enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis","outcome":"optically pure L-BPA at high e.e."}],
-          "review_comparison_sources":[{"source":"CMDC-20-e202500059","claim":"reviews scalability, cost-effectiveness, and safety"}],
+          "review_comparison_sources":[{"source":"CMDC-20-e202500059","claim":"L-BPA synthesis has been approached through multiple routes"}],
           "dimensions":{
             "isotopic_enrichment":{"requested":true,"evidence_found":true,"evidence":[{"source":"CMDC-20-e202500059","claim":"10B-enriched material is required."}]},
             "scalability":{"requested":true,"evidence_found":true,"evidence":[
@@ -1753,10 +1824,9 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertIn("optically pure L-BPA at high e.e", answer)
         self.assertIn("CMDC-20-e202500059", answer)
         self.assertIn(
-            "reports that the synthesis of the target compound has been approached through multiple routes",
+            "reports that L-BPA synthesis has been approached through multiple routes",
             answer,
         )
-        self.assertNotIn("reviews scalability, cost-effectiveness, and safety", answer)
         self.assertIn("oxidant on scale", answer)
         self.assertIn("Gram-scale deprotection", answer)
         self.assertIn("The hybrid route uses few reaction steps", answer)
@@ -1870,6 +1940,7 @@ class TestExecuteStructuredQuery(unittest.TestCase):
           }],
           "review_comparison_sources":[{
             "source":"CMDC-20-e202500059",
+            "claim":"L-BPA synthesis has been approached through multiple routes.",
             "dimensions":["isotopic enrichment","scalability","cost-effectiveness","safety"]
           }],
           "dimensions":{
@@ -2248,6 +2319,8 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertEqual(artifacts["stage6_grounded_answer"], "English draft answer.")
         self.assertEqual(artifacts["answer_for_judge"], "English draft answer.")
         self.assertEqual(artifacts["stage7_translated_answer"], "繁中最終答案")
+        self.assertEqual(artifacts["planning_detected_paper"], "paper_a")
+        self.assertEqual(artifacts["planning_selected_papers"], ["paper_a"])
         self.assertEqual(result, "繁中最終答案")
 
     @patch("rag.query_pipeline.translate_to_traditional_chinese")

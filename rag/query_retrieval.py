@@ -136,8 +136,14 @@ _QUERY_STOPWORDS = {
     "their", "these", "they", "this", "under", "used", "using", "what", "which",
     "with",
 }
-_VALUE_QUERY_MARKERS = ("value", "values", "data", "parameter", "condition", "dose", "yield")
-_VALUE_EVIDENCE_MARKERS = ("ic50", "km", "vmax", "mol", "mm", "nm", "μm", "°c", "%", "ph")
+_VALUE_QUERY_MARKERS = (
+    "value", "values", "data", "parameter", "condition", "dose", "yield",
+    "quantitative", "outcome", "efficacy", "survival",
+)
+_VALUE_EVIDENCE_MARKERS = (
+    "ic50", "km", "vmax", "mol", "mm", "nm", "μm", "°c", "%", "ph",
+    "day", "survival", "tumor", "accumulation", "retention",
+)
 _MECHANISM_QUERY_MARKERS = ("mechanism", "bind", "binding", "inhibit", "role", "how")
 _MECHANISM_EVIDENCE_MARKERS = (
     "bind", "bond", "interact", "inhibit", "occup", "convert", "exchange", "cross-link",
@@ -308,7 +314,28 @@ def _query_aware_window(text: str, query_text: str, limit: int) -> str:
     if not positions:
         return text[:limit]
     windows = [_sentence_window(text, position, limit) for position in sorted(positions)]
-    return max(windows, key=lambda window: (_query_window_score(window, query_text), len(window)))
+    best = max(windows, key=lambda window: (_query_window_score(window, query_text), len(window)))
+    if not any(marker in query_lower for marker in _VALUE_QUERY_MARKERS):
+        return best
+
+    start = text.find(best)
+    prefix = text[:start].rstrip() if start > 0 else ""
+    if not prefix:
+        return best
+    previous_boundary = max(
+        prefix.rfind(marker, 0, max(0, len(prefix) - 1))
+        for marker in (". ", "? ", "! ")
+    )
+    previous = prefix[previous_boundary + 2 if previous_boundary >= 0 else 0:].strip()
+    if (
+        len(previous) <= 400
+        and re.search(r"\d", previous)
+        and any(marker in previous.lower() for marker in (
+            *_VALUE_EVIDENCE_MARKERS, "yield", "afforded", "furnished", "resulted",
+        ))
+    ):
+        return f"{previous} {best}".strip()
+    return best
 
 
 def _clip_evidence_snippet(text: str, query_text: str, limit: int = 900) -> str:

@@ -21,8 +21,37 @@ _METHOD_QUERY_HINTS = (
 )
 _COMPARISON_QUERY_HINTS = (
     "compare", "comparison", "across the papers", "different routes",
-    "scalability", "cost-effectiveness", "trade-off",
+    "different approaches", "across the literature", "scalability",
+    "cost-effectiveness", "trade-off",
 )
+_OUTCOME_QUERY_HINTS = (
+    "therapeutic effect", "therapeutic efficacy", "efficacy", "supporting data",
+    "treatment outcome", "antitumor", "anti-tumor", "survival",
+)
+
+
+def _is_comparison_query(question: str) -> bool:
+    lower = (question or "").lower()
+    return any(term in lower for term in _COMPARISON_QUERY_HINTS)
+
+
+def _without_redundant_supplements(question: str, paper_names: list) -> list:
+    """Keep a parent paper instead of spending a comparison slot on its SI duplicate."""
+    if not _is_comparison_query(question):
+        return paper_names
+    known = {name.casefold() for name in paper_names}
+    kept = []
+    for name in paper_names:
+        parent = re.sub(
+            r"(?:[\s_-]?(?:supp(?:lementary)?|si))$",
+            "",
+            name,
+            flags=re.IGNORECASE,
+        ).rstrip()
+        if parent != name and parent.casefold() in known:
+            continue
+        kept.append(name)
+    return kept
 
 
 def _add_method_retrieval_facet(
@@ -58,6 +87,44 @@ def _add_method_retrieval_facet(
         "For the method or protocol in the user question, what exact reactants or reagents, "
         "solvent, catalyst loading, temperature, reaction time, optimized yield, and "
         "control or comparison outcomes are reported?"
+    )
+    return [*sub_questions, {"paper": paper, "sub_q": facet}]
+
+
+def _add_outcome_retrieval_facet(
+    question: str,
+    paper_names: list,
+    sub_questions: list[dict],
+) -> list[dict]:
+    lower = (question or "").lower()
+    if (
+        not getattr(cfg, "OUTCOME_RETRIEVAL_FACET_GUARD_ENABLED", False)
+        or not any(term in lower for term in _OUTCOME_QUERY_HINTS)
+    ):
+        return sub_questions
+
+    existing = " ".join(
+        str(item.get("sub_q", "")).lower()
+        for item in sub_questions
+        if isinstance(item, dict)
+    )
+    if "survival" in existing and any(
+        term in existing for term in ("tumor", "accumulation", "retention")
+    ):
+        return sub_questions
+
+    specific = list(dict.fromkeys(
+        str(item.get("paper", "")).strip()
+        for item in sub_questions
+        if isinstance(item, dict) and str(item.get("paper", "")).strip() not in {"", "ALL"}
+    ))
+    paper = specific[0] if len(specific) == 1 else (
+        paper_names[0] if len(paper_names) == 1 else "ALL"
+    )
+    facet = (
+        "What quantitative treatment outcomes are reported, including survival time, "
+        "tumor burden, accumulation or retention, and comparisons between treatment "
+        "and control groups?"
     )
     return [*sub_questions, {"paper": paper, "sub_q": facet}]
 
@@ -147,11 +214,12 @@ def select_relevant_papers(question: str, paper_names: list) -> list:
     from rag.llm_client import planning_llm
     from rag.metadata_manager import load_metadata
 
+    candidates = _without_redundant_supplements(question, paper_names)
     all_metadata = load_metadata()
     paper_list_str = "\n".join(
         f"- {p}：{all_metadata.get(p, {}).get('short_desc', '（無描述）')}"
         f"（關鍵字：{', '.join(all_metadata.get(p, {}).get('keywords', [])[:4])}）"
-        for p in paper_names
+        for p in candidates
     )
 
     prompt = f"""以下是論文清單，每篇附有簡短描述：
@@ -176,21 +244,21 @@ def select_relevant_papers(question: str, paper_names: list) -> list:
             selected = json.loads(raw)
         except json.JSONDecodeError as je:
             print(f"  ⚠️  論文篩選 JSON 解析失敗（{je}），退回查詢全部論文")
-            return paper_names
+            return candidates
 
-        valid = [p for p in selected if p in paper_names]
+        valid = [p for p in selected if p in candidates] if isinstance(selected, list) else []
         if valid:
-            print(f"  📌 篩選出 {len(valid)} 篇相關論文（共 {len(paper_names)} 篇）：")
+            print(f"  📌 篩選出 {len(valid)} 篇相關論文（共 {len(candidates)} 篇）：")
             for p in valid:
                 print(f"     - {p[:60]}")
             return valid
         else:
             print(f"  ⚠️  論文篩選結果為空，退回查詢全部論文")
-            return paper_names
+            return candidates
 
     except Exception as e:
         print(f"  ⚠️  論文篩選失敗（{e}），退回查詢全部論文")
-        return paper_names
+        return candidates
 
 
 def plan_sub_questions(question: str, paper_names: list) -> list:
@@ -275,6 +343,11 @@ def plan_sub_questions(question: str, paper_names: list) -> list:
                 paper_names,
                 deduped,
             )
+            sub_questions = _add_outcome_retrieval_facet(
+                question,
+                paper_names,
+                sub_questions,
+            )
 
             print(f"  → 子問題內容：{[sq.get('sub_q', '')[:200] for sq in sub_questions]}")
             return sub_questions
@@ -284,8 +357,9 @@ def plan_sub_questions(question: str, paper_names: list) -> list:
                 print("       重試中...")
 
     print("       改為對所有論文問同一問題")
-    return _add_method_retrieval_facet(
+    sub_questions = _add_method_retrieval_facet(
         question,
         paper_names,
         [{"paper": "ALL", "sub_q": question}],
     )
+    return _add_outcome_retrieval_facet(question, paper_names, sub_questions)

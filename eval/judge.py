@@ -164,7 +164,7 @@ def _contract_numbers(text: str) -> set[str]:
     plain = _without_citations(text)
     plain = re.sub(r"\\(?:text|mathrm)\{([^{}]*)\}", r"\1", plain)
     plain = re.sub(r"(?<=[A-Za-z])_\{?(\d+)\}?", r"\1", plain)
-    values = re.findall(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?", plain)
+    values = re.findall(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?(?![A-Za-z0-9])", plain)
     return {value.rstrip("0").rstrip(".") if "." in value else value for value in values}
 
 
@@ -640,6 +640,7 @@ _TRANSLATION_PHRASE_EQUIVALENTS = (
     ("room temperature", ("room temperature", "室溫")),
     ("water-stable", ("water-stable", "water stable", "水穩定", "耐水")),
     ("later-stage", ("later-stage", "later stage", "後期", "後階段")),
+    ("supplementary fig", ("supplementary fig", "supplementary figure", "補充圖")),
     (
         "cell membrane disruption",
         ("cell membrane disruption", "細胞膜破裂", "細胞膜破壞", "細胞膜受損"),
@@ -678,6 +679,17 @@ def _translation_structural_omission_false_positive(kind: str, reason: str) -> b
     )
 
 
+def _translation_citation_omission_false_positive(kind: str, reason: str) -> bool:
+    return bool(
+        kind == "omission"
+        and re.search(
+            r"\b(?:citation|reference|source label|source attribution|paper attribution)\b",
+            reason,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _translation_omission_witness_present(
     kind: str,
     reason: str,
@@ -705,6 +717,16 @@ def _translation_omission_witness_present(
         phrase_text = _normalized(phrase)
         if phrase_text in target_text:
             continue
+        if phrase_text.startswith("compared to"):
+            entities = re.findall(
+                r"[A-Za-z][A-Za-z0-9,+-]*\d[A-Za-z0-9,+-]*",
+                phrase,
+            )
+            if (
+                any(alias in target_text for alias in ("compared to", "相比", "相較"))
+                and all(_normalized(entity).strip(" ,+") in target_text for entity in entities)
+            ):
+                continue
         groups = [
             aliases for key, aliases in _TRANSLATION_PHRASE_EQUIVALENTS
             if key in phrase_text
@@ -755,6 +777,8 @@ def _validate_translation_audit(data: dict | None, source: str, target: str) -> 
         target_text = " ".join(target_lookup[value] for value in target_ids)
         reason = str(row.get("reason", "")).strip()[:300]
         if _translation_term_false_positive(kind, reason, source_text, target):
+            continue
+        if _translation_citation_omission_false_positive(kind, reason):
             continue
         if _translation_structural_omission_false_positive(kind, reason):
             continue

@@ -186,6 +186,8 @@ def _write_debug_artifacts(label: str, qid: str, question: str, artifacts: dict,
     items = {
         "question": question,
         "status_log": "\n".join(status_lines),
+        "planning_detected_paper": artifacts.get("planning_detected_paper"),
+        "planning_selected_papers": artifacts.get("planning_selected_papers"),
         "stage2_initial_evidence": artifacts.get("stage2_initial_evidence"),
         "stage2_evidence": artifacts.get("stage2_evidence"),
         "stage2_recovery_evidence": artifacts.get("stage2_recovery_evidence"),
@@ -400,9 +402,13 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
 
         print(f"\n{'='*70}\n[{i}/{len(questions)}] {qid}  ({q.get('type','?')})\n{qtext}\n{'='*70}")
 
-        # 1) 選擇層探測（獨立量測，不影響主 pipeline）
-        selected, detected = _probe_selection(qtext, all_names)
-        sel_recall = metrics.paper_selection_recall(selected, gold_papers)
+        # --retrieval-only 沒有主 pipeline，才獨立執行選文探測。
+        # 完整流程直接採用 pipeline 實際使用的選文，避免同一題由 LLM 選兩次。
+        if retrieval_only:
+            selected, detected = _probe_selection(qtext, all_names)
+            sel_recall = metrics.paper_selection_recall(selected, gold_papers)
+        else:
+            selected, detected, sel_recall = [], None, None
 
         # 2) 檢索層探測（只在有 gold_spans 時做）
         candidate_recall = None
@@ -425,6 +431,10 @@ def run(label: str, limit: int = None, retrieval_only: bool = False, ids: str = 
             except Exception as e:
                 answer = f"[PIPELINE ERROR] {e}"
             wall_s = round(time.time() - t0, 1)
+            actual_selected = artifacts.get("planning_selected_papers")
+            selected = actual_selected if isinstance(actual_selected, list) else []
+            detected = artifacts.get("planning_detected_paper")
+            sel_recall = metrics.paper_selection_recall(selected, gold_papers)
 
         stage2_recall = None
         if gold_spans and not retrieval_only and artifacts.get("stage2_evidence"):

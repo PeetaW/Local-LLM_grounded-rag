@@ -358,10 +358,8 @@ def _method_fact_roles(claim: str) -> set[str]:
 
 
 def _method_requirements(question: str, sub_questions: list[dict]) -> set[str]:
-    plan_text = " ".join(
-        [question or ""]
-        + [str(item.get("sub_q", "")) for item in (sub_questions or []) if isinstance(item, dict)]
-    ).lower()
+    # Retrieval facets broaden evidence recall; only the user's question controls answer scope.
+    plan_text = (question or "").lower()
     requirements = {"overview", "steps", "outcome"}
     if any(term in plan_text for term in (
         "experimental condition", "reaction condition", "temperature", "solvent",
@@ -626,17 +624,15 @@ def _stage4_empty_answer_fallback(
             continue
         source = str(review.get("source", "")).strip()
         if source and source not in background_sources:
+            claim = str(review.get("claim", "")).strip().rstrip(".")
+            if claim:
+                lines.append(f"- Review/comparison source: `{source}` reports that {claim} [{source}].")
             dimensions = [
                 str(value).strip().replace("_", "-")
                 for value in review.get("dimensions", [])
                 if str(value).strip()
             ] if isinstance(review.get("dimensions"), list) else []
-            if is_synthesis_comparison:
-                claim = f"the synthesis of {target_compound} has been approached through multiple routes"
-            else:
-                claim = f"multiple therapeutic strategies involve {target_compound}"
-            lines.append(f"- Review/comparison source: `{source}` reports that {claim} [{source}].")
-            if concise and dimensions:
+            if is_synthesis_comparison and concise and dimensions:
                 review_dimensions = [
                     value for value in dimensions if "isotop" not in value.lower()
                 ] or dimensions
@@ -964,6 +960,10 @@ def execute_structured_query(
         prefiltered = _keyword_prefilter(question, all_paper_names)
         paper_names = select_relevant_papers(question, prefiltered)
         paper_engines_to_use = {k: v for k, v in paper_engines.items() if k in paper_names}
+
+    if on_artifact:
+        on_artifact("planning_detected_paper", detected)
+        on_artifact("planning_selected_papers", list(paper_names))
 
     _status("\n  📋 拆解子問題中...")
     sub_questions = plan_sub_questions(question, paper_names)

@@ -181,9 +181,11 @@ class TestStructuredJudge(unittest.TestCase):
     def test_contract_numbers_ignore_identifier_digits_and_latex_parameter_subscripts(self):
         plain = "JPH203 preincubation alone had an IC50 of 193 +/- 50 nM."
         latex = r"JPH203 preincubation alone had an $\text{IC}_{50}$ of $193 \pm 50$ nM."
+        identifiers = "JPH203 binds LAT1-4F2hc, while 10B is the enriched isotope."
 
         self.assertEqual(judge._contract_numbers(plain), {"193", "50"})
         self.assertEqual(judge._contract_numbers(latex), {"193", "50"})
+        self.assertEqual(judge._contract_numbers(identifiers), set())
 
     def test_fact_contract_requires_same_scope_for_contradiction(self):
         facts = judge._fact_items([
@@ -452,6 +454,48 @@ class TestTranslationJudge(unittest.TestCase):
 
         self.assertEqual(errors, [])
         self.assertEqual(audit, [])
+
+    def test_translation_audit_ignores_citation_only_omissions(self):
+        source = "The major cost comes from isotope starting material [ReviewA]."
+        target = "主要成本來自同位素起始原料。"
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "omission",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": "The citation reference '[ReviewA]' is omitted from the target.",
+            }]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_recognizes_comparison_and_supplementary_figure(self):
+        source = "LAT1 is the primary transporter compared to ATB0,+ and LAT2."
+        target = "與 ATB0,+ 和 LAT2 相比，LAT1 是主要轉運蛋白。"
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "omission",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": "The phrase 'compared to ATB0,+ and LAT2' is omitted.",
+            }]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+        self.assertTrue(judge._translation_omission_witness_present(
+            "omission",
+            "The phrase 'Supplementary Fig' is omitted.",
+            "The result appears in Supplementary Fig.",
+            "結果顯示於補充圖。",
+        ))
 
     def test_translation_audit_uses_only_source_side_quoted_witnesses(self):
         source = "Strategy: `Ono` reports intramolecular boroxine formation [Ono]."
