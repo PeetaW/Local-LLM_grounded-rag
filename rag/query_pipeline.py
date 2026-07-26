@@ -364,7 +364,7 @@ def _method_requirements(question: str, sub_questions: list[dict]) -> set[str]:
     if any(term in plan_text for term in (
         "experimental condition", "reaction condition", "temperature", "solvent",
         "concentration", "reaction time", "stirring", "pressure", "ph",
-    )):
+    )) or re.search(r"\bkey steps?\b", plan_text):
         requirements.add("conditions")
     return requirements
 
@@ -540,6 +540,13 @@ def _atomic_dimension_claims(claim: str) -> list[str]:
     return parts if len(parts) > 1 and all(len(value.split()) >= 4 for value in parts) else [claim]
 
 
+_SPECULATIVE_MECHANISM_RE = re.compile(
+    r"\b(?:hypothesi[sz](?:e|ed)|possible mechanisms?|might|may|could|"
+    r"potentially|we speculate|it is possible)\b",
+    re.IGNORECASE,
+)
+
+
 def _stage4_empty_answer_fallback(
     knowledge_base: str,
     atomic_only: bool = False,
@@ -566,6 +573,9 @@ def _stage4_empty_answer_fallback(
         "step-by-step", "numerical",
     ))
     concise = bool(question) and not detail_requested
+    speculative_requested = any(term in q_lower for term in (
+        "hypothesis", "hypotheses", "possible mechanism", "speculat",
+    ))
     source_roles = comparison.get("source_roles") if isinstance(comparison.get("source_roles"), list) else []
     background_sources = {
         str(item.get("source", "")).strip()
@@ -611,12 +621,53 @@ def _stage4_empty_answer_fallback(
             label = "Route" if is_synthesis_comparison else "Strategy"
             lines.append(f"- {label}: `{source}` reports {phrase}{result} [{source}].")
 
+    supporting_by_source = {}
     for mechanism in comparison.get("supporting_mechanisms", []):
         if not isinstance(mechanism, dict):
             continue
         source = str(mechanism.get("source", "")).strip()
         claim = str(mechanism.get("claim", "")).strip().rstrip(".")
-        if source and claim and source not in background_sources:
+        if (
+            not source
+            or not claim
+            or source in background_sources
+            or (not speculative_requested and _SPECULATIVE_MECHANISM_RE.search(claim))
+            or (concise and source in supporting_by_source)
+        ):
+            continue
+        lines.append(f"- Mechanism: `{source}` reports {claim} [{source}].")
+        supporting_by_source.setdefault(source, []).append(claim)
+    for role in source_roles:
+        if not isinstance(role, dict) or str(role.get("role", "")).strip().lower() != "mechanism":
+            continue
+        source = str(role.get("source", "")).strip()
+        role_claim = str(role.get("claim", "")).strip().rstrip(".")
+        claim = role_claim
+        evidence = str(role.get("evidence", "")).strip()
+        if evidence:
+            atomic_evidence = re.split(
+                r"\s*\.{3,}\s*", evidence, maxsplit=1
+            )[0].strip().rstrip(".")
+            if len(atomic_evidence.split()) >= 4:
+                claim = atomic_evidence
+        if not speculative_requested and _SPECULATIVE_MECHANISM_RE.search(claim):
+            continue
+        claim_token_sets = [
+            set(re.findall(r"[a-z][a-z0-9-]+", value.lower()))
+            for value in {claim, role_claim}
+            if value
+        ]
+        duplicates = False
+        for other in supporting_by_source.get(source, []):
+            other_tokens = set(re.findall(r"[a-z][a-z0-9-]+", other.lower()))
+            if any(
+                len(tokens & other_tokens) / max(1, min(len(tokens), len(other_tokens)))
+                >= 0.5
+                for tokens in claim_token_sets
+            ):
+                duplicates = True
+                break
+        if source and claim and source not in background_sources and not duplicates:
             lines.append(f"- Mechanism: `{source}` reports {claim} [{source}].")
 
     for review in comparison.get("review_comparison_sources", []):
@@ -625,6 +676,13 @@ def _stage4_empty_answer_fallback(
         source = str(review.get("source", "")).strip()
         if source and source not in background_sources:
             claim = str(review.get("claim", "")).strip().rstrip(".")
+            evidence = str(review.get("evidence", "")).strip()
+            if evidence:
+                atomic_evidence = re.split(
+                    r"\s*\.{3,}\s*", evidence, maxsplit=1
+                )[0].strip().rstrip(".")
+                if len(atomic_evidence.split()) >= 4:
+                    claim = atomic_evidence
             if claim:
                 lines.append(f"- Review/comparison source: `{source}` reports that {claim} [{source}].")
             dimensions = [

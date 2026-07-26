@@ -509,6 +509,30 @@ class TestPlanSubQuestions(unittest.TestCase):
         self.assertIn("survival time", result[1]["sub_q"])
         self.assertIn("treatment and control groups", result[1]["sub_q"])
 
+    def test_water_stable_query_gets_quantitative_stability_facet(self):
+        papers = ["paper_a"]
+        meta = {"paper_a": {"short_desc": "desc", "main_topic": "topic"}}
+        raw = json.dumps([{
+            "paper": "paper_a",
+            "sub_q": "How do dynamic bonds support fluoride binding and hydrogel formation?",
+        }])
+
+        with (
+            patch.object(cfg, "OUTCOME_RETRIEVAL_FACET_GUARD_ENABLED", True),
+            patch("rag.metadata_manager.load_metadata", return_value=meta),
+            patch("rag.llm_client.planning_llm") as mock_llm,
+        ):
+            mock_llm.model = "planner"
+            mock_llm.complete.return_value = self._llm_resp(raw)
+            result = plan_sub_questions(
+                "What is the water-stable boroxine structure and how does it form a hydrogel?",
+                papers,
+            )
+
+        self.assertEqual(len(result), 2)
+        self.assertIn("study duration", result[1]["sub_q"])
+        self.assertIn("exact pH ranges", result[1]["sub_q"])
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # query_retrieval — is_empty_result (pure)
@@ -995,6 +1019,16 @@ class TestSplitIntoSentences(unittest.TestCase):
             "Raw BPA powder remained stable for 12 months."
         )
         self.assertEqual(claims, ["Raw BPA powder remained stable for 12 months."])
+
+    def test_keeps_numbered_english_proposition(self):
+        claims = split_into_sentences(
+            "7 ) We now describe an efficient hybrid synthesis illustrated in Scheme."
+        )
+
+        self.assertEqual(
+            claims,
+            ["7 ) We now describe an efficient hybrid synthesis illustrated in Scheme."],
+        )
 
     def test_keeps_substantive_tradeoff_sentence(self):
         claims = split_into_sentences(
@@ -1711,14 +1745,14 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertIn("chymotrypsin", answer)
         self.assertNotIn("commercially available", answer)
         self.assertNotIn("79%", answer)
-        self.assertNotIn("conditions", audit["requirements"])
+        self.assertIn("conditions", audit["requirements"])
         self.assertEqual(audit["missing_requirements"], [])
         self.assertTrue(all(claim.startswith("- ") and "[bbb0683]" in claim for claim in claims))
 
     def test_method_fact_renderer_ignores_retrieval_only_condition_facet(self):
         answer, claims, audit = pipeline_module._render_method_fact_list(
             "[Fact 1] Compound A was synthesized by a method that gave product B. (Source: PaperA)",
-            "What method is used and what are its key steps?",
+            "What method is used to synthesize Compound A?",
             [{"paper": "PaperA", "sub_q": "Report the experimental conditions and temperature."}],
         )
 
@@ -1857,7 +1891,26 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             "target_compound": "LAT1",
             "source_roles": [
                 {"source": "InhibitorA", "role": "route"},
-                {"source": "StructureA", "role": "mechanism"},
+                {
+                    "source": "StructureA",
+                    "role": "mechanism",
+                    "claim": "JPH203 has structural interactions in LAT1",
+                    "evidence": "JPH203 occupies the traditional LAT1 substrate-binding pocket",
+                },
+                {
+                    "source": "KineticsA",
+                    "role": "mechanism",
+                    "claim": "JPH203 exerts co-incubation and preincubation inhibitory effects",
+                    "evidence": (
+                        "The preincubation effect enhances the co-incubation inhibitory effects"
+                    ),
+                },
+                {
+                    "source": "TheoryA",
+                    "role": "mechanism",
+                    "claim": "Possible mechanisms may involve transient membrane localization",
+                    "evidence": "Possible mechanisms may involve transient membrane localization",
+                },
             ],
             "direct_routes": [{
                 "source": "InhibitorA",
@@ -1866,8 +1919,22 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             }],
             "supporting_mechanisms": [{
                 "source": "StructureA",
-                "claim": "JPH203 occupies the LAT1 substrate-binding pocket",
-                "evidence": "JPH203 binds within the traditional substrate-binding pocket",
+                "claim": "JPH203 forms a halogen bond with Tyr259",
+                "evidence": "JPH203 forms a halogen bond with Tyr259",
+            }, {
+                "source": "StructureA",
+                "claim": "JPH203 causes a 4.34 degree shift in TM1",
+                "evidence": "JPH203 causes a 4.34 degree shift in TM1",
+            }, {
+                "source": "KineticsA",
+                "claim": (
+                    "JPH203 inhibition involves both co-incubation and preincubation effects"
+                ),
+                "evidence": "JPH203 inhibition involves co-incubation and preincubation effects",
+            }, {
+                "source": "TheoryA",
+                "claim": "Hypothesized mechanisms may involve transient membrane localization",
+                "evidence": "Hypothesized mechanisms may involve transient membrane localization",
             }],
             "review_comparison_sources": [],
             "dimensions": {},
@@ -1880,6 +1947,18 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         )
         self.assertIn("- Strategy:", answer)
         self.assertIn("- Mechanism:", answer)
+        self.assertIn("traditional LAT1 substrate-binding pocket", answer)
+        self.assertIn("halogen bond with Tyr259", answer)
+        self.assertNotIn("4.34 degree shift", answer)
+        self.assertNotIn("TheoryA", answer)
+        self.assertEqual(
+            sum(line.startswith("- Mechanism: `StructureA`") for line in answer.splitlines()),
+            2,
+        )
+        self.assertEqual(
+            sum(line.startswith("- Mechanism: `KineticsA`") for line in answer.splitlines()),
+            1,
+        )
         self.assertNotIn("synthesis of LAT1", answer)
 
         old = cfg.STAGE4_ANSWER_VALIDATION_ENABLED
@@ -1924,6 +2003,31 @@ class TestExecuteStructuredQuery(unittest.TestCase):
 
         self.assertIn("isotope starting material [ReviewA].", answer)
         self.assertIn("10B costs over 1000 times normal boric acid [ReviewA].", answer)
+
+    def test_stage4_renderer_uses_atomic_review_evidence(self):
+        kb = json.dumps({"comparison_json": {
+            "source_roles": [{"source": "ReviewA", "role": "review/comparison source"}],
+            "direct_routes": [],
+            "review_comparison_sources": [{
+                "source": "ReviewA",
+                "claim": "Isotope, cost, and safety evidence form one combined limitation.",
+                "evidence": (
+                    "L-BPA synthesis has been approached through multiple routes, reflecting "
+                    "the challenge of producing enriched material... isotope feedstock is costly"
+                ),
+            }],
+            "dimensions": {},
+            "central_tradeoff": {"claim": "Route constraints differ.", "sources": ["ReviewA"]},
+        }})
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question="Compare L-BPA synthesis routes.",
+        )
+
+        self.assertIn("approached through multiple routes", answer)
+        self.assertNotIn("one combined limitation", answer)
+        self.assertNotIn("feedstock is costly", answer)
 
     def test_stage4_direct_render_is_concise_for_high_level_question(self):
         kb = """

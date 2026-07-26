@@ -295,27 +295,6 @@ def comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
     for source in review_sources - review_entry_sources:
         errors.append(f"Review/comparison source `{source}` is missing from review_comparison_sources.")
 
-    required_isotopes = {
-        str(term) for term in requirements.get("exact_isotopes", [])
-        if isinstance(term, str) and term
-    }
-    if "isotopic_enrichment" in query_dims and required_isotopes:
-        isotope_item = dimensions.get("isotopic_enrichment")
-        isotope_evidence = isotope_item.get("evidence", []) if isinstance(isotope_item, dict) else []
-        isotope_claims = " ".join(
-            str(entry.get("claim", ""))
-            for entry in isotope_evidence
-            if isinstance(entry, dict)
-        )
-        if not required_isotopes.intersection(
-            exact_isotope_terms(isotope_claims, require_context=False)
-        ):
-            errors.append(
-                "`dimensions.isotopic_enrichment.evidence` must preserve an exact isotope "
-                f"identifier from the retrieved evidence ({', '.join(sorted(required_isotopes))}); "
-                "do not replace it with only generic isotopic-enrichment wording."
-            )
-
     for key, item in dimensions.items():
         if not isinstance(item, dict) or not isinstance(item.get("evidence"), list):
             continue

@@ -45,6 +45,11 @@ _METHOD_QUERY_RE = re.compile(
     r"key steps?|reactants?|reagents?)\b",
     re.IGNORECASE,
 )
+_CONDITION_QUERY_RE = re.compile(
+    r"\b(?:conditions?|solvents?|catalysts?|loading|temperature|reaction time|"
+    r"duration|concentration|pressure|pH)\b",
+    re.IGNORECASE,
+)
 _RELATION_QUERY_RE = re.compile(
     r"\b(?:mechanism|role|relationship|interact\w*|bind\w*|inhibit\w*|"
     r"influence|why|how does|how do)\b",
@@ -59,6 +64,16 @@ _METHOD_ACTION_RE = re.compile(
     r"\b(?:react(?:ed|ion)|treat(?:ed|ment)|convert(?:ed|sion)|hydroly\w*|"
     r"alkylat\w*|coupl\w*|deprotect\w*|esterif\w*|prepar\w*|synthesi\w*|"
     r"cycli[sz]\w*|oxid\w*|reduc\w*)\b",
+    re.IGNORECASE,
+)
+_STEP_DEFINING_ACTION_RE = re.compile(
+    r"\b(?:reacted|treat(?:ed|ment)|convert(?:ed|sion)|hydroly\w*|"
+    r"alkylat\w*|coupl\w*|deprotect\w*|esterif\w*|cycli[sz]\w*|"
+    r"oxid\w*|reduc\w*)\b",
+    re.IGNORECASE,
+)
+_CHEMICAL_TRANSFORM_ACTION_RE = re.compile(
+    r"\b(?:reacted|alkylat\w*|coupl\w*|oxid\w*|reduc\w*)\b",
     re.IGNORECASE,
 )
 _CONDITION_EVIDENCE_RE = re.compile(
@@ -151,10 +166,25 @@ def build_fact_contract_requirements(
     outcome_query = bool(_OUTCOME_QUERY_RE.search(combined))
     if method_query:
         add("method_transform", "Exact reactants, reagents, and step-defining transformations", 2)
-        if re.search(r"\bhybrid\s+(?:method|process|route|synthesi\w*)\b", combined, re.IGNORECASE):
+        hybrid_query = bool(re.search(
+            r"\bhybrid\s+(?:method|process|route|synthesi\w*)\b",
+            combined,
+            re.IGNORECASE,
+        ))
+        if hybrid_query:
             add("chemical_step", "Chemical transformation in the hybrid process", 1)
             add("enzymatic_step", "Enzymatic transformation in the hybrid process", 1)
-        add("method_conditions", "Step-specific solvent, catalyst, temperature, time, or loading", 2)
+        explicit_conditions = bool(_CONDITION_QUERY_RE.search(query or ""))
+        if explicit_conditions or re.search(r"\bkey steps?\b", query or "", re.IGNORECASE):
+            add(
+                "method_conditions",
+                (
+                    "Condition for the chemical transformation in the hybrid process"
+                    if hybrid_query
+                    else "Step-specific solvent, catalyst, temperature, time, or loading"
+                ),
+                2 if explicit_conditions else 1,
+            )
         add("method_outcomes", "Step-specific yield, selectivity, purity, or product outcome", 2)
         if _CONTROL_EVIDENCE_RE.search(query or ""):
             add("control", "Control or comparison outcome", 1)
@@ -182,7 +212,7 @@ def build_fact_contract_requirements(
             re.IGNORECASE,
         ):
             add("structure_identity", label or "Requested stable structure", 2)
-            add("stability_values", label or "Requested stability evidence", 1)
+            add("stability_values", label or "Requested stability evidence", 2)
         elif re.search(
             r"\b(?:hydrogel|network|cross-?link\w*|gel[–-]sol)\b",
             combined,
@@ -234,7 +264,17 @@ def _requirement_score(requirement: dict, evidence: str) -> int:
         ))
         return 20 + 4 * actions + 2 * numbers - (12 if generic else 0)
     if kind == "method_conditions":
-        return 20 + 3 * overlap + 2 * numbers if _CONDITION_EVIDENCE_RE.search(evidence) else 0
+        action_pattern = (
+            _CHEMICAL_TRANSFORM_ACTION_RE
+            if "chemical transformation" in _plain(str(requirement.get("label", "")))
+            else _STEP_DEFINING_ACTION_RE
+        )
+        actions = len(action_pattern.findall(evidence))
+        return (
+            20 + 10 * actions + 3 * overlap + 2 * numbers
+            if _CONDITION_EVIDENCE_RE.search(evidence)
+            else 0
+        )
     if kind == "method_outcomes":
         return 20 + 3 * overlap + 3 * numbers if _OUTCOME_EVIDENCE_RE.search(evidence) else 0
     if kind == "chemical_step":
@@ -274,8 +314,18 @@ def _requirement_score(requirement: dict, evidence: str) -> int:
         markers = len(_STRUCTURE_IDENTITY_RE.findall(evidence))
         return 20 + 4 * markers + 3 * overlap if markers else 0
     if kind == "stability_values":
+        pH_range = bool(re.search(
+            r"\d+(?:\.\d+)?\s*<\s*pH\s*<\s*\d+(?:\.\d+)?",
+            evidence,
+            re.IGNORECASE,
+        ))
+        duration = bool(re.search(
+            r"\b\d+(?:\.\d+)?[-\s]+(?:days?|weeks?|months?)\b",
+            evidence,
+            re.IGNORECASE,
+        ))
         return (
-            20 + 3 * overlap
+            20 + 20 * pH_range + 10 * duration + 3 * overlap
             if numbers and _STABILITY_VALUE_RE.search(evidence)
             else 0
         )
@@ -367,12 +417,18 @@ def _catalog_noise(sentence: str) -> bool:
         or "retrieved evidence snippets" in plain
         or "use only snippets below" in plain
         or re.search(
-            r"\breceived\s+(?:january|february|march|april|may|june|july|"
+            r"\breceived\s*:?\s*(?:january|february|march|april|may|june|july|"
             r"august|september|october|november|december|\d)",
             plain,
         )
+        or (
+            re.search(r"\breceived\s*:", plain)
+            and re.search(r"\baccepted\s*:", plain)
+        )
         or ("department of" in plain and "university" in plain)
         or re.search(r"\b(?:supplementary\s+)?fig(?:ure)?\.?$", plain)
+        or re.search(r"^\d+(?:\.\d+)?\s*(?:mmol|mg|ml|g)?\s*\)", plain)
+        or re.search(r"(?:~{4,}|~[^A-Za-z0-9]{0,3}~|\[\(?x\]|\[lit\.,)", sentence, re.IGNORECASE)
         or (
             sentence.count("[") > sentence.count("]")
             and re.search(r"\[[^\]]{0,40}$", sentence)
@@ -382,6 +438,15 @@ def _catalog_noise(sentence: str) -> bool:
     plot_labels = re.search(r"\b(?:mau|time\s*\(min\))\b", plain, re.IGNORECASE)
     figure = re.search(r"\bfig\.", plain, re.IGNORECASE)
     return bool(plot_labels and figure)
+
+
+def _trim_scheme_ocr(sentence: str) -> str:
+    if not re.search(r"~{4,}", sentence):
+        return sentence
+    scheme = re.search(r"\s+\b(?:was|were)\s+\)\(", sentence, re.IGNORECASE)
+    if not scheme:
+        return sentence
+    return sentence[:scheme.start()].rstrip(" ,;") + "."
 
 
 def build_evidence_catalog(chunks: list[dict]) -> list[dict]:
@@ -394,7 +459,7 @@ def build_evidence_catalog(chunks: list[dict]) -> list[dict]:
             block = re.sub(r"\x03(?=g(?:/|\b))", "µ", block)
             clean = re.sub(r"\s+", " ", block).strip()
             sentences = re.split(
-                r"(?<!\bFig\.)(?<!\bEq\.)(?<!\bDr\.)(?<!\bMr\.)(?<!\bvs\.)"
+                r"(?<!\bFig\.)(?<!\bFigs\.)(?<!\bEq\.)(?<!\bDr\.)(?<!\bMr\.)(?<!\bvs\.)"
                 r"(?<!\bg\.)(?<!\bmg\.)(?<!\bml\.)(?<!\bmmol\.)(?<!\bmin\.)"
                 r"(?<!\bh\.)(?<=[.!?])\s+",
                 clean,
@@ -403,8 +468,10 @@ def build_evidence_catalog(chunks: list[dict]) -> list[dict]:
             sentences = [sentence.strip(" -\n") for sentence in sentences]
             windows, superseded = _interrupted_sentence_windows(sentences)
             for sentence in sentences + windows:
+                original_sentence = sentence
+                sentence = _trim_scheme_ocr(sentence)
                 if (
-                    sentence in superseded
+                    original_sentence in superseded
                     or (
                         sentence[:1].islower()
                         and not re.match(
@@ -466,7 +533,10 @@ def fact_contract_schema(
                 item["id"]: {
                     "type": "array",
                     "items": {"type": "string", "enum": evidence_ids},
-                    "maxItems": min(4, len(evidence_ids)),
+                    "maxItems": min(
+                        max(1, int(item.get("minimum", 1))),
+                        len(evidence_ids),
+                    ),
                 }
                 for item in requirements
             },
@@ -566,8 +636,13 @@ def _requirement_coverage(
     coverage = []
     for requirement in requirements:
         available = _rank_requirement(requirement, catalog)
-        matched = [item["id"] for item in available if item["id"] in selected_ids]
         target = min(int(requirement.get("minimum", 1)), len(available))
+        required = (
+            available[:target]
+            if requirement.get("kind") == "stability_values"
+            else available
+        )
+        matched = [item["id"] for item in required if item["id"] in selected_ids]
         coverage.append({
             **requirement,
             "available_count": len(available),
@@ -618,6 +693,7 @@ def validate_fact_contract(
         if not isinstance(mapping, dict):
             rejected.append({"reason": "top-level requirement_evidence must be an object"})
         else:
+            rows = []
             expected = {item["id"] for item in requirements}
             for requirement_id in mapping:
                 if requirement_id not in expected:
@@ -625,7 +701,8 @@ def validate_fact_contract(
                         "requirement_id": requirement_id,
                         "reason": "unknown requirement_id",
                     })
-            for requirement_id in expected:
+            for requirement in requirements:
+                requirement_id = requirement["id"]
                 mapped = mapping.get(requirement_id)
                 if not isinstance(mapped, list):
                     rejected.append({
@@ -633,7 +710,7 @@ def validate_fact_contract(
                         "reason": "requirement evidence must be a list",
                     })
                     continue
-                rows.extend(mapped)
+                rows.extend(mapped[:max(1, int(requirement.get("minimum", 1)))])
 
     selected = set()
     for index, evidence_id in enumerate(rows, 1):
@@ -685,8 +762,13 @@ def complete_fact_contract(
             minimum if structured_requirements else min(minimum, max_per_focus),
             len(ranked),
         )
-        matched = {item["id"] for item in ranked if item["id"] in selected_ids}
-        for item in ranked:
+        required = (
+            ranked[:target]
+            if requirement.get("kind") == "stability_values"
+            else ranked
+        )
+        matched = {item["id"] for item in required if item["id"] in selected_ids}
+        for item in required:
             if len(matched) >= target or len(additions) >= 8:
                 break
             if item["id"] in selected_ids:

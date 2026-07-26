@@ -46,9 +46,9 @@ def split_into_sentences(text: str) -> list:
     def _is_non_proposition(sentence: str) -> bool:
         if re.match(r"^\[.*\]\s*$", sentence):
             return True
-        if re.search(r"[：:]\s*$", sentence) and not re.search(r"[。！？!?]", sentence):
+        if re.search(r"[：:]\s*$", sentence) and not re.search(r"[.!?。！？]", sentence):
             return True
-        if re.match(r"^\d+[\.\s]\s*\S", sentence) and not re.search(r"[。！？!?]", sentence):
+        if re.match(r"^\d+[\.\s]\s*\S", sentence) and not re.search(r"[.!?。！？]", sentence):
             return True
         return bool(re.match(r"^\*\s+第[一二三四五六七八九十百千\d]+[階段步品]", sentence))
 

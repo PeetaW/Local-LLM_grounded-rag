@@ -145,13 +145,28 @@ def _normalize_comparison_json(
     comparison.setdefault("supporting_mechanisms", [])
     source_roles = comparison["source_roles"] if isinstance(comparison["source_roles"], list) else []
     review_sources = {
-        item.get("source") for item in source_roles
-        if isinstance(item, dict) and "review/comparison" in str(item.get("role", "")).lower()
+        str(item.get("source", "")).strip() for item in source_roles
+        if (
+            isinstance(item, dict)
+            and str(item.get("source", "")).strip()
+            and "review/comparison" in str(item.get("role", "")).lower()
+        )
     }
     background_sources = {
-        item.get("source") for item in source_roles
-        if isinstance(item, dict) and "background" in str(item.get("role", "")).lower()
+        str(item.get("source", "")).strip() for item in source_roles
+        if (
+            isinstance(item, dict)
+            and str(item.get("source", "")).strip()
+            and "background" in str(item.get("role", "")).lower()
+        )
     }
+    comparison["review_comparison_sources"] = [
+        item for item in comparison["review_comparison_sources"]
+        if (
+            isinstance(item, dict)
+            and str(item.get("source", "")).strip() in review_sources
+        )
+    ] if isinstance(comparison["review_comparison_sources"], list) else []
     comparison["supporting_mechanisms"] = [
         {
             "source": str(item.get("source", "")).strip(),
@@ -164,7 +179,7 @@ def _normalize_comparison_json(
             and item.get("source")
             and item.get("claim")
             and item.get("evidence")
-            and item.get("source") not in background_sources
+            and str(item.get("source", "")).strip() not in background_sources
         )
     ] if isinstance(comparison["supporting_mechanisms"], list) else []
     for route in comparison["direct_routes"] if isinstance(comparison["direct_routes"], list) else []:

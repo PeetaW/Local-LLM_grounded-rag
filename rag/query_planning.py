@@ -28,6 +28,7 @@ _OUTCOME_QUERY_HINTS = (
     "therapeutic effect", "therapeutic efficacy", "efficacy", "supporting data",
     "treatment outcome", "antitumor", "anti-tumor", "survival",
 )
+_QUANTITATIVE_STABILITY_HINTS = ("water-stable", "water stable")
 
 
 def _is_comparison_query(question: str) -> bool:
@@ -97,9 +98,11 @@ def _add_outcome_retrieval_facet(
     sub_questions: list[dict],
 ) -> list[dict]:
     lower = (question or "").lower()
+    outcome_query = any(term in lower for term in _OUTCOME_QUERY_HINTS)
+    stability_query = any(term in lower for term in _QUANTITATIVE_STABILITY_HINTS)
     if (
         not getattr(cfg, "OUTCOME_RETRIEVAL_FACET_GUARD_ENABLED", False)
-        or not any(term in lower for term in _OUTCOME_QUERY_HINTS)
+        or not (outcome_query or stability_query)
     ):
         return sub_questions
 
@@ -108,8 +111,12 @@ def _add_outcome_retrieval_facet(
         for item in sub_questions
         if isinstance(item, dict)
     )
-    if "survival" in existing and any(
+    if outcome_query and "survival" in existing and any(
         term in existing for term in ("tumor", "accumulation", "retention")
+    ):
+        return sub_questions
+    if stability_query and "ph" in existing and any(
+        term in existing for term in ("duration", "day", "time")
     ):
         return sub_questions
 
@@ -122,6 +129,9 @@ def _add_outcome_retrieval_facet(
         paper_names[0] if len(paper_names) == 1 else "ALL"
     )
     facet = (
+        "What quantitative stability evidence is reported, including study duration, "
+        "exact pH ranges, and comparisons between related structures or formulations?"
+        if stability_query else
         "What quantitative treatment outcomes are reported, including survival time, "
         "tumor burden, accumulation or retention, and comparisons between treatment "
         "and control groups?"

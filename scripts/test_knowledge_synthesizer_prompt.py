@@ -255,7 +255,70 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             ["Report exact conditions, outcomes, and control or comparison outcomes."],
         )
 
-        self.assertNotIn("control", {item["kind"] for item in requirements})
+        kinds = {item["kind"] for item in requirements}
+        self.assertNotIn("control", kinds)
+        key_step_condition = next(
+            item for item in requirements if item["kind"] == "method_conditions"
+        )
+        self.assertEqual(key_step_condition["minimum"], 1)
+        explicit_condition = next(
+            item
+            for item in build_fact_contract_requirements(
+                "Describe the synthesis method and its reaction conditions."
+            )
+            if item["kind"] == "method_conditions"
+        )
+        self.assertEqual(explicit_condition["minimum"], 2)
+
+    def test_grouped_fact_contract_ignores_ungrouped_extra_ids(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] Compound A was reacted with reagent B to yield product C. "
+                "A general background sentence does not describe the requested method."
+            ),
+        }])
+        requirements = build_fact_contract_requirements("Describe the synthesis method.")
+        contract = validate_fact_contract({
+            "evidence_ids": ["E1", "E2"],
+            "requirement_evidence": {
+                requirement["id"]: ["E1"] for requirement in requirements
+            },
+        }, catalog, requirements)
+
+        self.assertEqual(
+            [fact["evidence_id"] for fact in contract["facts"]],
+            ["E1"],
+        )
+
+    def test_grouped_fact_contract_caps_each_requirement_to_its_minimum(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] Compound A was reacted with reagent B to yield product C. "
+                "Compound D was reacted with reagent E to yield product F."
+            ),
+        }])
+        requirements = [{
+            "id": "R1",
+            "kind": "method_transform",
+            "label": "Requested transformation",
+            "minimum": 1,
+        }]
+        contract = validate_fact_contract({
+            "evidence_ids": ["E1", "E2"],
+            "requirement_evidence": {"R1": ["E1", "E2"]},
+        }, catalog, requirements)
+
+        self.assertEqual(
+            [fact["evidence_id"] for fact in contract["facts"]],
+            ["E1"],
+        )
+        schema = fact_contract_schema(catalog, requirements)
+        self.assertEqual(
+            schema["properties"]["requirement_evidence"]["properties"]["R1"]["maxItems"],
+            1,
+        )
 
     def test_fact_contract_relation_requirements_keep_both_mechanism_witnesses(self):
         catalog = build_evidence_catalog([{
@@ -283,7 +346,13 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
                 "[Snippet 1] The reaction furnished 2.83 g. 10.0 mmol of product after "
                 "30 min. and was cooled to room temperature. "
                 "Supporting details are shown in Supplementary Fig. "
-                "Department of Chemistry, Example University."
+                "Department of Chemistry, Example University. "
+                "7 ) We now describe an efficient synthesis illustrated in Scheme. "
+                "The reaction was )( OH THF >C::B ~~~~ 0.1 N HCl. "
+                "1.2 mmol) and enzyme were adjusted to pH 5.0. "
+                "The rotation was [(X] 8.6 [lit.,41]. "
+                "TM3 Received: 2 February 2024 Accepted: 31 May 2024 "
+                "www.example.org remains fully folded."
             ),
         }])
         texts = [item["text"] for item in catalog]
@@ -291,6 +360,71 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         self.assertTrue(any("2.83 g. 10.0 mmol" in text and "30 min. and" in text for text in texts))
         self.assertFalse(any("Supplementary Fig" in text for text in texts))
         self.assertFalse(any("Department of Chemistry" in text for text in texts))
+        self.assertFalse(any("illustrated in Scheme" in text for text in texts))
+        self.assertFalse(any("~~~~" in text for text in texts))
+        self.assertFalse(any("1.2 mmol)" in text for text in texts))
+        self.assertFalse(any("[lit." in text for text in texts))
+        self.assertFalse(any("Received:" in text for text in texts))
+
+    def test_fact_contract_preserves_figs_stability_and_salvages_scheme_prefix(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] The trimer remained stable during the 7-day study. "
+                "The hydrogel remained stable at pH=2 and pH=10. "
+                "It was stable at 2.4 < pH < 9, while the methyl analogue was stable "
+                "at 2.4 < pH < 10 (Supplementary Figs. 13h and 19c, d). "
+                "Enantioselective alkylation of lithiated 3 with bromide 2 in THF "
+                "at -78 C was )( OH THF >C::B ~~~~ 0.1 N HCl. "
+                "Hydrolysis of 6 with sodium hydroxide was stirred at room temperature for 36 h. "
+                "Recrystallization gave L-BPA (120 mg, 8()l~·~) as a crystal."
+            ),
+        }])
+        texts = [item["text"] for item in catalog]
+
+        self.assertTrue(any("2.4 < pH < 10" in text and "Figs. 13h" in text for text in texts))
+        self.assertTrue(any(
+            text == "Enantioselective alkylation of lithiated 3 with bromide 2 in THF at -78 C."
+            for text in texts
+        ))
+        self.assertFalse(any("8()l~·~" in text for text in texts))
+
+        stability = next(
+            item
+            for item in build_fact_contract_requirements(
+                "What water-stable structure was reported and how does it form a hydrogel?"
+            )
+            if item["kind"] == "stability_values"
+        )
+        selected = [
+            item["id"]
+            for item in catalog
+            if "7-day study" in item["text"] or "pH=2 and pH=10" in item["text"]
+        ]
+        contract = validate_fact_contract({"evidence_ids": selected}, catalog)
+        completed = complete_fact_contract(contract, catalog, [stability])
+        claims = [item["claim"] for item in completed["facts"]]
+
+        self.assertEqual(stability["minimum"], 2)
+        self.assertTrue(any("2.4 < pH < 10" in claim for claim in claims))
+        self.assertTrue(completed["requirement_coverage"][0]["covered"])
+
+        condition = next(
+            item
+            for item in build_fact_contract_requirements(
+                "What hybrid process is used for the synthesis, and what are its key steps?"
+            )
+            if item["kind"] == "method_conditions"
+        )
+        condition_contract = complete_fact_contract(
+            validate_fact_contract({"evidence_ids": []}, catalog),
+            catalog,
+            [condition],
+        )
+        self.assertEqual(
+            condition_contract["facts"][0]["claim"],
+            "Enantioselective alkylation of lithiated 3 with bromide 2 in THF at -78 C",
+        )
 
     def test_fact_contract_prefers_complete_fact_over_fragments(self):
         catalog = build_evidence_catalog([{
@@ -741,6 +875,53 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
 
         self.assertEqual(requirements["relation_requirements"], [])
 
+    def test_validator_accepts_source_close_generic_isotope_claim(self):
+        query = "Compare routes focusing on isotopic enrichment and cost-effectiveness."
+        requirements = build_comparison_requirements(query, [{
+            "source": "ReviewA",
+            "text": (
+                "Source metadata (not paper evidence): role_hint=review/comparison source\n"
+                "Retrieved evidence snippets:\n"
+                "[Snippet 1] Producing high-purity, isotopically enriched material is difficult.\n"
+                "[Snippet 2] BNCT requires delivery of 10B to malignant cells.\n"
+                "[Snippet 3] The major cost comes from the isotope starting material."
+            ),
+        }])
+        payload = {
+            "comparison_json": {
+                "source_roles": [{"source": "ReviewA", "role": "review/comparison source"}],
+                "direct_routes": [],
+                "review_comparison_sources": [{"source": "ReviewA", "claim": "compares routes"}],
+                "dimensions": {
+                    "isotopic_enrichment": {
+                        "requested": True,
+                        "evidence_found": True,
+                        "evidence": [{
+                            "source": "ReviewA",
+                            "claim": "Producing high-purity, isotopically enriched material is difficult.",
+                        }],
+                    },
+                    "cost_effectiveness": {
+                        "requested": True,
+                        "evidence_found": True,
+                        "evidence": [{
+                            "source": "ReviewA",
+                            "claim": "The major cost comes from the isotope starting material.",
+                        }],
+                    },
+                },
+                "central_tradeoff": {
+                    "claim": "High-purity isotopic enrichment must be balanced against cost.",
+                    "sources": ["ReviewA"],
+                },
+            }
+        }
+        attach_comparison_requirements(payload, requirements)
+
+        errors = _comparison_json_validation_errors(json.dumps(payload), query)
+
+        self.assertFalse(any("exact isotope identifier" in error for error in errors))
+
     def test_validator_does_not_misread_chemical_derivative_as_background(self):
         raw = """
         {
@@ -798,6 +979,25 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             [{"source": "ReviewA", "claim": "The review compares route safety."}],
         )
         self.assertTrue(safety["evidence_found"])
+
+    def test_comparison_normalizer_drops_non_review_source_from_review_section(self):
+        raw = json.dumps({"comparison_json": {
+            "source_roles": [{"source": "StructureA", "role": "mechanism"}],
+            "direct_routes": [],
+            "review_comparison_sources": [{
+                "source": "StructureA",
+                "claim": "A direct structural result was reported.",
+            }],
+            "dimensions": {},
+            "central_tradeoff": {"claim": "", "sources": []},
+        }})
+
+        normalized = json.loads(_normalize_comparison_json(raw))
+
+        self.assertEqual(
+            normalized["comparison_json"]["review_comparison_sources"],
+            [],
+        )
 
     def test_validator_rechecks_requested_dimensions_with_review_source(self):
         raw = """
@@ -896,7 +1096,7 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             cfg.COMPARISON_JSON_VALIDATION_ENABLED = old_validation
             cfg.COMPARISON_JSON_REPAIR_RETRIES = old_retries
 
-    def test_synthesizer_repairs_lost_exact_isotope_once(self):
+    def test_synthesizer_does_not_inject_exact_isotope_into_generic_claim(self):
         old_enabled = cfg.COMPARISON_JSON_ENABLED
         old_validation = cfg.COMPARISON_JSON_VALIDATION_ENABLED
         old_retries = cfg.COMPARISON_JSON_REPAIR_RETRIES
@@ -925,12 +1125,8 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
                     },
                 }
             }
-            repaired = json.loads(json.dumps(generic))
-            repaired["comparison_json"]["dimensions"]["isotopic_enrichment"]["evidence"][0]["claim"] = (
-                "Producing high-purity, 10B-enriched material is challenging."
-            )
             synth = KnowledgeSynthesizer()
-            synth._generate = MagicMock(side_effect=[json.dumps(generic), json.dumps(repaired)])
+            synth._generate = MagicMock(return_value=json.dumps(generic))
             statuses = []
 
             result = synth.synthesize(
@@ -948,14 +1144,17 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             payload = json.loads(result)
             comparison = payload["comparison_json"]
 
-            self.assertEqual(synth._generate.call_count, 2)
+            self.assertEqual(synth._generate.call_count, 1)
             self.assertEqual(payload["comparison_requirements"]["exact_isotopes"], ["10B"])
             self.assertEqual(
                 payload["comparison_requirements"]["dimension_sources"],
                 {"isotopic_enrichment": ["ReviewA"]},
             )
-            self.assertIn("10B-enriched", comparison["dimensions"]["isotopic_enrichment"]["text"])
-            self.assertTrue(any("exact isotope" in status for status in statuses))
+            self.assertEqual(
+                comparison["dimensions"]["isotopic_enrichment"]["text"],
+                "Producing isotopically enriched material is challenging.",
+            )
+            self.assertFalse(any("exact isotope" in status for status in statuses))
             self.assertTrue(any("validation passed" in status for status in statuses))
         finally:
             cfg.COMPARISON_JSON_ENABLED = old_enabled
