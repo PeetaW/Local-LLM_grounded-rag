@@ -187,6 +187,23 @@ class TestStructuredJudge(unittest.TestCase):
         self.assertEqual(judge._contract_numbers(latex), {"193", "50"})
         self.assertEqual(judge._contract_numbers(identifiers), set())
 
+    def test_fact_contract_requires_binding_pocket_relation(self):
+        fact = "Cryo-EM shows JPH203 occupying the traditional LAT1 substrate-binding pocket."
+
+        missing = judge._apply_fact_contract(
+            fact,
+            "covered",
+            ["JPH203 induces distinct conformational changes in LAT1 compared with JX075."],
+        )
+        covered = judge._apply_fact_contract(
+            fact,
+            "covered",
+            ["JPH203 binds within the traditional LAT1 substrate-binding pocket."],
+        )
+
+        self.assertEqual(missing[0], "missing")
+        self.assertEqual(covered[0], "covered")
+
     def test_fact_contract_requires_same_scope_for_contradiction(self):
         facts = judge._fact_items([
             "BPA degrades to tyrosine under alkaline and oxidative conditions, extremely rapidly."
@@ -229,6 +246,11 @@ class TestStructuredJudge(unittest.TestCase):
             "covered",
             ["The preincubation effect synergistically enhances the co-incubation inhibitory effects."],
         )
+        acid = judge._apply_fact_contract(
+            "Acidic treatment with HCl gives L-BPA methyl ester.",
+            "covered",
+            ["Treatment with hydrochloric acid gave L-BPA methyl ester."],
+        )
 
         self.assertEqual(degradation[0], "missing")
         self.assertIn("alkaline", degradation[1])
@@ -238,6 +260,7 @@ class TestStructuredJudge(unittest.TestCase):
         self.assertEqual(standalone[0], "missing")
         self.assertIn("standalone", standalone[1])
         self.assertEqual(cooperative[0], "covered")
+        self.assertEqual(acid[0], "covered")
 
     def test_fact_contract_recovers_only_explicit_positive_relation(self):
         facts = judge._fact_items([
@@ -268,6 +291,17 @@ class TestStructuredJudge(unittest.TestCase):
 
 
 class TestTranslationJudge(unittest.TestCase):
+    def test_translation_audit_accepts_list_and_alias_schema(self):
+        source = "The route uses chymotrypsin."
+        target = "此路線使用 chymotrypsin。"
+
+        for payload in ([], {"translation_errors": []}):
+            audit, errors = judge._validate_translation_audit(payload, source, target)
+            self.assertEqual(errors, [])
+            self.assertEqual(audit, [])
+
+        self.assertEqual(judge._json_object("[]"), [])
+
     def test_translation_fidelity_uses_separate_scoring_contract(self):
         client = MagicMock()
         client.post.return_value = _response({"errors": [{
@@ -460,11 +494,189 @@ class TestTranslationJudge(unittest.TestCase):
         target = "主要成本來自同位素起始原料。"
         audit, errors = judge._validate_translation_audit(
             {"errors": [{
+                "type": "mistranslation",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": "The citation reference '[ReviewA]' uses a different format in the target.",
+            }]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_ignores_publisher_metadata_omission(self):
+        source = (
+            "TM10 is disrupted, while TM3 Received: 2 February 2024 "
+            "Accepted: 31 May 2024 www.nature.com/celldisc remains fully folded."
+        )
+        target = "TM10 的結構被破壞，而 TM3 仍保持完全摺疊。"
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
                 "type": "omission",
                 "severity": "material",
                 "source_ids": ["S1"],
                 "target_ids": ["T1"],
-                "reason": "The citation reference '[ReviewA]' is omitted from the target.",
+                "reason": "The Received and Accepted publisher metadata was omitted.",
+            }]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_accepts_equivalent_phrase_and_word_order(self):
+        source = (
+            "The complex could show drastic therapeutic efficiency. "
+            "JPH203 induces distinct conformational changes in LAT1."
+        )
+        target = (
+            "研究顯示該複合物在小鼠胸腔腫瘤中可顯示出極高的治療效率。"
+            "JPH203 在 LAT1 中誘導不同的構象變化 (conformational changes)。"
+        )
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [
+                {
+                    "type": "mistranslation",
+                    "severity": "material",
+                    "source_ids": ["S1"],
+                    "target_ids": ["T1"],
+                    "reason": (
+                        "The phrase 'drastic therapeutic efficiency' changes meaning because "
+                        "'drastic' differs from 'extremely high'."
+                    ),
+                },
+                {
+                    "type": "omission",
+                    "severity": "material",
+                    "source_ids": ["S2"],
+                    "target_ids": ["T2"],
+                    "reason": "The phrase 'conformational changes in LAT1' is omitted.",
+                },
+            ]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_rejects_unverifiable_quoted_witnesses(self):
+        source = (
+            "The synthesis is based on enantioselective alkylation and "
+            "subsequent enzymatic hydrolysis."
+        )
+        target = (
+            "此合成以對映選擇性烷基化 (enantioselective alkylation) "
+            "與隨後的酶水解 (enzymatic hydrolysis) 為基礎。"
+        )
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [
+                {
+                    "type": "omission",
+                    "severity": "material",
+                    "source_ids": ["S1"],
+                    "target_ids": ["T1"],
+                    "reason": "The source phrase 'We now describe another route' was omitted.",
+                },
+                {
+                    "type": "addition",
+                    "severity": "material",
+                    "source_ids": ["S1"],
+                    "target_ids": ["T1"],
+                    "reason": "The target adds '完全不同的新製程'.",
+                },
+            ]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_deduplicates_same_sentence_pair(self):
+        error = {
+            "type": "mistranslation",
+            "severity": "minor",
+            "source_ids": ["S1"],
+            "target_ids": ["T1"],
+            "reason": "'chymotrypsin' was translated as trypsin.",
+        }
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [
+                error,
+                {
+                    **error,
+                    "severity": "material",
+                    "reason": "'chymotrypsin' changes enzyme identity.",
+                },
+            ]},
+            "The route uses chymotrypsin-catalysed hydrolysis.",
+            "此路線使用胰蛋白酶催化水解。",
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(audit), 1)
+        self.assertEqual(audit[0]["severity"], "material")
+
+    def test_translation_value_filter_accepts_reordered_clause_values(self):
+        source = (
+            "A solution of 4 (1.57 g, 4.1 mmol) received THF (8 ml) and "
+            "0.1 N hydrochloric acid (8.1 ml) at 5 C for 8 h."
+        )
+        target = (
+            "在 5 C 下，向 4 (1.57 g, 4.1 mmol) 的 THF (8 ml) 溶液加入 "
+            "0.1 N 鹽酸 (8.1 ml)，並反應 8 h。"
+        )
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "number_unit",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": "The target reordered the values despite preserving each value.",
+            }]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_value_filter_does_not_treat_l_bpa_as_litre(self):
+        source = "Recrystallization gave pure I.-BPA (120 mg, 8()l~·~)."
+        target = "重結晶得到純 L-BPA (120 mg, 8()l~·~)。"
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "number_unit",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": "The OCR value should have been corrected.",
+            }]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_discards_self_refuting_omission(self):
+        source = "The transporters have differing affinities."
+        target = "這些轉運蛋白具有不同的親和力。"
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "omission",
+                "severity": "minor",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": (
+                    "The target omits differing affinities. No, T1 says that "
+                    "different affinities are present."
+                ),
             }]},
             source,
             target,

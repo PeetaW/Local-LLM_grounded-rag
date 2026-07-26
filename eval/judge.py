@@ -108,7 +108,7 @@ def _generate(system: str, prompt: str, model: str, base_url: str,
         return None, f"judge call failed: {exc}"
 
 
-def _json_object(text: str) -> dict | None:
+def _json_object(text: str) -> dict | list | None:
     try:
         value = json.loads(text)
     except (TypeError, json.JSONDecodeError):
@@ -119,7 +119,7 @@ def _json_object(text: str) -> dict | None:
             value = json.loads(text[start:end + 1])
         except json.JSONDecodeError:
             return None
-    return value if isinstance(value, dict) else None
+    return value if isinstance(value, (dict, list)) else None
 
 
 def _normalized(text: str) -> str:
@@ -143,13 +143,22 @@ _CONTRACT_CONDITION_GROUPS = (
     )),
     ("alkaline", ("alkaline", "alkali", "naoh", "basic condition")),
     ("oxidative", ("oxidative", "oxidation", "h2o2")),
-    ("acidic", ("acidic", "hcl", "acetic acid")),
+    ("acidic", ("acidic", "hcl", "hydrochloric acid", "acetic acid")),
     ("dark", ("in the dark", "dark storage")),
 )
 _CONTRACT_OUTCOME_GROUPS = (
     ("stable", ("stable", "stability", "no detectable degradation")),
     ("rapid", ("rapid", "rapidly")),
     ("slow", ("slow", "slowly")),
+)
+_CONTRACT_RELATION_GROUPS = (
+    (
+        "binding_pocket",
+        (
+            "binding pocket", "substrate-binding pocket", "binds within",
+            "occupies the", "occupying the",
+        ),
+    ),
 )
 _POSITIVE_RECOVERY_GROUPS = (
     ("enhancement", ("enhanc", "augment")),
@@ -195,7 +204,9 @@ def _apply_fact_contract(fact: str, verdict: str, evidence: list[str]) -> tuple[
         missing_groups = _missing_contract_groups(
             fact,
             evidence_text,
-            _CONTRACT_CONDITION_GROUPS + _CONTRACT_OUTCOME_GROUPS,
+            _CONTRACT_CONDITION_GROUPS
+            + _CONTRACT_OUTCOME_GROUPS
+            + _CONTRACT_RELATION_GROUPS,
         )
         if missing_numbers or missing_facets or missing_groups:
             missing = sorted(missing_numbers | missing_facets | missing_groups)
@@ -623,11 +634,11 @@ def _translation_items(text: str, prefix: str) -> list[dict]:
 
 def _number_unit_signature(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     normalized = unicodedata.normalize("NFKC", _without_citations(text)).lower().replace("μ", "u").replace("µ", "u")
-    numbers = tuple(re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", normalized))
-    units = tuple(re.findall(
-        r"(?<![a-z])(?:%|°\s*[cf]|[numk]?m|kg|mg|ug|g|ml|l|h|hr|hours?|min|minutes?|days?|months?|years?)(?![a-z])",
+    numbers = tuple(sorted(re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", normalized)))
+    units = tuple(sorted(re.findall(
+        r"(?<![a-z])(?:%|°\s*[cf]|[numk]?m|kg|mg|ug|g|ml|l|h|hr|hours?|min|minutes?|days?|months?|years?)(?![a-z-])",
         normalized,
-    ))
+    )))
     return numbers, units
 
 
@@ -644,6 +655,16 @@ _TRANSLATION_PHRASE_EQUIVALENTS = (
     (
         "cell membrane disruption",
         ("cell membrane disruption", "細胞膜破裂", "細胞膜破壞", "細胞膜受損"),
+    ),
+    (
+        "drastic therapeutic efficiency",
+        (
+            "drastic therapeutic efficiency",
+            "顯著的治療效率",
+            "顯著治療效果",
+            "極高的治療效率",
+            "極高治療效率",
+        ),
     ),
 )
 
@@ -679,15 +700,60 @@ def _translation_structural_omission_false_positive(kind: str, reason: str) -> b
     )
 
 
-def _translation_citation_omission_false_positive(kind: str, reason: str) -> bool:
+def _translation_self_refuting_false_positive(kind: str, reason: str) -> bool:
     return bool(
-        kind == "omission"
+        kind in {"omission", "mistranslation"}
         and re.search(
+            r"\b(?:no,\s*t\d+\s+says|target\s+(?:t\d+\s+)?(?:says|contains|includes)|"
+            r"(?:is|are)\s+(?:clearly\s+)?present)\b",
+            reason,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _translation_citation_false_positive(reason: str) -> bool:
+    return bool(
+        re.search(
             r"\b(?:citation|reference|source label|source attribution|paper attribution)\b",
             reason,
             re.IGNORECASE,
         )
     )
+
+
+def _translation_metadata_false_positive(kind: str, reason: str, source: str) -> bool:
+    return bool(
+        kind == "omission"
+        and re.search(
+            r"\b(?:metadata|artifact|received|accepted|publisher|journal|www\.)\b",
+            reason,
+            re.IGNORECASE,
+        )
+        and re.search(
+            r"\b(?:received|accepted)\s*:|www\.|cell discovery",
+            source,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _translation_reason_quote_mismatch(
+    kind: str,
+    reason: str,
+    source: str,
+    target: str,
+) -> bool:
+    quoted = [
+        next(value for value in match if value).strip()
+        for match in re.findall(r"'([^']+)'|\"([^\"]+)\"|`([^`]+)`", reason or "")
+        if any(match)
+    ]
+    quoted = [value for value in quoted if len(_normalized(value)) >= 4]
+    if not quoted:
+        return False
+    witness_text = _normalized(target if kind == "addition" else source)
+    return not any(_normalized(value) in witness_text for value in quoted)
 
 
 def _translation_omission_witness_present(
@@ -696,7 +762,7 @@ def _translation_omission_witness_present(
     source: str,
     target: str,
 ) -> bool:
-    if kind != "omission":
+    if kind not in {"omission", "mistranslation"}:
         return False
     quoted = [
         next(value for value in match if value).strip()
@@ -713,9 +779,15 @@ def _translation_omission_witness_present(
 
     target_text = _normalized(target)
     target_numbers = _contract_numbers(target)
+    verified = False
     for phrase in phrases:
         phrase_text = _normalized(phrase)
         if phrase_text in target_text:
+            verified = True
+            continue
+        phrase_tokens = _contract_tokens(phrase)
+        if phrase_tokens and phrase_tokens <= _contract_tokens(target):
+            verified = True
             continue
         if phrase_text.startswith("compared to"):
             entities = re.findall(
@@ -726,13 +798,14 @@ def _translation_omission_witness_present(
                 any(alias in target_text for alias in ("compared to", "相比", "相較"))
                 and all(_normalized(entity).strip(" ,+") in target_text for entity in entities)
             ):
+                verified = True
                 continue
         groups = [
             aliases for key, aliases in _TRANSLATION_PHRASE_EQUIVALENTS
             if key in phrase_text
         ]
         if not groups:
-            return False
+            continue
         if any(
             not any(_normalized(alias) in target_text for alias in aliases)
             for aliases in groups
@@ -740,11 +813,23 @@ def _translation_omission_witness_present(
             return False
         if _contract_numbers(phrase) - target_numbers:
             return False
-    return True
+        verified = True
+    return verified
 
 
-def _validate_translation_audit(data: dict | None, source: str, target: str) -> tuple[list, list]:
-    rows = data.get("errors") if isinstance(data, dict) else None
+def _validate_translation_audit(data: dict | list | None, source: str, target: str) -> tuple[list, list]:
+    if isinstance(data, list):
+        rows = data
+    elif isinstance(data, dict):
+        rows = data.get("errors")
+        if not isinstance(rows, list):
+            rows = next((
+                data[key]
+                for key in ("error_audit", "translation_errors", "issues")
+                if isinstance(data.get(key), list)
+            ), None)
+    else:
+        rows = None
     if not isinstance(rows, list):
         return [], ["top-level 'errors' must be a list"]
     source_items = _translation_items(source, "S")
@@ -752,6 +837,7 @@ def _validate_translation_audit(data: dict | None, source: str, target: str) -> 
     source_lookup = {item["id"]: item["text"] for item in source_items}
     target_lookup = {item["id"]: item["text"] for item in target_items}
     valid, errors = [], []
+    seen = {}
     allowed_types = {"mistranslation", "omission", "addition", "number_unit", "negation_relation", "untranslated"}
     for index, row in enumerate(rows, 1):
         if not isinstance(row, dict):
@@ -778,9 +864,17 @@ def _validate_translation_audit(data: dict | None, source: str, target: str) -> 
         reason = str(row.get("reason", "")).strip()[:300]
         if _translation_term_false_positive(kind, reason, source_text, target):
             continue
-        if _translation_citation_omission_false_positive(kind, reason):
+        if _translation_citation_false_positive(reason):
+            continue
+        if _translation_metadata_false_positive(kind, reason, source_text):
             continue
         if _translation_structural_omission_false_positive(kind, reason):
+            continue
+        if _translation_self_refuting_false_positive(kind, reason):
+            continue
+        if _translation_reason_quote_mismatch(
+            kind, reason, source_text, target_text
+        ):
             continue
         if (
             getattr(cfg, "TRANSLATION_OMISSION_WITNESS_FILTER_ENABLED", False)
@@ -791,7 +885,9 @@ def _validate_translation_audit(data: dict | None, source: str, target: str) -> 
             source_signature = _number_unit_signature(source_text)
             if source_signature[0] and source_signature == _number_unit_signature(target_text):
                 continue
-        valid.append({
+        signature = (kind, tuple(source_ids), tuple(target_ids))
+        duplicate_index = seen.get(signature)
+        entry = {
             "type": kind,
             "severity": severity,
             "source_ids": source_ids,
@@ -799,7 +895,13 @@ def _validate_translation_audit(data: dict | None, source: str, target: str) -> 
             "source": [source_lookup[value] for value in source_ids],
             "target": [target_lookup[value] for value in target_ids],
             "reason": reason,
-        })
+        }
+        if duplicate_index is not None:
+            if severity == "material" and valid[duplicate_index]["severity"] == "minor":
+                valid[duplicate_index] = entry
+            continue
+        seen[signature] = len(valid)
+        valid.append(entry)
     return valid, errors
 
 
