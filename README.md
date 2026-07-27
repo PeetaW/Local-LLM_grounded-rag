@@ -61,9 +61,9 @@ rather than a black-box AI that changes without notice.
 
 ## Development Status
 
-As of **2026-07-12**, the Q08 cross-paper comparison A/B has reached **1.0 correctness** and **1.0 grounding** in one run, using validated atomic comparison JSON and deterministic rendering with no Stage 4 LLM generation. A stability repeat kept correctness at `1.0` but exposed partial `ALL` task duplication, a literal validator false positive, and grounding `0.875`; deterministic fixes are implemented and await the next Q08 run.
+As of **2026-07-27**, the pipeline uses source-bound structured evidence contracts and deterministic rendering for both comparison and non-comparison questions. The latest eight-question `baseline_v10_requirement_contract_smoke` reached correctness `0.906`, grounding `0.964`, paper selection `100%`, and Stage 2 evidence recall `0.811`. The latest complete 12-question run is still `baseline_v9_fact_contract_full`; the v10 architecture has not yet passed a full-set regression.
 
-This is a strong architecture result, not yet a stability claim. The next gates are a post-fix Q08 repeat, a Q02/Q08 regression, and then the full eval set. Stage 3 remains the latency bottleneck; optimization follows reproducible quality.
+Focused v10 runs confirmed Q02 and Q08 at correctness/grounding `1.0`, then exposed deterministic contract defects for Q07 stability witnesses and Q09 structural mechanisms. Those defects are fixed and pass offline replay against the saved artifacts, but still require a fresh Q07/Q09 model run. The next gates are that focused run, a Q07/Q08/Q09 stability regression, and then the full eval set. Retrieval is about six seconds in recent runs; Stage 3 generation and repair remain the main latency bottleneck.
 
 The active sequence and longer-term roadmap are tracked in [PENDING_TASKS.md](PENDING_TASKS.md).
 
@@ -453,9 +453,9 @@ All parameters are centralized in `config.py`:
 
 ## 開發狀態
 
-截至 **2026-07-12**，Q08 跨文獻比較 A/B 曾以 validated atomic comparison JSON 與不經 Stage 4 LLM 的確定性渲染達到 **correctness 1.0**、**grounding 1.0**。穩定性複跑仍維持 correctness `1.0`，但暴露部分 `ALL` task 重複、validator 字面誤判與 grounding `0.875`；三項確定性修正已完成，等待下一輪 Q08 驗證。
+截至 **2026-07-27**，比較題與非比較題都已採用 source-bound structured evidence contract 與確定性渲染。最新八題 `baseline_v10_requirement_contract_smoke` 達 correctness `0.906`、grounding `0.964`、論文選擇命中率 `100%`、Stage 2 evidence recall `0.811`。目前最新的完整 12 題仍是 `baseline_v9_fact_contract_full`，v10 架構尚未通過全題組回歸。
 
-這證明架構方向有效，但尚不能宣稱穩定。下一個驗收依序是修正後 Q08 複跑、Q02/Q08 回歸，再跑完整 eval set。Stage 3 仍是主要延遲來源，應等品質可重現後再優化。
+v10 focused runs 已確認 Q02、Q08 correctness/grounding `1.0`，之後也找出 Q07 stability witness 與 Q09 結構機制的確定性 contract 缺陷。修正已通過保存 artifact 的離線 replay，但仍需新的 Q07/Q09 模型流程驗證。下一個驗收依序是 focused run、Q07/Q08/Q09 穩定性回歸，再跑完整 eval set。近期 retrieval 約六秒，主要延遲仍在 Stage 3 生成與 repair。
 
 目前推進順序與長期 roadmap 見 [PENDING_TASKS.md](PENDING_TASKS.md)。
 

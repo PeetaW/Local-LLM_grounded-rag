@@ -1,7 +1,7 @@
 # 待實作任務看板（PENDING TASKS）
 
 > 用途：跟 spec 雙邊對照，確保任務推進。完成的 spec 已移至 `archive/specs/`（見該處 STATUS.md）。
-> 最後盤點：2026-07-12（對照 code、git history 與最新 eval artifacts 驗證）。
+> 最後盤點：2026-07-27（對照 code、git history、config 與最新 eval artifacts 驗證）。
 
 ## 已完成（歸檔，僅供回顧）
 - ✅ pipeline_v2（Stage 3/4/5）
@@ -9,30 +9,33 @@
 - ✅ query-engine-refactor（拆模組、stream/non-stream 共用、死碼 query_engine.py 已刪）
 → 細節見 `archive/specs/STATUS.md`
 
-## 目前 checkpoint（2026-07-12）
+## 目前 checkpoint（2026-07-27）
 
-- **Q08 跨文獻比較架構已有單輪完整通過**：`q08_atomic_evidence_render_r3_dedup` 達 correctness `1.0`、grounding `1.0`、selection/coverage `100%`、`C0/U0`。
-- `q08_atomic_evidence_render_r4_stability` 未通過穩定性門檻：correctness `1.0`、grounding `0.875`、9 tasks、Stage 4 `231.9s`、Corrector `116.0s`、總延遲 `804.9s`。
-- r4 暴露三個確定性根因：4 specific + 1 `ALL` 仍重複展開、validator 不接受 `high optical purity + 10B` 的等價表述、comparison snippet 在 `normal boric acid` 中途截斷。修正已完成，待 r5 驗證。
-- 目前 `ANSWERABILITY_GATE_ENABLED=False`、`FINAL_TRANSLATION_ENABLED=False` 是 Q08 隔離測試狀態，不代表已撤回產品設計；完整回歸前需恢復並驗證。
+- **v10 requirement-contract 架構已進入跨題型驗收**：八題 `baseline_v10_requirement_contract_smoke` 達 correctness `0.906`、grounding `0.964`、paper selection `100%`、Stage 2 evidence recall `0.811`。這是目前最強 smoke 結果，但不是完整 12 題 baseline。
+- **最新完整 12 題仍是 v9**：`baseline_v9_fact_contract_full` 為 correctness `0.646`、grounding `0.908`。在 v10 focused/stability gate 通過前，不把 smoke 平均值當成全題組品質宣稱。
+- **focused r3 已證明主路徑可行**：Q02、Q08 correctness/grounding 都是 `1.0/1.0`；四題 Q02/Q07/Q08/Q09 平均 correctness `0.875`、grounding `0.958`。
+- **r4 是確定性 contract 回歸，不是 retrieval 退化**：Q07 的正確 `pH=2/10` hydrogel witness 已被 Stage 2 找到且由 LLM 選中，卻遭 stability rank gate 拒絕；Q09 的 pocket/Tyr259 原文已進 comparison JSON，卻被 renderer 的省略號裁切丟失。兩項 root fix 已完成，保存 artifact 的離線 replay 通過，待 `baseline_v10_contract_rootfix_r5` 實跑。
+- **evaluator 尚有一個已處理的穩定性邊界**：Q07 rejudge correctness 已由 `0.75` 修正為 `1.0`；translation structured output 曾因無上限的 reason 失效並掉入 scalar fallback，現已限制 reason 長度，待新流程驗證。
+- **產品開關已恢復**：`ANSWERABILITY_GATE_ENABLED=True`、`FINAL_TRANSLATION_ENABLED=True`；structured fact contract、comparison direct render、method direct render 與 Stage 2 query-aware evidence 皆為 `True`。
+- **速度判讀不變**：近期 retrieval 約 `6s`，focused runs 平均總延遲約 `500s`；主要瓶頸是 Stage 3 本地 LLM 生成/repair，而不是 retrieval。
 
 ---
 
 ## 待實作（有詳細 spec）
 
 ### 1. pipeline_v4 — 分階段索引（`pipeline_v4_task_spec.md`）
-**狀態：未開始（2026-07-12 複核）。** 現況：索引一條龍同步跑 VL（indexer.py:39-42），VL 失敗會卡住建索引。
+**狀態：未開始（2026-07-27 複核）。** 現況：索引一條龍同步跑 VL（indexer.py:39-42），VL 失敗會卡住建索引。
 目標：拆成 fast base-index（先可搜尋）+ 非阻塞 VL/摘要增量豐富化 + per-paper 狀態追蹤
 （`text_index_ready`/`vl_pending`/`vl_partial`/`summary_ready`/`last_successful_build`）+ 安全增量重建。
 **重要：這是下方「匯入健檢 Phase 2」的地基**——MVP 已可做 corpus health/dedup，但 per-paper 狀態仍需分階段索引支撐。
 
 ### 2. memory_redesign — 記憶模組重設計（`memory_redesign_spec.md`）
-**狀態：未開始（2026-07-12 複核）。** 研究知識管理層（非問答 log）。三類 episodic/preference/work_state、
+**狀態：未開始（2026-07-27 複核）。** 研究知識管理層（非問答 log）。三類 episodic/preference/work_state、
 狀態生命週期、原子結論句、三機制（C 衝突守衛→A 快速觸發→B session 整合）。
 屬 Tier 2；前置條件「穩定量尺」已於 2026-06 備齊（量尺三軸：檢索/忠實度/正確性）。
 
 ### 3. api-refactor — API 分層（`api-refactor-spec.md`）
-**狀態：未開始（2026-07-12 複核）。** `api.py` 仍把 routes/schemas/session/injection/memory/orchestration 混在同一檔，
+**狀態：未開始（2026-07-27 複核）。** `api.py` 仍把 routes/schemas/session/injection/memory/orchestration 混在同一檔，
 import 時還連帶觸發 main.py 全域初始化。目標：拆成薄 transport 層 + 清楚服務邊界 + 安全啟動。
 2026-04 的 `api-refractor` PR 是較早的 status streaming/query pipeline 整理；目前這份 spec 在該 PR 之後建立，完成條件尚未達成。
 （優先序最低——目前不是品質或延遲瓶頸。）
@@ -170,17 +173,22 @@ citation 修正全題組站得住（無 bullet 掛 4–5 篇）＝結構性勝�
 
 `q08_atomic_evidence_render_r4_stability` correctness 仍為 `1.0`，但 grounding 降至 `0.875`，不能視為穩定重現。Planner 產生 4 specific + 1 `ALL`，舊 guard 因尚有一篇未被 specific 覆蓋而保留 `ALL`，task builder 再將它展開到全部 5 篇，形成 9 tasks。Stage 3 原始 atomic JSON 內容完整，卻因 validator 只認字面 `high-purity` 而拒絕等價的 `high optical purity + 10B`；repair 在 14734 prompt tokens 後以 `done_reason=length` 截斷，遂回退 Stage 4/Corrector。Grounding 唯一失敗則源於 evidence clip 把原文 `normal boric acid` 截斷，後續補成 `normal boron`。現行修正讓 `ALL` 只補未覆蓋論文、validator 接受純度詞與同位素詞組合，並在 200 字內補齊關鍵句句尾。
 
+#### Baseline v10 structured-contract milestone（2026-07-27）— focused root fix 待實跑
+
+v10 已將 requirement-aware evidence selection、method fact direct render、comparison JSON validator、structured correctness/translation judge 串成同一條產品路徑。八題 smoke 的 correctness/grounding 明顯優於 v9 smoke，但後續 focused runs 證明「validator 接受」還必須等價於「renderer 實際輸出」，不能只檢查藏在 JSON metadata 的內容。
+
+`baseline_v10_contract_rootfix_r4` 的 Q07/Q08/Q09 結果為 correctness `0.75/1.0/0.5`、grounding `1.0/0.833/0.714`。Q07、Q09 缺口都可由 Stage 2 與 Stage 3 artifact 重現，已修在 shared contract/renderer，而非再加 prompt：stability mapping 接受所有語義有效 witness；named mechanism 必須存在於可渲染的 `supporting_mechanisms`；含省略號的 mechanism evidence 回退完整 role claim；translation audit reason 受 JSON schema 長度約束。離線測試與實際 artifact replay 均通過，正式分數仍以 r5 新流程為準。
+
 ---
 
-## 建議推進序（2026-07-12）
+## 建議推進序（2026-07-27）
 
-1. **Q08 修正後穩定性複跑**：執行 `python eval\run_eval.py --run --label q08_atomic_evidence_render_r5_partial_dedup --ids Q08`。驗收：correctness/grounding `1.0`、5 tasks、首次 atomic JSON valid、Stage 4 LLM `0s`、cost evidence 保留 `normal boric acid`。
-2. **Q02/Q08 小回歸**：若複跑通過，執行 `python eval\run_eval.py --run --label q02_q08_atomic_render_regression --ids Q02,Q08`，確認比較題特化沒有傷到方法題。
-3. **恢復產品開關後跑完整 baseline**：將 answerability gate 與最終中文翻譯恢復產品狀態，再跑全題組；英文 correctness 仍使用 pre-translation `answer_for_judge`。
-4. **通過後才 promote/commit comparison direct-render 路徑**。若 Q08 複跑失敗，先比較 Stage 3 JSON/artifact，不再盲目加 prompt。
-5. **速度第二順位**：穩定後再處理 central-tradeoff repair；優先讓 deterministic normalizer/validator 對齊，目標省掉約 `181s` 的第二次 Stage 3 generation，不提高 `num_ctx`。
-6. **產品化長線**：pipeline_v4 分階段索引 → ingestion health Phase 2 → memory redesign。API refactor 仍在，但目前順位最低。
+1. **Q07/Q09 focused root-fix 驗證**：執行 `python eval\run_eval.py --run --label baseline_v10_contract_rootfix_r5 --ids Q07,Q09`。驗收：兩題 correctness `1.0`；Q07 保留 hydrogel `pH=2/10`、boroxine pH range、7-day；Q09 保留 substrate-binding pocket 與 `halogen bond with Tyr259`，且不再輸出殘缺 head 片段。
+2. **Q07/Q08/Q09 stability regression**：focused 通過後以同一 config 重跑三題。Q08 預期維持 correctness/translation `1.0`；若唯一 review claim 仍被 grounding 判 unsupported，單獨檢查 citation-aware raw-chunk witness，不改生成內容。
+3. **完整 12 題 baseline v11**：三題穩定後直接跑全題組，驗收 correctness/translation judge coverage 都為 `12/12`、paper selection 無回歸，並逐題檢查 Stage 2 recall 與 grounding；不只比較平均分。
+4. **Stage 3 速度優化**：品質通過後再量測 repair rate、prompt tokens、generation duration；優先消除可由 deterministic normalizer 完成的 repair，不提高 `num_ctx`。
+5. **產品化長線**：pipeline_v4 分階段索引 → ingestion health Phase 2 → memory redesign。API refactor 保留但目前順位最低。
 
 ### 方向決定
 
-維持 robustness/品質優先。Retrieval 已不是瓶頸；近期焦點是證明 atomic cross-paper comparison 可重現並通過其他題型回歸。只有在這三道驗收完成後，才把單輪 `1.0/1.0` 視為可推進的主流程候選。
+維持 robustness/品質優先。Retrieval 已不是瓶頸；近期焦點已從單一 Q08 prompt 迭代轉為跨題型 structured contract 的穩定性。只有 focused、stability、完整 12 題三道驗收完成後，才把 v10 視為可推進的產品 baseline。
