@@ -178,6 +178,33 @@ class TestStructuredJudge(unittest.TestCase):
         self.assertEqual([item["verdict"] for item in audit], ["missing", "missing"])
         self.assertEqual([item["judge_verdict"] for item in audit], ["covered", "covered"])
 
+    def test_fact_contract_combines_complementary_numeric_passages(self):
+        facts = judge._fact_items([(
+            "HO-PBA trimer remains stable during a 7-day study and is stable at "
+            "2.4 < pH < 9, while CH3-HO-PBA trimer is stable at 2.4 < pH < 10."
+        )])
+        candidate = (
+            "HO-PBA trimer is stable at 2.4 < pH < 9, while CH3-HO-PBA trimer "
+            "is stable at 2.4 < pH < 10. "
+            "HO-PBA trimers remain stable during the 7-day study."
+        )
+        audit, errors = judge._validate_fact_audit(
+            {"facts": [{
+                "id": "F1",
+                "verdict": "covered",
+                "evidence_ids": ["C1"],
+                "reason": "the pH ranges are stated",
+            }]},
+            facts,
+            candidate,
+            stable_protocol=True,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit[0]["verdict"], "covered")
+        self.assertEqual(audit[0]["evidence_ids"], ["C1", "C2"])
+        self.assertIn("complementary candidate passages", audit[0]["reason"])
+
     def test_contract_numbers_ignore_identifier_digits_and_latex_parameter_subscripts(self):
         plain = "JPH203 preincubation alone had an IC50 of 193 +/- 50 nM."
         latex = r"JPH203 preincubation alone had an $\text{IC}_{50}$ of $193 \pm 50$ nM."
@@ -326,8 +353,13 @@ class TestTranslationJudge(unittest.TestCase):
         self.assertIn("Taiwan amino-acid names", payload["system"])
         self.assertIn("ENGLISH SOURCE SENTENCES", payload["prompt"])
         self.assertIn("not a one-to-one mapping", payload["prompt"])
+        self.assertIn("under 300 characters", payload["prompt"])
         self.assertEqual(payload["format"]["required"], ["errors"])
         self.assertEqual(payload["format"]["properties"]["errors"]["type"], "array")
+        self.assertEqual(
+            payload["format"]["properties"]["errors"]["items"]["properties"]["reason"]["maxLength"],
+            300,
+        )
 
     def test_translation_fidelity_accepts_retained_english_terms(self):
         client = MagicMock()
@@ -342,6 +374,30 @@ class TestTranslationJudge(unittest.TestCase):
 
         self.assertEqual(result["score"], 1.0)
         self.assertEqual(result["error_audit"], [])
+
+    def test_translation_fidelity_falls_back_after_invalid_structured_output(self):
+        client = MagicMock()
+        client.post.side_effect = [
+            _response({"score": 5}),
+            _response({"score": 5}),
+            _text_response("SCORE: 5\nREASON: scientific meaning is preserved."),
+        ]
+        with patch.object(judge, "requests", client):
+            result = judge.judge_translation_fidelity(
+                "JPH203 binds LAT1.",
+                "JPH203 與 LAT1 結合。",
+                model="test",
+                base_url="http://test",
+            )
+
+        self.assertEqual(result["score"], 1.0)
+        self.assertEqual(result["mode"], "translation_fidelity_scalar_fallback")
+        self.assertIn("top-level 'errors'", result["structured_error"])
+        self.assertEqual(result["judge_attempts"], 3)
+        self.assertNotIn(
+            "Return JSON only",
+            client.post.call_args_list[2].kwargs["json"]["system"],
+        )
 
     def test_translation_fidelity_discards_identical_number_unit_false_positive(self):
         client = MagicMock()
@@ -676,6 +732,34 @@ class TestTranslationJudge(unittest.TestCase):
                 "reason": (
                     "The target omits differing affinities. No, T1 says that "
                     "different affinities are present."
+                ),
+            }]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_accepts_retained_english_term_in_omission_report(self):
+        source = (
+            "Mechanism: `s41421-024-00697-6` reports JPH203 induces distinct "
+            "conformational changes, including a 4.34 degree shift in TM1 and "
+            "rotation of TM6 and TM10 [s41421-024-00697-6]."
+        )
+        target = (
+            "JPH203 誘導不同的 conformational changes（構象變化），包括 TM1 的 "
+            "4.34 度位移以及 TM6 和 TM10 的旋轉 [s41421-024-00697-6]。"
+        )
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "omission",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": (
+                    "The target fails to translate conformational changes in Chinese "
+                    "without relying on the English technical term."
                 ),
             }]},
             source,

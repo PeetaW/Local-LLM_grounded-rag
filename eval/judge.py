@@ -50,6 +50,20 @@ _TRANSLATION_JUDGE_SYSTEM = (
     "and citations. Taiwan amino-acid names using 胺酸 are valid; for example, tyrosine=酪胺酸 and "
     "phenylalanine=苯丙胺酸. Do not require Mainland Chinese 氨酸 variants. Return JSON only."
 )
+_TRANSLATION_FALLBACK_SYSTEM = _TRANSLATION_JUDGE_SYSTEM.replace(
+    " Return JSON only.",
+    "",
+)
+
+_TRANSLATION_RUBRIC = (
+    "Score translation fidelity from 1 to 5:\n"
+    "5 = scientifically faithful with no meaning-changing error\n"
+    "4 = one minor imprecision with scientific meaning intact\n"
+    "3 = one material semantic error or omission\n"
+    "2 = several material errors\n"
+    "1 = broadly unfaithful or substantially untranslated\n"
+    "Do not penalize retained English technical terms, markdown, citations, or style."
+)
 
 _TRANSLATION_AUDIT_SCHEMA = {
     "type": "object",
@@ -69,7 +83,7 @@ _TRANSLATION_AUDIT_SCHEMA = {
                     "severity": {"type": "string", "enum": ["minor", "material"]},
                     "source_ids": {"type": "array", "items": {"type": "string"}},
                     "target_ids": {"type": "array", "items": {"type": "string"}},
-                    "reason": {"type": "string"},
+                    "reason": {"type": "string", "maxLength": 300},
                 },
                 "required": ["type", "severity", "source_ids", "target_ids", "reason"],
                 "additionalProperties": False,
@@ -195,21 +209,31 @@ def _missing_contract_groups(fact: str, evidence: str, groups) -> set[str]:
     }
 
 
-def _apply_fact_contract(fact: str, verdict: str, evidence: list[str]) -> tuple[str, str]:
-    evidence_text = " ".join(evidence)
-    if verdict == "covered":
-        missing_numbers = _contract_numbers(fact) - _contract_numbers(evidence_text)
-        dependent_facets = set(re.findall(r"\b([a-z][a-z0-9]*)[- ]dependent\b", _normalized(fact)))
-        missing_facets = dependent_facets - _contract_tokens(evidence_text)
-        missing_groups = _missing_contract_groups(
+def _covered_contract_missing(fact: str, evidence: str) -> set[str]:
+    missing_numbers = _contract_numbers(fact) - _contract_numbers(evidence)
+    dependent_facets = set(re.findall(
+        r"\b([a-z][a-z0-9]*)[- ]dependent\b",
+        _normalized(fact),
+    ))
+    missing_facets = dependent_facets - _contract_tokens(evidence)
+    return (
+        missing_numbers
+        | missing_facets
+        | _missing_contract_groups(
             fact,
-            evidence_text,
+            evidence,
             _CONTRACT_CONDITION_GROUPS
             + _CONTRACT_OUTCOME_GROUPS
             + _CONTRACT_RELATION_GROUPS,
         )
-        if missing_numbers or missing_facets or missing_groups:
-            missing = sorted(missing_numbers | missing_facets | missing_groups)
+    )
+
+
+def _apply_fact_contract(fact: str, verdict: str, evidence: list[str]) -> tuple[str, str]:
+    evidence_text = " ".join(evidence)
+    if verdict == "covered":
+        missing = sorted(_covered_contract_missing(fact, evidence_text))
+        if missing:
             return "missing", f"deterministic contract missing required elements: {', '.join(missing)}"
     elif verdict == "contradicted":
         missing_groups = _missing_contract_groups(
@@ -236,6 +260,47 @@ def _apply_fact_contract(fact: str, verdict: str, evidence: list[str]) -> tuple[
         if overlap < 0.4:
             return "missing", "deterministic contract found insufficient entity/condition overlap for contradiction"
     return verdict, ""
+
+
+def _extend_fact_contract_witnesses(
+    fact: str,
+    evidence_ids: list[str],
+    evidence: list[str],
+    candidate_items: list[dict],
+) -> tuple[list[str], list[str]] | None:
+    """Add at most two complementary passages that close explicit contract gaps."""
+    selected_ids = list(dict.fromkeys(evidence_ids))
+    selected = list(evidence)
+    missing = _covered_contract_missing(fact, " ".join(selected))
+    fact_tokens = _contract_tokens(fact)
+    limit = min(4, len(selected_ids) + 2)
+
+    while missing and len(selected_ids) < limit:
+        best = None
+        for item in candidate_items:
+            if item["id"] in selected_ids:
+                continue
+            text = item["text"]
+            overlap = (
+                len(fact_tokens & _contract_tokens(text)) / len(fact_tokens)
+                if fact_tokens else 0.0
+            )
+            if overlap < 0.25:
+                continue
+            trial_missing = _covered_contract_missing(
+                fact,
+                " ".join([*selected, text]),
+            )
+            reduction = len(missing) - len(trial_missing)
+            if reduction > 0 and (best is None or (reduction, overlap) > best[0]):
+                best = ((reduction, overlap), item, trial_missing)
+        if best is None:
+            break
+        _, item, missing = best
+        selected_ids.append(item["id"])
+        selected.append(item["text"])
+
+    return (selected_ids, selected) if not missing else None
 
 
 def _positive_contract_witness(fact: str, candidate_items: list[dict]) -> dict | None:
@@ -371,6 +436,19 @@ def _validate_fact_audit(
                 contract_reason = "deterministic contract found an explicit positive relation witness"
             else:
                 verdict, contract_reason = _apply_fact_contract(expected[fact_id], verdict, evidence)
+                if judge_verdict == "covered" and verdict == "missing":
+                    extended = _extend_fact_contract_witnesses(
+                        expected[fact_id],
+                        evidence_ids,
+                        evidence,
+                        candidate_items,
+                    )
+                    if extended:
+                        evidence_ids, evidence = extended
+                        verdict = "covered"
+                        contract_reason = (
+                            "deterministic contract combined complementary candidate passages"
+                        )
             if verdict == "missing":
                 evidence = []
                 evidence_ids = []
@@ -670,8 +748,13 @@ _TRANSLATION_PHRASE_EQUIVALENTS = (
 
 
 def _translation_term_false_positive(kind: str, reason: str, source: str, target: str) -> bool:
-    if kind not in {"mistranslation", "untranslated"} or not re.search(
+    if kind not in {"mistranslation", "untranslated", "omission"} or not re.search(
         r"translat|technical term|chemical name|corresponds to", reason, re.I
+    ):
+        return False
+    if kind == "omission" and (
+        not re.search(r"\b(?:english|chinese|technical term)\b", reason, re.I)
+        or _contract_numbers(re.sub(r"`[^`]+`", " ", source)) - _contract_numbers(target)
     ):
         return False
     source_lower, reason_lower, target_lower = source.lower(), reason.lower(), target.lower()
@@ -916,6 +999,7 @@ def _translation_prompt(source: str, target: str, correction: str = "") -> str:
         "number/unit error, negation/relation error, or a substantially untranslated sentence. "
         "Do not report retained English technical terms, wording preference, style, or fluency. "
         "Use severity=minor only when scientific meaning remains intact; otherwise material. "
+        "Keep each reason under 300 characters. "
         "Sentence IDs are alignment anchors, not a one-to-one mapping: a source sentence may be "
         "merged into a neighboring target sentence. Search the entire target before reporting an omission. "
         "Never report omission solely because sentence, caption, or paragraph boundaries changed; if the "
@@ -956,6 +1040,7 @@ def judge_translation_fidelity(source: str, target: str, model: str = None,
     if not (source or "").strip() or not (target or "").strip():
         return {"score": None, "raw": None, "reason": "missing source or translation", "mode": "translation_fidelity_v2"}
     correction = ""
+    last_output = ""
     for attempt in range(1, 3):
         output, error = _generate(
             _TRANSLATION_JUDGE_SYSTEM,
@@ -967,6 +1052,7 @@ def judge_translation_fidelity(source: str, target: str, model: str = None,
         )
         if error:
             return {"score": None, "raw": None, "reason": error, "mode": "translation_fidelity_v2"}
+        last_output = output or ""
         audit, errors = _validate_translation_audit(_json_object(output), source, target)
         if not errors:
             raw, score, reason = _score_translation_audit(audit)
@@ -979,13 +1065,28 @@ def judge_translation_fidelity(source: str, target: str, model: str = None,
                 "judge_attempts": attempt,
             }
         correction = "; ".join(errors)
-    return {
-        "score": None,
-        "raw": None,
-        "reason": f"invalid translation audit: {correction}",
-        "mode": "translation_fidelity_v2",
-        "judge_attempts": 2,
-    }
+    structured_error = f"invalid translation audit: {correction}"
+    fallback_prompt = (
+        f"{_TRANSLATION_RUBRIC}\n\nENGLISH SOURCE:\n{source}\n\n"
+        f"TRADITIONAL CHINESE TARGET:\n{target}\n\n"
+        "Output exactly two lines:\nSCORE: <1-5>\nREASON: <one sentence>"
+    )
+    output, error = _generate(
+        _TRANSLATION_FALLBACK_SYSTEM,
+        fallback_prompt,
+        model,
+        base_url,
+        timeout,
+    )
+    fallback = _parse_scalar_score(
+        output,
+        error,
+        "translation_fidelity_scalar_fallback",
+    )
+    fallback["structured_error"] = structured_error
+    fallback["last_structured_output"] = last_output[:2000]
+    fallback["judge_attempts"] = 3
+    return fallback
 
 
 if __name__ == "__main__":

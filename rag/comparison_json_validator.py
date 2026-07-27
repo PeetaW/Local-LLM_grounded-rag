@@ -34,6 +34,13 @@ _ISOTOPE_SYMBOLS = {
     "chlorine": "Cl", "bromine": "Br", "iodine": "I",
 }
 _SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
+_NAMED_INTERACTION_RE = re.compile(
+    r"\b(?P<relation>(?:halogen|hydrogen|covalent|ionic)\s+bond|salt bridge)\b"
+    r"[^.!?]{0,120}\b(?:with|between)\b[^.!?]{0,60}"
+    r"\b(?P<anchor>(?:Ala|Arg|Asn|Asp|Cys|Gln|Glu|Gly|His|Ile|Leu|Lys|"
+    r"Met|Phe|Pro|Ser|Thr|Trp|Tyr|Val)\d+)\b",
+    re.IGNORECASE,
+)
 
 
 def query_dimension_keys(query: str) -> set[str]:
@@ -181,6 +188,28 @@ def build_comparison_requirements(query: str, chunks: list[dict]) -> dict:
                     "anchors": anchors,
                 })
 
+    mechanism_requirements = []
+    if query_requests_mechanism(query):
+        for row in rows:
+            found = None
+            for unit in _evidence_units(row["evidence"]):
+                for sentence in re.split(r"(?<=[.!?])\s+", unit):
+                    match = _NAMED_INTERACTION_RE.search(sentence)
+                    if match:
+                        found = {
+                            "source": row["source"],
+                            "anchors": [
+                                match.group("relation"),
+                                match.group("anchor"),
+                            ],
+                            "claim": re.sub(r"\s+", " ", sentence).strip(),
+                        }
+                        break
+                if found:
+                    break
+            if found:
+                mechanism_requirements.append(found)
+
     return {
         "version": 3,
         "requested_dimensions": requested,
@@ -188,6 +217,7 @@ def build_comparison_requirements(query: str, chunks: list[dict]) -> dict:
         "dimension_sources": dimension_sources,
         "exact_isotopes": isotopes,
         "relation_requirements": relation_requirements,
+        "mechanism_requirements": mechanism_requirements,
     }
 
 
@@ -284,6 +314,34 @@ def comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
         valid_mechanisms.append(item)
     if query_requests_mechanism(query) and not valid_mechanisms:
         errors.append("The question asks for mechanism differences; add source-bound supporting_mechanisms evidence.")
+    for requirement in requirements.get("mechanism_requirements", []):
+        if not isinstance(requirement, dict):
+            continue
+        source = str(requirement.get("source", "")).strip()
+        anchors = [
+            str(anchor).strip().lower()
+            for anchor in requirement.get("anchors", [])
+            if str(anchor).strip()
+        ]
+        candidates = [
+            item for item in valid_mechanisms
+            if isinstance(item, dict)
+            and str(item.get("source", "")).strip() == source
+        ]
+        if source and anchors and not any(
+            all(
+                anchor in (
+                    f"{item.get('claim', '')} {item.get('evidence', '')}".lower()
+                )
+                for anchor in anchors
+            )
+            for item in candidates
+        ):
+            errors.append(
+                "Mechanism evidence from "
+                f"`{source}` must preserve the source relation "
+                f"`{' + '.join(anchors)}` in one source-bound item."
+            )
 
     for source in requirements.get("review_sources", []):
         if "review/comparison" not in roles_by_source.get(source, ""):

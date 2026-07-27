@@ -547,6 +547,18 @@ _SPECULATIVE_MECHANISM_RE = re.compile(
 )
 
 
+def _source_close_evidence(text: str) -> str:
+    value = str(text or "").strip()
+    if re.fullmatch(
+        r"snippets?\s+\d+(?:\s*(?:,|and)\s*\d+)*",
+        value,
+        re.IGNORECASE,
+    ):
+        return ""
+    atomic = re.split(r"\s*\.{3,}\s*", value, maxsplit=1)[0].strip().rstrip(".")
+    return atomic if len(atomic.split()) >= 4 else ""
+
+
 def _stage4_empty_answer_fallback(
     knowledge_base: str,
     atomic_only: bool = False,
@@ -643,13 +655,13 @@ def _stage4_empty_answer_fallback(
         source = str(role.get("source", "")).strip()
         role_claim = str(role.get("claim", "")).strip().rstrip(".")
         claim = role_claim
-        evidence = str(role.get("evidence", "")).strip()
-        if evidence:
-            atomic_evidence = re.split(
-                r"\s*\.{3,}\s*", evidence, maxsplit=1
-            )[0].strip().rstrip(".")
-            if len(atomic_evidence.split()) >= 4:
-                claim = atomic_evidence
+        role_evidence = str(role.get("evidence", ""))
+        atomic_evidence = (
+            "" if re.search(r"\.{3,}", role_evidence)
+            else _source_close_evidence(role_evidence)
+        )
+        if atomic_evidence:
+            claim = atomic_evidence
         if not speculative_requested and _SPECULATIVE_MECHANISM_RE.search(claim):
             continue
         claim_token_sets = [
@@ -676,13 +688,9 @@ def _stage4_empty_answer_fallback(
         source = str(review.get("source", "")).strip()
         if source and source not in background_sources:
             claim = str(review.get("claim", "")).strip().rstrip(".")
-            evidence = str(review.get("evidence", "")).strip()
-            if evidence:
-                atomic_evidence = re.split(
-                    r"\s*\.{3,}\s*", evidence, maxsplit=1
-                )[0].strip().rstrip(".")
-                if len(atomic_evidence.split()) >= 4:
-                    claim = atomic_evidence
+            atomic_evidence = _source_close_evidence(review.get("evidence", ""))
+            if atomic_evidence:
+                claim = atomic_evidence
             if claim:
                 lines.append(f"- Review/comparison source: `{source}` reports that {claim} [{source}].")
             dimensions = [

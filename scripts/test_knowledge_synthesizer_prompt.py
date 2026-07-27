@@ -320,6 +320,33 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             1,
         )
 
+    def test_grouped_fact_contract_rejects_requirement_mismatch(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] The boroxine cross-links form the hydrogel. "
+                "Excess free trimer de-crosslinks the network and collapses the hydrogel."
+            ),
+        }])
+        requirements = [{
+            "id": "R1",
+            "kind": "network_disruption",
+            "label": "Requested network disruption",
+            "minimum": 1,
+        }]
+        contract = validate_fact_contract({
+            "evidence_ids": [],
+            "requirement_evidence": {"R1": ["E1"]},
+        }, catalog, requirements)
+        completed = complete_fact_contract(contract, catalog, requirements)
+
+        self.assertEqual(contract["facts"], [])
+        self.assertEqual(
+            contract["rejected"][0]["reason"],
+            "evidence does not satisfy requirement",
+        )
+        self.assertIn("collapses the hydrogel", completed["facts"][0]["claim"])
+
     def test_fact_contract_relation_requirements_keep_both_mechanism_witnesses(self):
         catalog = build_evidence_catalog([{
             "source": "PaperA",
@@ -425,6 +452,40 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             condition_contract["facts"][0]["claim"],
             "Enantioselective alkylation of lithiated 3 with bromide 2 in THF at -78 C",
         )
+
+    def test_grouped_stability_contract_keeps_valid_lower_ranked_witness(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] The trimer remained stable during the 7-day study. "
+                "The hydrogel remained stable at pH=2 and pH=10. "
+                "The boroxine was stable at 2.4 < pH < 9."
+            ),
+        }])
+        requirement = {
+            "id": "R1",
+            "kind": "stability_values",
+            "label": "Requested stability evidence",
+            "minimum": 2,
+        }
+        hydrogel_id = next(
+            item["id"] for item in catalog if "hydrogel remained stable" in item["text"]
+        )
+        contract = validate_fact_contract({
+            "evidence_ids": [],
+            "requirement_evidence": {"R1": [hydrogel_id]},
+        }, catalog, [requirement])
+        completed = complete_fact_contract(contract, catalog, [requirement])
+        claims = " ".join(item["claim"] for item in completed["facts"])
+
+        self.assertEqual(
+            [item["evidence_id"] for item in contract["facts"]],
+            [hydrogel_id],
+        )
+        self.assertIn("pH=2 and pH=10", claims)
+        self.assertIn("7-day study", claims)
+        self.assertIn("2.4 < pH < 9", claims)
+        self.assertTrue(completed["requirement_coverage"][0]["covered"])
 
     def test_fact_contract_prefers_complete_fact_over_fragments(self):
         catalog = build_evidence_catalog([{
@@ -874,6 +935,61 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         )
 
         self.assertEqual(requirements["relation_requirements"], [])
+
+    def test_mechanism_requirement_restores_named_source_interaction(self):
+        query = "How do therapeutic strategies targeting LAT1 differ in mechanism?"
+        chunks = [{
+            "source": "StructureA",
+            "text": (
+                "Retrieved evidence snippets:\n"
+                "[Snippet 1] JPH203 binds within the traditional substrate-binding pocket. "
+                "The chloride atom of JPH203 forms a halogen bond with Tyr259."
+            ),
+        }]
+        requirements = build_comparison_requirements(query, chunks)
+        payload = {"comparison_json": {
+            "source_roles": [{
+                "source": "StructureA",
+                "role": "mechanism",
+                "claim": "JPH203 binds the traditional substrate-binding pocket.",
+                "evidence": (
+                    "The α-amino group and α-carboxyl group of the head... "
+                    "the chloride atom of JPH203 forms a halogen bond with Tyr259."
+                ),
+            }],
+            "direct_routes": [],
+            "review_comparison_sources": [],
+            "supporting_mechanisms": [{
+                "source": "StructureA",
+                "claim": "JPH203 causes a conformational shift in TM1.",
+                "evidence": "JPH203 causes a conformational shift in TM1.",
+            }],
+            "dimensions": {},
+            "central_tradeoff": {"claim": "Mechanisms differ.", "sources": ["StructureA"]},
+        }, "comparison_requirements": requirements}
+        raw = json.dumps(payload)
+
+        self.assertTrue(any(
+            "preserve the source relation" in error
+            for error in _comparison_json_validation_errors(raw, query)
+        ))
+
+        normalized = json.loads(_normalize_comparison_json(
+            raw,
+            query,
+            requirements=requirements,
+        ))
+        mechanisms = normalized["comparison_json"]["supporting_mechanisms"]
+
+        self.assertEqual(
+            requirements["mechanism_requirements"][0]["anchors"],
+            ["halogen bond", "Tyr259"],
+        )
+        self.assertIn("halogen bond with Tyr259", mechanisms[0]["claim"])
+        self.assertFalse(_comparison_json_validation_errors(
+            json.dumps(normalized),
+            query,
+        ))
 
     def test_validator_accepts_source_close_generic_isotope_claim(self):
         query = "Compare routes focusing on isotopic enrichment and cost-effectiveness."

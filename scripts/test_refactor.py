@@ -1894,8 +1894,11 @@ class TestExecuteStructuredQuery(unittest.TestCase):
                 {
                     "source": "StructureA",
                     "role": "mechanism",
-                    "claim": "JPH203 has structural interactions in LAT1",
-                    "evidence": "JPH203 occupies the traditional LAT1 substrate-binding pocket",
+                    "claim": "JPH203 binds within the traditional LAT1 substrate-binding pocket",
+                    "evidence": (
+                        "The α-amino group and α-carboxyl group of the head... "
+                        "the chloride atom of JPH203 forms a halogen bond with Tyr259"
+                    ),
                 },
                 {
                     "source": "KineticsA",
@@ -1949,6 +1952,7 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertIn("- Mechanism:", answer)
         self.assertIn("traditional LAT1 substrate-binding pocket", answer)
         self.assertIn("halogen bond with Tyr259", answer)
+        self.assertNotIn("of the head", answer)
         self.assertNotIn("4.34 degree shift", answer)
         self.assertNotIn("TheoryA", answer)
         self.assertEqual(
@@ -2028,6 +2032,27 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertIn("approached through multiple routes", answer)
         self.assertNotIn("one combined limitation", answer)
         self.assertNotIn("feedstock is costly", answer)
+
+    def test_stage4_renderer_does_not_render_snippet_locator_as_evidence(self):
+        kb = json.dumps({"comparison_json": {
+            "source_roles": [{"source": "ReviewA", "role": "review/comparison source"}],
+            "direct_routes": [],
+            "review_comparison_sources": [{
+                "source": "ReviewA",
+                "claim": "The review compares multiple synthetic approaches.",
+                "evidence": "Snippet 2, 3, 4",
+            }],
+            "dimensions": {},
+            "central_tradeoff": {"claim": "Route constraints differ.", "sources": ["ReviewA"]},
+        }})
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question="Compare synthetic routes.",
+        )
+
+        self.assertIn("compares multiple synthetic approaches", answer)
+        self.assertNotIn("reports that Snippet 2, 3, 4", answer)
 
     def test_stage4_direct_render_is_concise_for_high_level_question(self):
         kb = """

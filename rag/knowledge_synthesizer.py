@@ -139,6 +139,11 @@ def _normalize_comparison_json(
     comparison = data.get("comparison_json") if isinstance(data, dict) else None
     if not isinstance(comparison, dict):
         return text
+    if requirements is None:
+        requirements = build_comparison_requirements(
+            query,
+            [{"text": evidence_text, "source": "retrieved evidence"}],
+        )
     comparison.setdefault("source_roles", [])
     comparison.setdefault("direct_routes", [])
     comparison.setdefault("review_comparison_sources", [])
@@ -182,6 +187,51 @@ def _normalize_comparison_json(
             and str(item.get("source", "")).strip() not in background_sources
         )
     ] if isinstance(comparison["supporting_mechanisms"], list) else []
+    role_sources = {
+        str(item.get("source", "")).strip()
+        for item in source_roles
+        if isinstance(item, dict) and item.get("source")
+    }
+    mechanism_additions = []
+    for requirement in requirements.get("mechanism_requirements", []):
+        if not isinstance(requirement, dict):
+            continue
+        source = str(requirement.get("source", "")).strip()
+        anchors = [
+            str(anchor).strip().lower()
+            for anchor in requirement.get("anchors", [])
+            if str(anchor).strip()
+        ]
+        existing = [
+            item for item in comparison["supporting_mechanisms"]
+            if isinstance(item, dict)
+            and str(item.get("source", "")).strip() == source
+        ]
+        if (
+            not source
+            or source not in role_sources
+            or source in background_sources
+            or any(
+                all(
+                    anchor in (
+                        f"{item.get('claim', '')} {item.get('evidence', '')}".lower()
+                    )
+                    for anchor in anchors
+                )
+                for item in existing
+            )
+        ):
+            continue
+        claim = re.sub(r"\s+", " ", str(requirement.get("claim", ""))).strip()
+        if claim:
+            mechanism_additions.append({
+                "source": source,
+                "claim": claim.rstrip("."),
+                "evidence": claim,
+            })
+    comparison["supporting_mechanisms"] = (
+        mechanism_additions + comparison["supporting_mechanisms"]
+    )
     for route in comparison["direct_routes"] if isinstance(comparison["direct_routes"], list) else []:
         if isinstance(route, dict):
             route.setdefault("outcome", "")
@@ -264,11 +314,6 @@ def _normalize_comparison_json(
         ))
     else:
         comparison["central_tradeoff"] = {"claim": "", "sources": []}
-    if requirements is None:
-        requirements = build_comparison_requirements(
-            query,
-            [{"text": evidence_text, "source": "retrieved evidence"}],
-        )
     attach_comparison_requirements(data, requirements)
     return json.dumps(data, ensure_ascii=False, indent=2)
 

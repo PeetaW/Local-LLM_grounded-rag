@@ -710,7 +710,29 @@ def validate_fact_contract(
                         "reason": "requirement evidence must be a list",
                     })
                     continue
-                rows.extend(mapped[:max(1, int(requirement.get("minimum", 1)))])
+                limit = max(1, int(requirement.get("minimum", 1)))
+                ranked = _rank_requirement(requirement, catalog)
+                allowed = {item["id"] for item in ranked}
+                accepted_count = 0
+                for evidence_id in mapped:
+                    if accepted_count >= limit:
+                        break
+                    if not isinstance(evidence_id, str) or evidence_id not in evidence:
+                        rejected.append({
+                            "requirement_id": requirement_id,
+                            "evidence_id": evidence_id,
+                            "reason": "unknown evidence_id",
+                        })
+                        continue
+                    if evidence_id not in allowed:
+                        rejected.append({
+                            "requirement_id": requirement_id,
+                            "evidence_id": evidence_id,
+                            "reason": "evidence does not satisfy requirement",
+                        })
+                        continue
+                    rows.append(evidence_id)
+                    accepted_count += 1
 
     selected = set()
     for index, evidence_id in enumerate(rows, 1):
