@@ -727,6 +727,7 @@ _TAIWAN_TERM_EQUIVALENTS = {
 _TRANSLATION_PHRASE_EQUIVALENTS = (
     ("bench scale", ("bench scale", "實驗室規模", "小試規模")),
     ("room temperature", ("room temperature", "室溫")),
+    ("furthermore", ("furthermore", "此外", "另外")),
     ("water-stable", ("water-stable", "water stable", "水穩定", "耐水")),
     ("later-stage", ("later-stage", "later stage", "後期", "後階段")),
     ("supplementary fig", ("supplementary fig", "supplementary figure", "補充圖")),
@@ -847,12 +848,32 @@ def _translation_omission_witness_present(
 ) -> bool:
     if kind not in {"omission", "mistranslation"}:
         return False
+    source_text = _normalized(source)
+    target_text = _normalized(target)
+    reason_text = _normalized(reason)
+    identifiers = set(re.findall(
+        r"\b(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9]+(?:-[a-z0-9]+)*\b",
+        reason_text,
+    ))
+    if kind == "omission" and any(
+        value in source_text and value in target_text for value in identifiers
+    ):
+        return True
+    words = re.findall(r"[a-z][a-z0-9-]*", reason_text)
+    if kind == "omission" and any(
+        phrase in source_text and phrase in target_text
+        for size in (5, 4, 3)
+        for start in range(len(words) - size + 1)
+        for phrase in [" ".join(words[start:start + size])]
+        if any(len(word) >= 8 for word in words[start:start + size])
+    ):
+        return True
+
     quoted = [
         next(value for value in match if value).strip()
         for match in re.findall(r"'([^']+)'|\"([^\"]+)\"|`([^`]+)`", reason or "")
         if any(match)
     ]
-    source_text = _normalized(source)
     phrases = [
         phrase for phrase in quoted
         if _normalized(phrase) and _normalized(phrase) in source_text
@@ -860,7 +881,6 @@ def _translation_omission_witness_present(
     if not phrases:
         return False
 
-    target_text = _normalized(target)
     target_numbers = _contract_numbers(target)
     verified = False
     for phrase in phrases:

@@ -814,6 +814,48 @@ class TestTranslationJudge(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(audit, [])
 
+    def test_translation_audit_discards_present_unquoted_witnesses(self):
+        source = (
+            "The inhibition was observed in HT-29 cells at 25% of control after 120 min. "
+            "Malignant cells are killed by neutron beam irradiation. "
+            "Furthermore, JPH203 forms a halogen bond with Tyr259."
+        )
+        target = (
+            "在 HT-29 細胞中觀察到抑制作用，120 min 後降至對照組的 25%。"
+            "惡性細胞隨後由 neutron beam irradiation 將其殺死。"
+            "此外，JPH203 與 Tyr259 形成鹵鍵。"
+        )
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [
+                {
+                    "type": "omission",
+                    "severity": "material",
+                    "source_ids": ["S1"],
+                    "target_ids": ["T1"],
+                    "reason": "The source specifies the inhibition was observed in HT-29 cells, but this detail is missing.",
+                },
+                {
+                    "type": "omission",
+                    "severity": "material",
+                    "source_ids": ["S2"],
+                    "target_ids": ["T2"],
+                    "reason": "The source states that malignant cells are killed by neutron beam irradiation, but the target omits it.",
+                },
+                {
+                    "type": "omission",
+                    "severity": "material",
+                    "source_ids": ["S3"],
+                    "target_ids": ["T3"],
+                    "reason": "The transition 'Furthermore' is omitted.",
+                },
+            ]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
 
 if __name__ == "__main__":
     unittest.main()
