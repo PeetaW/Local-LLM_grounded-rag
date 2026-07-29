@@ -541,7 +541,7 @@ def _atomic_dimension_claims(claim: str) -> list[str]:
 
 
 _SPECULATIVE_MECHANISM_RE = re.compile(
-    r"\b(?:hypothesi[sz](?:e|ed)|possible mechanisms?|might|may|could|"
+    r"\b(?:hypothesi[sz](?:e|ed)|(?:possible|proposed) mechanisms?|might|may|could|"
     r"potentially|we speculate|it is possible)\b",
     re.IGNORECASE,
 )
@@ -550,8 +550,8 @@ _SPECULATIVE_MECHANISM_RE = re.compile(
 def _source_close_evidence(text: str) -> str:
     value = str(text or "").strip()
     if re.fullmatch(
-        r"snippets?\s+\d+(?:\s*(?:,|and)\s*\d+)*",
-        value,
+        r"snippets?\s+\d+(?:\s*(?:,|and)\s*(?:snippets?\s+)?\d+)*",
+        value.rstrip("."),
         re.IGNORECASE,
     ):
         return ""
@@ -656,10 +656,16 @@ def _stage4_empty_answer_fallback(
         role_claim = str(role.get("claim", "")).strip().rstrip(".")
         claim = role_claim
         role_evidence = str(role.get("evidence", ""))
-        atomic_evidence = (
-            "" if re.search(r"\.{3,}", role_evidence)
-            else _source_close_evidence(role_evidence)
-        )
+        atomic_evidence = _source_close_evidence(role_evidence)
+        if atomic_evidence and role_claim:
+            evidence_tokens = set(re.findall(r"[a-z][a-z0-9-]+", atomic_evidence.lower()))
+            role_tokens = set(re.findall(r"[a-z][a-z0-9-]+", role_claim.lower()))
+            if (
+                len(evidence_tokens & role_tokens)
+                / max(1, min(len(evidence_tokens), len(role_tokens)))
+                < 0.5
+            ):
+                atomic_evidence = ""
         if atomic_evidence:
             claim = atomic_evidence
         if not speculative_requested and _SPECULATIVE_MECHANISM_RE.search(claim):
@@ -682,13 +688,25 @@ def _stage4_empty_answer_fallback(
         if source and claim and source not in background_sources and not duplicates:
             lines.append(f"- Mechanism: `{source}` reports {claim} [{source}].")
 
+    review_role_evidence = {
+        str(role.get("source", "")).strip(): str(role.get("evidence", ""))
+        for role in source_roles
+        if (
+            isinstance(role, dict)
+            and "review/comparison" in str(role.get("role", "")).lower()
+            and str(role.get("source", "")).strip()
+        )
+    }
     for review in comparison.get("review_comparison_sources", []):
         if not isinstance(review, dict):
             continue
         source = str(review.get("source", "")).strip()
         if source and source not in background_sources:
             claim = str(review.get("claim", "")).strip().rstrip(".")
-            atomic_evidence = _source_close_evidence(review.get("evidence", ""))
+            atomic_evidence = max((
+                _source_close_evidence(review_role_evidence.get(source, "")),
+                _source_close_evidence(review.get("evidence", "")),
+            ), key=len)
             if atomic_evidence:
                 claim = atomic_evidence
             if claim:

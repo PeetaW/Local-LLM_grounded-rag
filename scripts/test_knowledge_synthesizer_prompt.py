@@ -17,6 +17,7 @@ import config as cfg
 from rag.comparison_json_validator import (
     attach_comparison_requirements,
     build_comparison_requirements,
+    comparison_json_payload,
     exact_isotope_terms,
 )
 from rag.fact_contract import (
@@ -692,6 +693,11 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         self.assertIn('"safety"', normalized)
         self.assertNotIn("```", normalized)
 
+    def test_comparison_json_parser_accepts_pdf_control_character(self):
+        raw = '{"comparison_json":{"evidence":"20.3 \x01 0.8"}}'
+        parsed = comparison_json_payload(raw)
+        self.assertEqual(parsed["comparison_json"]["evidence"], "20.3 \x01 0.8")
+
     def test_comparison_json_normalizer_patches_query_dimensions_and_review_routes(self):
         raw = """
         {
@@ -990,6 +996,49 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             json.dumps(normalized),
             query,
         ))
+
+    def test_mechanism_requirement_precedes_dense_anchor_paraphrase(self):
+        query = "How do therapeutic strategies targeting LAT1 differ in mechanism?"
+        chunks = [{
+            "source": "StructureA",
+            "text": (
+                "Retrieved evidence snippets:\n"
+                "[Snippet 1] JPH203 binds within the traditional substrate-binding pocket. "
+                "The chloride atom of JPH203 forms a halogen bond with Tyr259."
+            ),
+        }]
+        requirements = build_comparison_requirements(query, chunks)
+        dense_claim = (
+            "JPH203 uses a halogen bond with Tyr259 and several hydrophobic contacts."
+        )
+        payload = {"comparison_json": {
+            "source_roles": [{
+                "source": "StructureA",
+                "role": "mechanism",
+                "claim": "JPH203 binds the traditional substrate-binding pocket.",
+                "evidence": "JPH203 binds within the traditional substrate-binding pocket.",
+            }],
+            "direct_routes": [],
+            "review_comparison_sources": [],
+            "supporting_mechanisms": [{
+                "source": "StructureA",
+                "claim": dense_claim,
+                "evidence": dense_claim,
+            }],
+            "dimensions": {},
+            "central_tradeoff": {"claim": "Mechanisms differ.", "sources": ["StructureA"]},
+        }, "comparison_requirements": requirements}
+
+        normalized = json.loads(_normalize_comparison_json(
+            json.dumps(payload),
+            query,
+            requirements=requirements,
+        ))
+        mechanisms = normalized["comparison_json"]["supporting_mechanisms"]
+        required_claim = requirements["mechanism_requirements"][0]["claim"].rstrip(".")
+
+        self.assertEqual(mechanisms[0]["claim"], required_claim)
+        self.assertEqual(mechanisms[1]["claim"], dense_claim)
 
     def test_validator_accepts_source_close_generic_isotope_claim(self):
         query = "Compare routes focusing on isotopic enrichment and cost-effectiveness."

@@ -860,7 +860,8 @@ class TestRunSubqueriesParallel(unittest.TestCase):
 
     def test_comparison_snippet_clips_around_dimension_terms(self):
         text = (
-            "opening procedural background " * 80
+            "10B is discussed in introductory background. "
+            + "opening procedural background " * 80
             + "The review highlights limitations regarding scalability, cost-effectiveness, "
             + "and safety, especially considering the high cost of isotopically enriched 10B. "
             + "trailing text " * 80
@@ -1936,8 +1937,8 @@ class TestExecuteStructuredQuery(unittest.TestCase):
                 "evidence": "JPH203 inhibition involves co-incubation and preincubation effects",
             }, {
                 "source": "TheoryA",
-                "claim": "Hypothesized mechanisms may involve transient membrane localization",
-                "evidence": "Hypothesized mechanisms may involve transient membrane localization",
+                "claim": "Proposed mechanisms include transient membrane localization",
+                "evidence": "Proposed mechanisms include transient membrane localization",
             }],
             "review_comparison_sources": [],
             "dimensions": {},
@@ -2033,6 +2034,40 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertNotIn("one combined limitation", answer)
         self.assertNotIn("feedstock is costly", answer)
 
+    def test_stage4_renderer_prefers_review_role_source_sentence(self):
+        complete = (
+            "There is no consensus approach to making it—the synthesis of L-BPA "
+            "has been approached through multiple routes."
+        )
+        clipped = "The synthesis of L-BPA has been approached through multiple routes."
+        for role_evidence, review_evidence in (
+            (complete, clipped),
+            (clipped, complete),
+        ):
+            kb = json.dumps({"comparison_json": {
+                "source_roles": [{
+                    "source": "ReviewA",
+                    "role": "review/comparison source",
+                    "claim": "The review compares L-BPA routes.",
+                    "evidence": role_evidence,
+                }],
+                "direct_routes": [],
+                "review_comparison_sources": [{
+                    "source": "ReviewA",
+                    "claim": "The review compares several constraints.",
+                    "evidence": review_evidence,
+                }],
+                "dimensions": {},
+                "central_tradeoff": {"claim": "Route constraints differ.", "sources": ["ReviewA"]},
+            }})
+            answer = pipeline_module._stage4_empty_answer_fallback(
+                kb,
+                atomic_only=True,
+                question="Compare L-BPA synthesis routes.",
+            )
+
+            self.assertIn("There is no consensus approach", answer)
+
     def test_stage4_renderer_does_not_render_snippet_locator_as_evidence(self):
         kb = json.dumps({"comparison_json": {
             "source_roles": [{"source": "ReviewA", "role": "review/comparison source"}],
@@ -2040,7 +2075,7 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             "review_comparison_sources": [{
                 "source": "ReviewA",
                 "claim": "The review compares multiple synthetic approaches.",
-                "evidence": "Snippet 2, 3, 4",
+                "evidence": "Snippet 2, Snippet 3, Snippet 4.",
             }],
             "dimensions": {},
             "central_tradeoff": {"claim": "Route constraints differ.", "sources": ["ReviewA"]},
@@ -2052,7 +2087,42 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         )
 
         self.assertIn("compares multiple synthetic approaches", answer)
-        self.assertNotIn("reports that Snippet 2, 3, 4", answer)
+        self.assertNotIn("reports that Snippet 2, Snippet 3, Snippet 4", answer)
+
+    def test_stage4_renderer_prefers_overlapping_source_close_role_evidence(self):
+        source = "StructureA"
+        kb = json.dumps({"comparison_json": {
+            "target_compound": "LAT1",
+            "source_roles": [{
+                "source": source,
+                "role": "mechanism",
+                "claim": (
+                    "JPH203 binds to the traditional substrate-binding pocket "
+                    "of LAT1 with high specificity"
+                ),
+                "evidence": (
+                    "JPH203 binds within the traditional substrate-binding pocket... "
+                    "The hydrophobic tail moiety fits into a hydrophobic pocket."
+                ),
+            }],
+            "direct_routes": [],
+            "supporting_mechanisms": [{
+                "source": source,
+                "claim": "The chloride atom of JPH203 forms a halogen bond with Tyr259",
+                "evidence": "The chloride atom of JPH203 forms a halogen bond with Tyr259.",
+            }],
+            "review_comparison_sources": [],
+            "dimensions": {},
+            "central_tradeoff": {"claim": "The binding mechanisms differ.", "sources": [source]},
+        }})
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question="How do therapeutic strategies targeting LAT1 differ in mechanism?",
+        )
+
+        self.assertIn("binds within the traditional substrate-binding pocket", answer)
+        self.assertNotIn("high specificity", answer)
 
     def test_stage4_direct_render_is_concise_for_high_level_question(self):
         kb = """

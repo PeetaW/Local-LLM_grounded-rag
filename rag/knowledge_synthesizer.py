@@ -193,44 +193,39 @@ def _normalize_comparison_json(
         if isinstance(item, dict) and item.get("source")
     }
     mechanism_additions = []
+    mechanism_keys = set()
     for requirement in requirements.get("mechanism_requirements", []):
         if not isinstance(requirement, dict):
             continue
         source = str(requirement.get("source", "")).strip()
-        anchors = [
-            str(anchor).strip().lower()
-            for anchor in requirement.get("anchors", [])
-            if str(anchor).strip()
-        ]
-        existing = [
-            item for item in comparison["supporting_mechanisms"]
-            if isinstance(item, dict)
-            and str(item.get("source", "")).strip() == source
-        ]
+        claim = re.sub(r"\s+", " ", str(requirement.get("claim", ""))).strip()
+        claim_key = claim.rstrip(".").lower()
         if (
             not source
             or source not in role_sources
             or source in background_sources
-            or any(
-                all(
-                    anchor in (
-                        f"{item.get('claim', '')} {item.get('evidence', '')}".lower()
-                    )
-                    for anchor in anchors
-                )
-                for item in existing
-            )
+            or not claim_key
+            or (source, claim_key) in mechanism_keys
         ):
             continue
-        claim = re.sub(r"\s+", " ", str(requirement.get("claim", ""))).strip()
-        if claim:
-            mechanism_additions.append({
-                "source": source,
-                "claim": claim.rstrip("."),
-                "evidence": claim,
-            })
+        mechanism_keys.add((source, claim_key))
+        mechanism_additions.append({
+            "source": source,
+            "claim": claim.rstrip("."),
+            "evidence": claim,
+        })
     comparison["supporting_mechanisms"] = (
-        mechanism_additions + comparison["supporting_mechanisms"]
+        mechanism_additions + [
+            item for item in comparison["supporting_mechanisms"]
+            if (
+                str(item.get("source", "")).strip(),
+                re.sub(
+                    r"\s+",
+                    " ",
+                    str(item.get("claim", "")),
+                ).strip().rstrip(".").lower(),
+            ) not in mechanism_keys
+        ]
     )
     for route in comparison["direct_routes"] if isinstance(comparison["direct_routes"], list) else []:
         if isinstance(route, dict):

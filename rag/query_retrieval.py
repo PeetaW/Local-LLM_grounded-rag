@@ -357,13 +357,20 @@ def _clip_evidence_snippet(text: str, query_text: str, limit: int = 900) -> str:
     positions = [lower.find(term) for term in _COMPARISON_DIMENSION_TERMS if lower.find(term) >= 0]
     if not positions:
         return text[:limit]
-    pos = min(positions)
+    windows = {
+        position: _sentence_window(text, position, limit)
+        for position in positions
+    }
+    pos = max(windows, key=lambda position: (
+        sum(term in windows[position].lower() for term in _COMPARISON_DIMENSION_TERMS),
+        _query_window_score(windows[position], query_text),
+        len(windows[position]),
+    ))
     start = max(0, pos - limit // 3)
     sentence_start = text.rfind(". ", max(0, start - 200), start)
     if sentence_start >= 0:
         start = sentence_start + 2
     end = min(len(text), start + limit)
-    # ponytail: finish only a nearby sentence; raise the 200-char tail if eval still clips key terms.
     anchor = max(position for position in positions if position < end)
     sentence_end = text.rfind(". ", anchor, end)
     if sentence_end < 0:

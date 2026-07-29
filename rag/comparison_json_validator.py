@@ -82,7 +82,7 @@ def comparison_json_payload(text: str):
     if start > 0 and end > start:
         stripped = stripped[start:end + 1]
     try:
-        return json.loads(stripped)
+        return json.loads(stripped, strict=False)
     except json.JSONDecodeError:
         return None
 
