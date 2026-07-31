@@ -19,7 +19,9 @@ from rag.comparison_json_validator import (
     build_comparison_requirements,
     comparison_json_payload as _comparison_json_payload,
     comparison_json_validation_errors as _comparison_json_validation_errors,
+    direct_route_targets_query_target,
     query_dimension_keys as _query_dimension_keys,
+    query_target,
 )
 
 logger = logging.getLogger(__name__)
@@ -149,6 +151,25 @@ def _normalize_comparison_json(
     comparison.setdefault("review_comparison_sources", [])
     comparison.setdefault("supporting_mechanisms", [])
     source_roles = comparison["source_roles"] if isinstance(comparison["source_roles"], list) else []
+    target = str(requirements.get("query_target") or query_target(query)).strip()
+    indirect_sources = {
+        str(route.get("source", "")).strip()
+        for route in comparison["direct_routes"]
+        if (
+            isinstance(route, dict)
+            and route.get("source")
+            and target
+            and not direct_route_targets_query_target(route, target)
+        )
+    } if isinstance(comparison["direct_routes"], list) else set()
+    if indirect_sources:
+        for item in source_roles:
+            if isinstance(item, dict) and str(item.get("source", "")).strip() in indirect_sources:
+                item["role"] = "background"
+        comparison["direct_routes"] = [
+            route for route in comparison["direct_routes"]
+            if not isinstance(route, dict) or str(route.get("source", "")).strip() not in indirect_sources
+        ]
     review_sources = {
         str(item.get("source", "")).strip() for item in source_roles
         if (
@@ -327,6 +348,7 @@ Rules:
 - Set `evidence_found=true` only when the retrieved evidence supports that dimension; otherwise set it false and leave `evidence` empty.
 - Every dimension evidence item must contain exactly one source and one atomic claim. Split claims from different sources into separate items.
 - Background sources must not provide core comparison-dimension evidence; use route or review/comparison sources.
+- For a query about strategies targeting X, direct_routes must act on X. Target-mediated uptake or delivery that does not inhibit, suppress, block, bind, or otherwise act on X is background.
 - When the question asks how mechanisms differ, preserve each structural or mechanistic witness in `supporting_mechanisms` with one source, one atomic claim, and its paper evidence.
 - Every direct route must preserve its reported outcome, including optical purity, e.e., yield, or other comparison-relevant result when present.
 - central_tradeoff must contain one claim and only the source paper(s) that directly support it; prefer a review/comparison source when available.
@@ -398,6 +420,7 @@ Rules:
 - Source metadata and guidance lines may only decide role; they are not paper evidence.
 - A review/comparison source stays role="review/comparison source"; do not rewrite it as an experimental route paper.
 - If a review/comparison source describes example routes, summarize them in review_comparison_sources, not in direct_routes.
+- For a query about strategies targeting X, classify target-mediated uptake or delivery as background unless the intervention itself acts on X.
 __SYNTHETIC_SCOPE__
 __MECHANISM_RULE__
 - Each dimensions.*.evidence item must bind exactly one atomic claim to exactly one source. Never place two papers' claims in one item and never use a separate multi-source list.

@@ -71,6 +71,18 @@ sys.modules["rag.knowledge_synthesizer"]._comparison_json_validation_errors = Ma
 sys.modules["rag.comparison_json_validator"].comparison_json_validation_errors = MagicMock(
     return_value=[]
 )
+def _comparison_payload_stub(text):
+    stripped = str(text).strip()
+    start, end = stripped.find("{"), stripped.rfind("}")
+    if start > 0 and end > start:
+        stripped = stripped[start:end + 1]
+    try:
+        return json.loads(stripped, strict=False)
+    except json.JSONDecodeError:
+        return None
+
+
+sys.modules["rag.comparison_json_validator"].comparison_json_payload = _comparison_payload_stub
 sys.modules["rag.comparison_json_validator"].exact_isotope_terms = (
     lambda text, require_context=True: ["10B"] if "10b" in str(text).lower() else []
 )
@@ -1859,7 +1871,7 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertIn("optically pure L-BPA at high e.e", answer)
         self.assertIn("CMDC-20-e202500059", answer)
         self.assertIn(
-            "reports that L-BPA synthesis has been approached through multiple routes",
+            "Review/comparison source: L-BPA synthesis has been approached through multiple routes",
             answer,
         )
         self.assertIn("oxidant on scale", answer)
@@ -1980,6 +1992,80 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         finally:
             cfg.STAGE4_ANSWER_VALIDATION_ENABLED = old
 
+    def test_stage4_renderer_restores_strategy_requirements_without_background_or_discourse(self):
+        kb = json.dumps({
+            "comparison_json": {
+                "target_compound": "LAT1",
+                "source_roles": [
+                    {"source": "InhibitorA", "role": "route"},
+                    {"source": "PeptideA", "role": "route"},
+                    {
+                        "source": "StructureA",
+                        "role": "mechanism",
+                        "claim": "JPH203 binds within the LAT1 substrate-binding pocket.",
+                        "evidence": "Furthermore, JPH203 forms a halogen bond with Tyr259.",
+                    },
+                    {"source": "DeliveryA", "role": "background"},
+                ],
+                "direct_routes": [{
+                    "source": "InhibitorA",
+                    "route_phrase": "JPH203 inhibition of LAT1",
+                    "outcome": "blocked amino-acid transport",
+                }, {
+                    "source": "PeptideA",
+                    "route_phrase": "self-assembling peptide targeting LAT1",
+                    "outcome": "suppressed amino-acid uptake",
+                }],
+                "supporting_mechanisms": [{
+                    "source": "StructureA",
+                    "claim": "Furthermore, JPH203 forms a halogen bond with Tyr259.",
+                    "evidence": "Furthermore, JPH203 forms a halogen bond with Tyr259.",
+                }],
+                "review_comparison_sources": [],
+                "dimensions": {},
+                "central_tradeoff": {
+                    "claim": "The interventions act on LAT1 through distinct mechanisms.",
+                    "sources": ["InhibitorA", "PeptideA", "StructureA"],
+                },
+            },
+            "comparison_requirements": {
+                "strategy_requirements": [{
+                    "source": "InhibitorA",
+                    "claim": "JPH203 competitively inhibits LAT1-mediated amino-acid transport.",
+                }, {
+                    "source": "PeptideA",
+                    "claim": (
+                        "We designed a self-assembling peptide conjugated to the "
+                        "L-phenylalanine targeting motif as a LAT1 ligand."
+                    ),
+                }, {
+                    "source": "PeptideA",
+                    "claim": (
+                        "The peptide suppressed LAT1-mediated transport and thereby "
+                        "inhibited cancer-cell proliferation."
+                    ),
+                }, {
+                    "source": "StructureA",
+                    "claim": "The LAT1 structure provides a structural basis for inhibitor design.",
+                }, {
+                    "source": "DeliveryA",
+                    "claim": "BPA uptake into tumor cells is mediated by LAT1.",
+                }],
+            },
+        })
+
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question="How do therapeutic strategies targeting LAT1 differ in mechanism?",
+        )
+
+        for term in ("competitively", "L-phenylalanine", "proliferation", "structural basis"):
+            self.assertIn(term, answer)
+        self.assertIn("reports JPH203 forms a halogen bond with Tyr259", answer)
+        self.assertNotIn("Furthermore", answer)
+        self.assertNotIn("DeliveryA", answer)
+
     def test_stage4_renderer_splits_semicolon_dimension_claims(self):
         kb = json.dumps({"comparison_json": {
             "source_roles": [{"source": "ReviewA", "role": "review/comparison source"}],
@@ -2009,6 +2095,112 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertIn("isotope starting material [ReviewA].", answer)
         self.assertIn("10B costs over 1000 times normal boric acid [ReviewA].", answer)
 
+    def test_stage4_renderer_keeps_review_citation_atomic_and_splits_lowercase_cost_clause(self):
+        kb = json.dumps({"comparison_json": {
+            "source_roles": [{
+                "source": "ReviewA",
+                "role": "review/comparison source",
+                "evidence": (
+                    "The reported methods are comprehensively examined and compared. "
+                    "The review highlights limitations regarding scalability and cost."
+                ),
+            }],
+            "direct_routes": [],
+            "review_comparison_sources": [{
+                "source": "ReviewA",
+                "claim": "The review compares synthetic methods.",
+                "dimensions": ["cost-effectiveness"],
+            }],
+            "dimensions": {
+                "cost_effectiveness": {
+                    "requested": True,
+                    "evidence_found": True,
+                    "evidence": [{
+                        "source": "ReviewA",
+                        "claim": (
+                            "There is a high cost of isotopically enriched 10B; "
+                            "when preparing enriched compounds, the major cost comes "
+                            "from the isotope starting material."
+                        ),
+                    }],
+                },
+            },
+            "central_tradeoff": {"claim": "Enrichment raises cost.", "sources": ["ReviewA"]},
+        }})
+
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question="Compare synthesis routes and cost-effectiveness.",
+        )
+
+        self.assertIn(
+            "Review/comparison source: The reported methods are comprehensively "
+            "examined and compared [ReviewA].",
+            answer,
+        )
+        self.assertNotIn("The review highlights limitations regarding", answer)
+        self.assertIn(
+            "Cost-effectiveness: There is a high cost of isotopically enriched 10B "
+            "[ReviewA].",
+            answer,
+        )
+        self.assertIn(
+            "Cost-effectiveness: when preparing enriched compounds, the major cost "
+            "comes from the isotope starting material [ReviewA].",
+            answer,
+        )
+
+    def test_stage4_renderer_atomizes_role_claim_when_review_evidence_is_locator(self):
+        kb = json.dumps({"comparison_json": {
+            "source_roles": [{
+                "source": "ReviewA",
+                "role": "review/comparison source",
+                "claim": (
+                    "The synthesis has been approached through multiple routes, "
+                    "reflecting purity challenges, with limitations regarding scale and cost."
+                ),
+                "evidence": "Snippet 3",
+            }],
+            "direct_routes": [],
+            "review_comparison_sources": [{
+                "source": "ReviewA",
+                "claim": (
+                    "There is no consensus approach; reported methods have limitations "
+                    "regarding scalability and cost."
+                ),
+                "dimensions": ["scalability", "cost-effectiveness"],
+                "evidence": "Snippet 3",
+            }],
+            "dimensions": {},
+            "central_tradeoff": {"claim": "Purity versus scale and cost.", "sources": ["ReviewA"]},
+        }})
+
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question="Compare synthesis routes.",
+        )
+
+        self.assertIn(
+            "Review/comparison source: The synthesis has been approached through "
+            "multiple routes, reflecting purity challenges [ReviewA].",
+            answer,
+        )
+        self.assertNotIn("reported methods have limitations", answer)
+
+    def test_atomic_dimension_claims_splits_specific_apposition(self):
+        self.assertEqual(
+            pipeline_module._atomic_dimension_claims(
+                "The major cost comes from isotope starting material, "
+                "specifically the high cost of isotopically enriched 10B."
+            ),
+            [
+                "The major cost comes from isotope starting material",
+                "the high cost of isotopically enriched 10B",
+            ],
+        )
+
     def test_stage4_renderer_uses_atomic_review_evidence(self):
         kb = json.dumps({"comparison_json": {
             "source_roles": [{"source": "ReviewA", "role": "review/comparison source"}],
@@ -2034,39 +2226,73 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertNotIn("one combined limitation", answer)
         self.assertNotIn("feedstock is costly", answer)
 
-    def test_stage4_renderer_prefers_review_role_source_sentence(self):
-        complete = (
-            "There is no consensus approach to making it—the synthesis of L-BPA "
-            "has been approached through multiple routes."
+    def test_stage4_renderer_prefers_role_scope_over_longer_review_detail(self):
+        kb = json.dumps({"comparison_json": {
+            "source_roles": [{
+                "source": "ReviewA",
+                "role": "review/comparison source",
+                "claim": "The review compares L-BPA routes.",
+                "evidence": (
+                    "The synthesis of L-BPA has been approached through multiple routes, "
+                    "reflecting challenges in producing enriched material."
+                ),
+            }],
+            "direct_routes": [],
+            "review_comparison_sources": [{
+                "source": "ReviewA",
+                "claim": "The review compares several constraints.",
+                "evidence": (
+                    "The review highlights the limitations of each method regarding "
+                    "scalability, cost-effectiveness, and safety, especially isotope cost."
+                ),
+            }],
+            "dimensions": {},
+            "central_tradeoff": {"claim": "Route constraints differ.", "sources": ["ReviewA"]},
+        }})
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question="Compare L-BPA synthesis routes.",
         )
-        clipped = "The synthesis of L-BPA has been approached through multiple routes."
-        for role_evidence, review_evidence in (
-            (complete, clipped),
-            (clipped, complete),
-        ):
-            kb = json.dumps({"comparison_json": {
-                "source_roles": [{
-                    "source": "ReviewA",
-                    "role": "review/comparison source",
-                    "claim": "The review compares L-BPA routes.",
-                    "evidence": role_evidence,
-                }],
-                "direct_routes": [],
-                "review_comparison_sources": [{
-                    "source": "ReviewA",
-                    "claim": "The review compares several constraints.",
-                    "evidence": review_evidence,
-                }],
-                "dimensions": {},
-                "central_tradeoff": {"claim": "Route constraints differ.", "sources": ["ReviewA"]},
-            }})
-            answer = pipeline_module._stage4_empty_answer_fallback(
-                kb,
-                atomic_only=True,
-                question="Compare L-BPA synthesis routes.",
-            )
 
-            self.assertIn("There is no consensus approach", answer)
+        self.assertIn(
+            "approached through multiple routes, reflecting challenges in producing "
+            "enriched material [ReviewA].",
+            answer,
+        )
+        self.assertNotIn("especially isotope cost", answer)
+
+    def test_stage4_renderer_prefers_review_overview_over_generic_role_evidence(self):
+        kb = json.dumps({"comparison_json": {
+            "source_roles": [{
+                "source": "ReviewA",
+                "role": "review/comparison source",
+                "claim": "A comprehensive review compares reported syntheses.",
+                "evidence": (
+                    "Reported methods from academic and patent literature are "
+                    "comprehensively examined and compared."
+                ),
+            }],
+            "direct_routes": [],
+            "review_comparison_sources": [{
+                "source": "ReviewA",
+                "claim": "There is no consensus approach to making the target.",
+                "evidence": (
+                    "There is no consensus approach to making it—the synthesis has been "
+                    "approached through multiple routes, reflecting production challenges."
+                ),
+            }],
+            "dimensions": {},
+            "central_tradeoff": {"claim": "Purity versus scale and cost.", "sources": ["ReviewA"]},
+        }})
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question="Compare synthesis routes.",
+        )
+
+        self.assertIn("approached through multiple routes", answer)
+        self.assertNotIn("comprehensively examined and compared", answer)
 
     def test_stage4_renderer_does_not_render_snippet_locator_as_evidence(self):
         kb = json.dumps({"comparison_json": {
@@ -2135,7 +2361,8 @@ class TestExecuteStructuredQuery(unittest.TestCase):
           "direct_routes":[{
             "source":"bbb0683",
             "route_phrase":"enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis",
-            "outcome":"74% e.e. for adduct 4; optically pure L-BPA (100% optical purity) with 79% yield"
+            "outcome":"74% e.e. for adduct 4; optically pure L-BPA (100% optical purity) with 79% yield",
+            "evidence":"The methyl ester was hydrolyzed with chymo- trypsin to furnish optically pure L-BPA."
           }],
           "review_comparison_sources":[{
             "source":"CMDC-20-e202500059",
@@ -2166,6 +2393,15 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             question="Compare routes focusing on isotopic enrichment, scalability, and cost-effectiveness.",
         )
         self.assertIn("yielding optically pure L-BPA at high e.e.", answer)
+        self.assertIn(
+            "reports enantioselective alkylation followed by enzymatic hydrolysis,",
+            answer,
+        )
+        self.assertIn(
+            "Route detail: Hydrolyzed with chymotrypsin to furnish optically pure L-BPA "
+            "[bbb0683].",
+            answer,
+        )
         self.assertIn(
             "has been approached through multiple routes [CMDC-20-e202500059].",
             answer,

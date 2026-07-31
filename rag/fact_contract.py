@@ -312,7 +312,20 @@ def _requirement_score(requirement: dict, evidence: str) -> int:
         ):
             return 0
         markers = len(_STRUCTURE_IDENTITY_RE.findall(evidence))
-        return 20 + 4 * markers + 3 * overlap if markers else 0
+        precursor_formation = bool(
+            re.search(r"\bdehydrat\w*\b", evidence, re.IGNORECASE)
+            and re.search(r"\bdimer\w*\b", evidence, re.IGNORECASE)
+        )
+        emission = bool(re.search(
+            r"\baggregation-induced\s+(?:enhanced\s+)?emission\b",
+            evidence,
+            re.IGNORECASE,
+        ))
+        return (
+            20 + 4 * markers + 3 * overlap
+            + 10 * precursor_formation + 4 * emission
+            if markers else 0
+        )
     if kind == "stability_values":
         pH_range = bool(re.search(
             r"\d+(?:\.\d+)?\s*<\s*pH\s*<\s*\d+(?:\.\d+)?",

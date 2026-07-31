@@ -177,6 +177,13 @@ _CONTRACT_RELATION_GROUPS = (
 _POSITIVE_RECOVERY_GROUPS = (
     ("enhancement", ("enhanc", "augment")),
 )
+_DOCUMENT_ID_RE = re.compile(
+    r"(?<![A-Za-z0-9.-])"
+    r"(?=[A-Za-z0-9.-]*[A-Za-z])"
+    r"(?=[A-Za-z0-9.-]*\d{5,})"
+    r"[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)+"
+    r"(?![A-Za-z0-9.-])"
+)
 
 
 def _without_citations(text: str) -> str:
@@ -185,6 +192,7 @@ def _without_citations(text: str) -> str:
 
 def _contract_numbers(text: str) -> set[str]:
     plain = _without_citations(text)
+    plain = _DOCUMENT_ID_RE.sub(" ", plain)
     plain = re.sub(r"\\(?:text|mathrm)\{([^{}]*)\}", r"\1", plain)
     plain = re.sub(r"(?<=[A-Za-z])_\{?(\d+)\}?", r"\1", plain)
     values = re.findall(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?(?![A-Za-z0-9])", plain)
@@ -209,16 +217,36 @@ def _missing_contract_groups(fact: str, evidence: str, groups) -> set[str]:
     }
 
 
-def _covered_contract_missing(fact: str, evidence: str) -> set[str]:
+def _covered_contract_missing(
+    fact: str,
+    evidence: str,
+    required_terms: tuple[str, ...] = (),
+) -> set[str]:
     missing_numbers = _contract_numbers(fact) - _contract_numbers(evidence)
     dependent_facets = set(re.findall(
         r"\b([a-z][a-z0-9]*)[- ]dependent\b",
         _normalized(fact),
     ))
     missing_facets = dependent_facets - _contract_tokens(evidence)
+    evidence_text = _normalized(evidence)
+    def _required_term_present(term: str) -> bool:
+        normalized = _normalized(term)
+        if normalized in evidence_text:
+            return True
+        if " " not in normalized and normalized.endswith("e") and len(normalized) > 4:
+            root = re.escape(normalized[:-1])
+            return bool(re.search(rf"\b{root}(?:e(?:s|d|ly)?|ing)\b", evidence_text))
+        return False
+
+    missing_required = {
+        f"term:{term}"
+        for term in required_terms
+        if not _required_term_present(term)
+    }
     return (
         missing_numbers
         | missing_facets
+        | missing_required
         | _missing_contract_groups(
             fact,
             evidence,
@@ -229,10 +257,15 @@ def _covered_contract_missing(fact: str, evidence: str) -> set[str]:
     )
 
 
-def _apply_fact_contract(fact: str, verdict: str, evidence: list[str]) -> tuple[str, str]:
+def _apply_fact_contract(
+    fact: str,
+    verdict: str,
+    evidence: list[str],
+    required_terms: tuple[str, ...] = (),
+) -> tuple[str, str]:
     evidence_text = " ".join(evidence)
     if verdict == "covered":
-        missing = sorted(_covered_contract_missing(fact, evidence_text))
+        missing = sorted(_covered_contract_missing(fact, evidence_text, required_terms))
         if missing:
             return "missing", f"deterministic contract missing required elements: {', '.join(missing)}"
     elif verdict == "contradicted":
@@ -267,11 +300,12 @@ def _extend_fact_contract_witnesses(
     evidence_ids: list[str],
     evidence: list[str],
     candidate_items: list[dict],
+    required_terms: tuple[str, ...] = (),
 ) -> tuple[list[str], list[str]] | None:
     """Add at most two complementary passages that close explicit contract gaps."""
     selected_ids = list(dict.fromkeys(evidence_ids))
     selected = list(evidence)
-    missing = _covered_contract_missing(fact, " ".join(selected))
+    missing = _covered_contract_missing(fact, " ".join(selected), required_terms)
     fact_tokens = _contract_tokens(fact)
     limit = min(4, len(selected_ids) + 2)
 
@@ -285,13 +319,18 @@ def _extend_fact_contract_witnesses(
                 len(fact_tokens & _contract_tokens(text)) / len(fact_tokens)
                 if fact_tokens else 0.0
             )
-            if overlap < 0.25:
-                continue
             trial_missing = _covered_contract_missing(
                 fact,
                 " ".join([*selected, text]),
+                required_terms,
             )
             reduction = len(missing) - len(trial_missing)
+            closes_required_term = any(
+                value.startswith("term:")
+                for value in missing - trial_missing
+            )
+            if overlap < 0.25 and not closes_required_term:
+                continue
             if reduction > 0 and (best is None or (reduction, overlap) > best[0]):
                 best = ((reduction, overlap), item, trial_missing)
         if best is None:
@@ -303,7 +342,11 @@ def _extend_fact_contract_witnesses(
     return (selected_ids, selected) if not missing else None
 
 
-def _positive_contract_witness(fact: str, candidate_items: list[dict]) -> dict | None:
+def _positive_contract_witness(
+    fact: str,
+    candidate_items: list[dict],
+    required_terms: tuple[str, ...] = (),
+) -> dict | None:
     fact_text = _normalized(fact)
     active_groups = [
         group for group in _POSITIVE_RECOVERY_GROUPS
@@ -322,7 +365,12 @@ def _positive_contract_witness(fact: str, candidate_items: list[dict]) -> dict |
             continue
         if _missing_contract_groups(fact, evidence, active_groups):
             continue
-        if _apply_fact_contract(fact, "covered", [evidence])[0] != "covered":
+        if _apply_fact_contract(
+            fact,
+            "covered",
+            [evidence],
+            required_terms,
+        )[0] != "covered":
             continue
         overlap = len(fact_tokens & _contract_tokens(evidence)) / len(fact_tokens) if fact_tokens else 0.0
         if overlap >= 0.4:
@@ -331,11 +379,25 @@ def _positive_contract_witness(fact: str, candidate_items: list[dict]) -> dict |
 
 
 def _fact_items(reference_facts: list) -> list[dict]:
-    return [
-        {"id": f"F{i}", "fact": str(fact).strip()}
-        for i, fact in enumerate(reference_facts or [], 1)
-        if str(fact).strip()
-    ]
+    items = []
+    for i, value in enumerate(reference_facts or [], 1):
+        if isinstance(value, dict):
+            fact = str(value.get("fact", "")).strip()
+            required_terms = tuple(
+                str(term).strip()
+                for term in value.get("required_terms", [])
+                if isinstance(term, str) and str(term).strip()
+            )
+        else:
+            fact = str(value).strip()
+            required_terms = ()
+        if fact:
+            items.append({
+                "id": f"F{i}",
+                "fact": fact,
+                "required_terms": required_terms,
+            })
+    return items
 
 
 def _candidate_items(candidate: str) -> list[dict]:
@@ -362,7 +424,7 @@ def _validate_fact_audit(
     candidate_items: list[dict] | None = None,
     stable_protocol: bool | None = None,
 ) -> tuple[list, list]:
-    expected = {item["id"]: item["fact"] for item in facts}
+    expected = {item["id"]: item for item in facts}
     rows = data.get("facts") if isinstance(data, dict) else None
     if not isinstance(rows, list):
         return [], ["top-level 'facts' must be a list"]
@@ -425,8 +487,10 @@ def _validate_fact_audit(
         judge_verdict = verdict
         contract_reason = ""
         if stable_protocol:
+            fact = expected[fact_id]["fact"]
+            required_terms = expected[fact_id].get("required_terms", ())
             witness = (
-                _positive_contract_witness(expected[fact_id], candidate_items)
+                _positive_contract_witness(fact, candidate_items, required_terms)
                 if verdict == "missing" else None
             )
             if witness:
@@ -435,13 +499,19 @@ def _validate_fact_audit(
                 evidence = [witness["text"]]
                 contract_reason = "deterministic contract found an explicit positive relation witness"
             else:
-                verdict, contract_reason = _apply_fact_contract(expected[fact_id], verdict, evidence)
+                verdict, contract_reason = _apply_fact_contract(
+                    fact,
+                    verdict,
+                    evidence,
+                    required_terms,
+                )
                 if judge_verdict == "covered" and verdict == "missing":
                     extended = _extend_fact_contract_witnesses(
-                        expected[fact_id],
+                        fact,
                         evidence_ids,
                         evidence,
                         candidate_items,
+                        required_terms,
                     )
                     if extended:
                         evidence_ids, evidence = extended
@@ -454,7 +524,7 @@ def _validate_fact_audit(
                 evidence_ids = []
         found[fact_id] = {
             "id": fact_id,
-            "fact": expected[fact_id],
+            "fact": expected[fact_id]["fact"],
             "verdict": verdict,
             "evidence": evidence,
             "reason": contract_reason or str(row.get("reason", "")).strip()[:300],

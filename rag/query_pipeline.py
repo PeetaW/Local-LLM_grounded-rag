@@ -16,6 +16,7 @@ from llama_index.core import Settings
 import config as cfg
 from rag.knowledge_synthesizer import KnowledgeSynthesizer
 from rag.comparison_json_validator import (
+    comparison_json_payload as _comparison_json_payload,
     comparison_json_validation_errors as _comparison_json_validation_errors,
 )
 from rag.answer_verifier import AnswerVerifier
@@ -534,7 +535,10 @@ def _stage4_answer_validation_issues(answer: str, knowledge_base: str, question:
 def _atomic_dimension_claims(claim: str) -> list[str]:
     parts = [
         value.strip().rstrip(".")
-        for value in re.split(r";\s+(?=[A-Z0-9])", claim or "")
+        for value in re.split(
+            r";\s+|,\s+[Ss]pecifically\s+",
+            claim or "",
+        )
         if value.strip()
     ]
     return parts if len(parts) > 1 and all(len(value.split()) >= 4 for value in parts) else [claim]
@@ -545,18 +549,73 @@ _SPECULATIVE_MECHANISM_RE = re.compile(
     r"potentially|we speculate|it is possible)\b",
     re.IGNORECASE,
 )
+_LEADING_DISCOURSE_RE = re.compile(
+    r"^(?:furthermore|moreover|additionally|in addition|in summary|also)\s*,?\s*",
+    re.IGNORECASE,
+)
+
+# ponytail: lexical ranking until comparison_json has an explicit overview field.
+_REVIEW_OVERVIEW_MARKERS = (
+    "multiple route",
+    "several route",
+    "different route",
+    "diverse synthes",
+    "no consensus",
+    "approached through",
+    "challenge",
+)
 
 
 def _source_close_evidence(text: str) -> str:
-    value = str(text or "").strip()
+    value = _LEADING_DISCOURSE_RE.sub("", str(text or "").strip())
+    value = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "", value)
+    value = re.sub(r"\s*\(Fig\.?\s*$", "", value, flags=re.IGNORECASE)
     if re.fullmatch(
         r"snippets?\s+\d+(?:\s*(?:,|and)\s*(?:snippets?\s+)?\d+)*",
         value.rstrip("."),
         re.IGNORECASE,
     ):
         return ""
-    atomic = re.split(r"\s*\.{3,}\s*", value, maxsplit=1)[0].strip().rstrip(".")
+    sentences = split_into_sentences(value)
+    atomic = (sentences[0] if sentences else value).strip().rstrip(".")
+    head = re.split(
+        r";\s+|,\s+(?=with limitations\b)",
+        atomic,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
+    if len(head.split()) >= 4:
+        atomic = head
     return atomic if len(atomic.split()) >= 4 else ""
+
+
+def _atomic_hydrolysis_route(route_phrase: str, evidence: str) -> tuple[str, str]:
+    if "enzymatic hydrolysis" not in str(route_phrase or "").lower():
+        return route_phrase, ""
+    text = re.sub(
+        r"(?<=[A-Za-z])-\s+(?=[A-Za-z])",
+        "",
+        str(evidence or ""),
+    )
+    match = re.search(
+        r"\bhydroly[sz]ed\s+with\s+(?:an?\s+|the\s+)?"
+        r"(?P<agent>[A-Za-z][A-Za-z0-9-]*)\b[^.;]*",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return route_phrase, ""
+    agent = match.group("agent")
+    summary = re.sub(
+        rf"\b{re.escape(agent)}[- ]cataly[sz]ed\s+enzymatic hydrolysis\b"
+        rf"|\benzymatic hydrolysis\s+with\s+{re.escape(agent)}\b",
+        "enzymatic hydrolysis",
+        route_phrase,
+        flags=re.IGNORECASE,
+    )
+    claim = match.group(0).strip()
+    detail = claim[:1].upper() + claim[1:] if len(claim.split()) >= 4 else ""
+    return summary, detail
 
 
 def _stage4_empty_answer_fallback(
@@ -564,9 +623,13 @@ def _stage4_empty_answer_fallback(
     atomic_only: bool = False,
     question: str = "",
 ) -> str:
-    comparison = _comparison_json_from_knowledge_base(knowledge_base)
-    if not comparison:
+    payload = _comparison_json_payload(knowledge_base)
+    payload = payload if isinstance(payload, dict) else {}
+    comparison = payload.get("comparison_json")
+    if not isinstance(comparison, dict) or not comparison:
         return "" if atomic_only else (knowledge_base or "").strip()
+    requirements = payload.get("comparison_requirements")
+    requirements = requirements if isinstance(requirements, dict) else {}
 
     q_lower = (question or "").lower()
     route_text = " ".join(
@@ -612,12 +675,21 @@ def _stage4_empty_answer_fallback(
 
     target_compound = str(comparison.get("target_compound", "") or "the target compound").strip().rstrip(".")
     lines = ["Comparison scaffold:"]
+    rendered_source_text = {}
     for route in comparison.get("direct_routes", []):
         if not isinstance(route, dict):
             continue
         source = str(route.get("source", "")).strip()
-        phrase = str(route.get("route_phrase", "")).strip().rstrip(".")
-        outcome = str(route.get("outcome", "")).strip().rstrip(".")
+        phrase = _LEADING_DISCOURSE_RE.sub(
+            "", str(route.get("route_phrase", "")).strip().rstrip(".")
+        )
+        phrase, route_detail = _atomic_hydrolysis_route(
+            phrase,
+            route.get("evidence", ""),
+        )
+        outcome = _LEADING_DISCOURSE_RE.sub(
+            "", str(route.get("outcome", "")).strip().rstrip(".")
+        )
         outcome_lower = outcome.lower()
         if concise and "optically pure" in outcome_lower:
             product = "L-BPA" if "l-bpa" in outcome_lower else target_compound
@@ -632,13 +704,54 @@ def _stage4_empty_answer_fallback(
             ) if outcome else ""
             label = "Route" if is_synthesis_comparison else "Strategy"
             lines.append(f"- {label}: `{source}` reports {phrase}{result} [{source}].")
+            rendered_source_text[source] = f"{phrase} {outcome}"
+            if route_detail:
+                lines.append(f"- Route detail: {route_detail} [{source}].")
+
+    roles_by_source = {
+        str(role.get("source", "")).strip(): str(role.get("role", "")).strip().lower()
+        for role in source_roles
+        if isinstance(role, dict) and role.get("source")
+    }
+    for item in comparison.get("supporting_mechanisms", []):
+        if isinstance(item, dict) and item.get("source"):
+            source = str(item["source"]).strip()
+            rendered_source_text[source] = (
+                f"{rendered_source_text.get(source, '')} {item.get('claim', '')}"
+            ).strip()
+    for role in source_roles:
+        if isinstance(role, dict) and str(role.get("role", "")).strip().lower() == "mechanism":
+            source = str(role.get("source", "")).strip()
+            rendered_source_text[source] = (
+                f"{rendered_source_text.get(source, '')} {role.get('claim', '')} {role.get('evidence', '')}"
+            ).strip()
+    for requirement in requirements.get("strategy_requirements", []):
+        if not isinstance(requirement, dict):
+            continue
+        source = str(requirement.get("source", "")).strip()
+        role = roles_by_source.get(source, "")
+        if not source or source in background_sources or role not in ("route", "mechanism"):
+            continue
+        claim = _source_close_evidence(requirement.get("claim", ""))
+        claim_tokens = set(re.findall(r"[a-z0-9-]{4,}", claim.lower()))
+        rendered_tokens = set(re.findall(
+            r"[a-z0-9-]{4,}",
+            rendered_source_text.get(source, "").lower(),
+        ))
+        if not claim_tokens or len(claim_tokens & rendered_tokens) / len(claim_tokens) >= 0.7:
+            continue
+        label = "Strategy evidence" if role == "route" else "Mechanism evidence"
+        lines.append(f"- {label}: {claim} [{source}].")
+        rendered_source_text[source] = f"{rendered_source_text.get(source, '')} {claim}"
 
     supporting_by_source = {}
     for mechanism in comparison.get("supporting_mechanisms", []):
         if not isinstance(mechanism, dict):
             continue
         source = str(mechanism.get("source", "")).strip()
-        claim = str(mechanism.get("claim", "")).strip().rstrip(".")
+        claim = _LEADING_DISCOURSE_RE.sub(
+            "", str(mechanism.get("claim", "")).strip().rstrip(".")
+        )
         if (
             not source
             or not claim
@@ -668,6 +781,7 @@ def _stage4_empty_answer_fallback(
                 atomic_evidence = ""
         if atomic_evidence:
             claim = atomic_evidence
+        claim = _LEADING_DISCOURSE_RE.sub("", claim)
         if not speculative_requested and _SPECULATIVE_MECHANISM_RE.search(claim):
             continue
         claim_token_sets = [
@@ -688,8 +802,8 @@ def _stage4_empty_answer_fallback(
         if source and claim and source not in background_sources and not duplicates:
             lines.append(f"- Mechanism: `{source}` reports {claim} [{source}].")
 
-    review_role_evidence = {
-        str(role.get("source", "")).strip(): str(role.get("evidence", ""))
+    review_roles = {
+        str(role.get("source", "")).strip(): role
         for role in source_roles
         if (
             isinstance(role, dict)
@@ -703,14 +817,28 @@ def _stage4_empty_answer_fallback(
         source = str(review.get("source", "")).strip()
         if source and source not in background_sources:
             claim = str(review.get("claim", "")).strip().rstrip(".")
-            atomic_evidence = max((
-                _source_close_evidence(review_role_evidence.get(source, "")),
+            role = review_roles.get(source, {})
+            evidence_candidates = (
+                _source_close_evidence(role.get("evidence", "")),
                 _source_close_evidence(review.get("evidence", "")),
-            ), key=len)
+            )
+            atomic_evidence = max(
+                evidence_candidates,
+                key=lambda value: (
+                    sum(marker in value.lower() for marker in _REVIEW_OVERVIEW_MARKERS),
+                    bool(value),
+                ),
+            )
             if atomic_evidence:
                 claim = atomic_evidence
+            else:
+                claim = (
+                    _source_close_evidence(role.get("claim", ""))
+                    or _source_close_evidence(claim)
+                    or claim
+                )
             if claim:
-                lines.append(f"- Review/comparison source: `{source}` reports that {claim} [{source}].")
+                lines.append(f"- Review/comparison source: {claim} [{source}].")
             dimensions = [
                 str(value).strip().replace("_", "-")
                 for value in review.get("dimensions", [])

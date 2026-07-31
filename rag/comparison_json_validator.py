@@ -41,6 +41,16 @@ _NAMED_INTERACTION_RE = re.compile(
     r"Met|Phe|Pro|Ser|Thr|Trp|Tyr|Val)\d+)\b",
     re.IGNORECASE,
 )
+_STRATEGY_QUALIFIER_RE = re.compile(
+    r"\b(?:competitiv\w*|minimally toxic|self[- ]?assembl\w*|proliferat\w*|"
+    r"structural basis|targeting motif)\b",
+    re.IGNORECASE,
+)
+_TARGET_ACTION = (
+    r"(?:inhibit\w*|suppress\w*|block\w*|antagoni[sz]\w*|degrad\w*|"
+    r"silenc\w*|knock(?:down|ed)?|bind\w*|bound|sensiti[sz]\w*)"
+)
+_STRATEGY_ACTION = rf"(?:{_TARGET_ACTION}|design\w*|develop\w*|conjugat\w*)"
 
 
 def query_dimension_keys(query: str) -> set[str]:
@@ -60,6 +70,35 @@ def query_dimension_keys(query: str) -> set[str]:
 def query_requests_mechanism(query: str) -> bool:
     text = (query or "").lower()
     return "mechanism" in text or "mechanistic" in text or "機制" in text
+
+
+def query_target(query: str) -> str:
+    match = re.search(
+        r"\btarget(?:s|ed|ing)?\s+(?:the\s+)?([A-Za-z][A-Za-z0-9-]{2,})\b",
+        query or "",
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else ""
+
+
+def direct_route_targets_query_target(route: dict, target: str) -> bool:
+    if not target:
+        return True
+    text = " ".join(
+        str(route.get(key, ""))
+        for key in ("route_phrase", "outcome", "evidence")
+    )
+    target_pattern = rf"\b{re.escape(target)}\b"
+    if not re.search(target_pattern, text, re.IGNORECASE):
+        return bool(re.search(_TARGET_ACTION, text, re.IGNORECASE))
+    return bool(
+        re.search(rf"{_TARGET_ACTION}[^.!?]{{0,80}}{target_pattern}", text, re.IGNORECASE)
+        or re.search(
+            rf"{target_pattern}(?:-mediated)?[^.!?]{{0,60}}{_TARGET_ACTION}",
+            text,
+            re.IGNORECASE,
+        )
+    )
 
 
 def is_synthetic_route_query(query: str) -> bool:
@@ -118,6 +157,19 @@ def _evidence_units(text: str) -> list[str]:
     parts = re.split(r"(?m)^\s*\[Snippet \d+\]\s*", str(text or ""))
     units = [part.strip() for part in parts if part.strip()]
     return units or [str(text or "")]
+
+
+def _evidence_sentences(text: str) -> list[str]:
+    boundary = re.compile(
+        r"(?<!\bFig\.)(?<!\bFigs\.)(?<!\bet al\.)(?<=[.!?])"
+        r"(?:\d+(?:[,–-]\d+)*)?\s+(?=[A-Z])"
+    )
+    return [
+        sentence.strip()
+        for unit in _evidence_units(text)
+        for sentence in boundary.split(unit)
+        if sentence.strip()
+    ]
 
 
 def build_comparison_requirements(query: str, chunks: list[dict]) -> dict:
@@ -192,32 +244,82 @@ def build_comparison_requirements(query: str, chunks: list[dict]) -> dict:
     if query_requests_mechanism(query):
         for row in rows:
             found = None
-            for unit in _evidence_units(row["evidence"]):
-                for sentence in re.split(r"(?<=[.!?])\s+", unit):
-                    match = _NAMED_INTERACTION_RE.search(sentence)
-                    if match:
-                        found = {
-                            "source": row["source"],
-                            "anchors": [
-                                match.group("relation"),
-                                match.group("anchor"),
-                            ],
-                            "claim": re.sub(r"\s+", " ", sentence).strip(),
-                        }
-                        break
-                if found:
+            for sentence in _evidence_sentences(row["evidence"]):
+                match = _NAMED_INTERACTION_RE.search(sentence)
+                if match:
+                    found = {
+                        "source": row["source"],
+                        "anchors": [
+                            match.group("relation"),
+                            match.group("anchor"),
+                        ],
+                        "claim": re.sub(r"\s+", " ", sentence).strip(),
+                    }
                     break
             if found:
                 mechanism_requirements.append(found)
 
+    target = query_target(query)
+    strategy_requirements = []
+    if target and query_requests_mechanism(query) and not is_synthetic_route_query(query):
+        for row in rows:
+            candidates = []
+            for index, sentence in enumerate(_evidence_sentences(row["evidence"])):
+                claim = re.sub(r"\s+", " ", sentence).strip()
+                words = claim.split()
+                qualifiers = _STRATEGY_QUALIFIER_RE.findall(claim)
+                if (
+                    not qualifiers
+                    or not (6 <= len(words) <= 120)
+                    or re.match(r"^\d+[A-Za-z]?\)?,", claim)
+                ):
+                    continue
+                target_present = bool(re.search(
+                    rf"\b{re.escape(target)}\b",
+                    claim,
+                    re.IGNORECASE,
+                ))
+                action_present = bool(re.search(_STRATEGY_ACTION, claim, re.IGNORECASE))
+                if not action_present:
+                    continue
+                score = (
+                    6 * target_present
+                    + 2 * len({value.lower() for value in qualifiers})
+                    + 3 * int(bool(re.search(
+                        r"\b(?:design\w*|develop\w*|conjugat\w*)\b",
+                        claim,
+                        re.IGNORECASE,
+                    )))
+                    + 2 * int(bool(re.search(r"\bproliferation\b", claim, re.IGNORECASE)))
+                    + int(bool(re.search(r"\b(?:via|through|thereby|by)\b", claim, re.IGNORECASE)))
+                )
+                candidates.append((score, -index, claim))
+            selected = []
+            for _, _, claim in sorted(candidates, reverse=True):
+                tokens = set(re.findall(r"[a-z0-9]+", claim.lower()))
+                if any(
+                    len(tokens & seen) / max(1, min(len(tokens), len(seen))) >= 0.7
+                    for seen, _ in selected
+                ):
+                    continue
+                selected.append((tokens, claim))
+                if len(selected) == 2:
+                    break
+            strategy_requirements.extend({
+                "source": row["source"],
+                "claim": claim,
+            } for _, claim in selected)
+
     return {
-        "version": 3,
+        "version": 4,
+        "query_target": target,
         "requested_dimensions": requested,
         "review_sources": review_sources,
         "dimension_sources": dimension_sources,
         "exact_isotopes": isotopes,
         "relation_requirements": relation_requirements,
         "mechanism_requirements": mechanism_requirements,
+        "strategy_requirements": strategy_requirements,
     }
 
 
@@ -283,6 +385,7 @@ def comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
     background_sources = {
         source for source, role in roles_by_source.items() if "background" in role
     }
+    target = str(requirements.get("query_target") or query_target(query)).strip()
     direct_route_sources = {
         str(item.get("source", "")).strip()
         for item in comparison.get("direct_routes", [])
@@ -352,6 +455,14 @@ def comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
         errors.append(f"Route source `{source}` is missing from direct_routes.")
     for source in review_sources - review_entry_sources:
         errors.append(f"Review/comparison source `{source}` is missing from review_comparison_sources.")
+    for requirement in requirements.get("strategy_requirements", []):
+        if not isinstance(requirement, dict):
+            continue
+        source = str(requirement.get("source", "")).strip()
+        if source and source not in roles_by_source:
+            errors.append(f"Strategy evidence source `{source}` is missing from source_roles.")
+        elif source in background_sources:
+            errors.append(f"Strategy evidence source `{source}` must not have role=background.")
 
     for key, item in dimensions.items():
         if not isinstance(item, dict) or not isinstance(item.get("evidence"), list):
@@ -445,6 +556,11 @@ def comparison_json_validation_errors(text: str, query: str = "") -> list[str]:
             errors.append(f"Direct route `{source}` must preserve its route-defining phrase.")
         if atomic_required and not str(route.get("outcome", "")).strip():
             errors.append(f"Direct route `{source}` must preserve its reported outcome.")
+        if target and not direct_route_targets_query_target(route, target):
+            errors.append(
+                f"Direct strategy `{source}` describes target-mediated delivery or uptake "
+                f"without an intervention acting on `{target}`; classify it as background."
+            )
         if is_synthetic_route_query(query) and (
             source in background_sources or any(
                 term in source.lower()

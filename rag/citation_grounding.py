@@ -289,7 +289,7 @@ def _preprocess_for_nli(text: str, citation_sources=()) -> str:
     # LaTeX → 可讀科學表達式（保留化學式語義）
     text = _latex_to_plain(text)
     text = re.sub(
-        r'^(?:Route|Review/comparison source|High-purity/isotopic enrichment|'
+        r'^(?:Route|Strategy(?: evidence)?|Mechanism evidence|Review/comparison source|High-purity/isotopic enrichment|'
         r'Isotopic enrichment|Scalability|Cost-effectiveness|Safety)\s*:\s*',
         '',
         text,
@@ -345,8 +345,9 @@ def _find_lexical_support(
     for source in cited_sources:
         claim = re.sub(re.escape(source), " ", claim, flags=re.IGNORECASE)
     claim_tokens = _lexical_tokens(claim)
-    if len(claim_tokens) < 6:
+    if len(claim_tokens) < 5:
         return None
+    required_coverage = 1.0 if len(claim_tokens) == 5 else 0.8
 
     claim_numbers = {token for token in claim_tokens if any(char.isdigit() for char in token)}
     claim_negated = bool(claim_tokens & _LEXICAL_NEGATIONS)
@@ -361,7 +362,13 @@ def _find_lexical_support(
             )
             if s
         ]
-        windows = sentences + [
+        clauses = [
+            clause.strip()
+            for sentence in sentences
+            for clause in re.split(r"\s*[;—–]\s*", sentence)
+            if len(clause.split()) >= 4
+        ]
+        windows = sentences + clauses + [
             f"{sentences[i]} {sentences[i + 1]}"
             for i in range(len(sentences) - 1)
         ]
@@ -372,7 +379,7 @@ def _find_lexical_support(
             if not claim_numbers.issubset(source_tokens):
                 continue
             coverage = len(claim_tokens & source_tokens) / len(claim_tokens)
-            if coverage >= 0.8 and (best is None or coverage > best[1]):
+            if coverage >= required_coverage and (best is None or coverage > best[1]):
                 best = (str(chunk.get("id", chunk.get("source", ""))), coverage)
     return best
 

@@ -205,14 +205,125 @@ class TestStructuredJudge(unittest.TestCase):
         self.assertEqual(audit[0]["evidence_ids"], ["C1", "C2"])
         self.assertIn("complementary candidate passages", audit[0]["reason"])
 
+    def test_required_term_contract_combines_named_route_detail(self):
+        facts = judge._fact_items([{
+            "fact": (
+                "bbb0683 uses enantioselective alkylation followed by "
+                "chymotrypsin-catalysed enzymatic hydrolysis."
+            ),
+            "required_terms": ["chymotrypsin"],
+        }])
+        candidate = (
+            "Route bbb0683 uses enantioselective alkylation followed by enzymatic hydrolysis. "
+            "Hydrolyzed with chymotrypsin to furnish optically pure L-BPA."
+        )
+        audit, errors = judge._validate_fact_audit(
+            {"facts": [{
+                "id": "F1",
+                "verdict": "covered",
+                "evidence_ids": ["C1"],
+                "reason": "the route is stated",
+            }]},
+            facts,
+            candidate,
+            stable_protocol=True,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit[0]["verdict"], "covered")
+        self.assertEqual(audit[0]["evidence_ids"], ["C1", "C2"])
+        self.assertIn("complementary candidate passages", audit[0]["reason"])
+
+        missing, missing_errors = judge._validate_fact_audit(
+            {"facts": [{
+                "id": "F1",
+                "verdict": "covered",
+                "evidence_ids": ["C1"],
+                "reason": "the route is stated",
+            }]},
+            facts,
+            candidate.split(" Hydrolyzed", 1)[0],
+            stable_protocol=True,
+        )
+        self.assertEqual(missing_errors, [])
+        self.assertEqual(missing[0]["verdict"], "missing")
+        self.assertIn("term:chymotrypsin", missing[0]["reason"])
+
+    def test_required_phrase_rejects_implied_multiple_routes(self):
+        facts = judge._fact_items([{
+            "fact": "Multiple distinct synthetic routes to L-BPA are reported across the papers.",
+            "required_terms": ["multiple routes"],
+        }])
+        audit, errors = judge._validate_fact_audit(
+            {"facts": [{
+                "id": "F1",
+                "verdict": "covered",
+                "evidence_ids": ["C1"],
+                "reason": "Multiple methods are implied.",
+            }]},
+            facts,
+            "The review highlights limitations of each method.",
+            stable_protocol=True,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit[0]["verdict"], "missing")
+        self.assertIn("term:multiple routes", audit[0]["reason"])
+
+        purity_facts = judge._fact_items([{
+            "fact": (
+                "Producing high-purity, isotopically enriched 10B material "
+                "is a central challenge."
+            ),
+            "required_terms": ["high-purity", "isotopically enriched", "challenge"],
+        }])
+        purity_audit, purity_errors = judge._validate_fact_audit(
+            {"facts": [{
+                "id": "F1",
+                "verdict": "covered",
+                "evidence_ids": ["C1"],
+                "reason": "Isotope cost implies the production challenge.",
+            }]},
+            purity_facts,
+            "The major cost comes from the isotope starting material.",
+            stable_protocol=True,
+        )
+
+        self.assertEqual(purity_errors, [])
+        self.assertEqual(purity_audit[0]["verdict"], "missing")
+        self.assertIn("term:challenge", purity_audit[0]["reason"])
+        self.assertIn("term:high-purity", purity_audit[0]["reason"])
+        self.assertIn("term:isotopically enriched", purity_audit[0]["reason"])
+
+        challenging = judge._apply_fact_contract(
+            purity_facts[0]["fact"],
+            "covered",
+            ["Producing high-purity, isotopically enriched material is challenging."],
+            purity_facts[0]["required_terms"],
+        )
+        self.assertEqual(challenging[0], "covered")
+
+        competitive = judge._apply_fact_contract(
+            "JPH203 is a competitive inhibitor of LAT1.",
+            "covered",
+            ["JPH203 competitively inhibits LAT1-mediated transport."],
+            ("competitive",),
+        )
+        self.assertEqual(competitive[0], "covered")
+
     def test_contract_numbers_ignore_identifier_digits_and_latex_parameter_subscripts(self):
         plain = "JPH203 preincubation alone had an IC50 of 193 +/- 50 nM."
         latex = r"JPH203 preincubation alone had an $\text{IC}_{50}$ of $193 \pm 50$ nM."
-        identifiers = "JPH203 binds LAT1-4F2hc, while 10B is the enriched isotope."
+        identifiers = (
+            "CMDC-20-e202500059 and s41421-024-00697-6 discuss JPH203 binding "
+            "LAT1-4F2hc, while 10B is the enriched isotope."
+        )
+        numeric_range = "The reaction ran at -78 C and then at 40-50 C with 74% yield."
 
         self.assertEqual(judge._contract_numbers(plain), {"193", "50"})
         self.assertEqual(judge._contract_numbers(latex), {"193", "50"})
         self.assertEqual(judge._contract_numbers(identifiers), set())
+        self.assertEqual(judge._contract_numbers(numeric_range), {"78", "40", "50", "74"})
 
     def test_fact_contract_requires_binding_pocket_relation(self):
         fact = "Cryo-EM shows JPH203 occupying the traditional LAT1 substrate-binding pocket."

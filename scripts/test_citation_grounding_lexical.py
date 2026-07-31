@@ -56,6 +56,38 @@ class TestLexicalGrounding(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result[0], "paper-1")
 
+    def test_matches_five_token_verbatim_scientific_claim(self):
+        result = _find_lexical_support(
+            "high cost of isotopically enriched 10B.",
+            [{
+                "id": "review-1",
+                "source": "review",
+                "text": (
+                    "The review highlights limitations regarding scalability and cost-effectiveness, "
+                    "especially considering the high cost of isotopically enriched 10B."
+                ),
+            }],
+            ("review",),
+        )
+
+        self.assertEqual(result, ("review-1", 1.0))
+
+    def test_matches_positive_clause_after_unrelated_negated_clause(self):
+        result = _find_lexical_support(
+            "The synthesis of L-BPA has been approached through multiple routes.",
+            [{
+                "id": "review-1",
+                "source": "review",
+                "text": (
+                    "There is no consensus approach to making it—the synthesis of L-BPA "
+                    "has been approached through multiple routes, reflecting purity challenges."
+                ),
+            }],
+            ("review",),
+        )
+
+        self.assertEqual(result, ("review-1", 1.0))
+
     def test_skips_non_substantive_source_preamble(self):
         sentence = (
             "Based on the provided data from a single source, the following information addresses "

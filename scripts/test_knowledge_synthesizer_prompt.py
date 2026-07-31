@@ -511,6 +511,29 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         self.assertIn("drug product slowly degraded", bound["facts"][0]["claim"])
         self.assertEqual(len(bound["rejected"]), 1)
 
+    def test_fact_contract_prefers_precursor_formation_for_structure_identity(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] Exposure to water transforms the dimer into a stable trimer complex. "
+                "[Snippet 2] Under ambient conditions, HO-PBA spontaneously dehydrates into a "
+                "dimer with aggregation-induced enhanced emission."
+            ),
+        }])
+        requirement = {
+            "id": "R1",
+            "kind": "structure_identity",
+            "label": "How is the water-stable boroxine formed?",
+            "minimum": 1,
+        }
+        contract = complete_fact_contract(
+            validate_fact_contract({"evidence_ids": []}, catalog),
+            catalog,
+            [requirement],
+        )
+
+        self.assertIn("spontaneously dehydrates", contract["facts"][0]["claim"])
+
     def test_synthesizer_structured_contract_is_ab_switch(self):
         cfg.STRUCTURED_FACT_CONTRACT_ENABLED = True
         synth = KnowledgeSynthesizer()
@@ -996,6 +1019,93 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             json.dumps(normalized),
             query,
         ))
+
+    def test_strategy_requirements_keep_qualifiers_and_reclassify_uptake_only_source(self):
+        query = "How do therapeutic strategies targeting LAT1 differ in mechanism?"
+        requirements = build_comparison_requirements(query, [{
+            "source": "InhibitorA",
+            "text": (
+                "Retrieved evidence snippets:\n"
+                "JPH203 competitively inhibits LAT1-mediated amino-acid transport. "
+                "At minimally toxic concentrations, JPH203 sensitized cancer cells to radiation."
+            ),
+        }, {
+            "source": "PeptideA",
+            "text": (
+                "Retrieved evidence snippets:\n"
+                "For example, prior self-assembling peptides conjugated with a "
+                "CAIX-targeting motif inhibited cancer growth through multivalent interactions. "
+                "We designed a self-assembling peptide conjugated to the L-phenylalanine "
+                "targeting motif as a LAT1 ligand. The peptide suppressed LAT1-mediated "
+                "transport and thereby inhibited cancer-cell proliferation."
+            ),
+        }, {
+            "source": "StructureA",
+            "text": (
+                "Retrieved evidence snippets:\n"
+                "In summary, the LAT1 structure provides a structural basis for rational "
+                "inhibitor design."
+            ),
+        }, {
+            "source": "DeliveryA",
+            "text": "Retrieved evidence snippets:\nBPA uptake into tumor cells is mediated by LAT1.",
+        }])
+        claims = " ".join(item["claim"] for item in requirements["strategy_requirements"])
+        for term in (
+            "competitively",
+            "minimally toxic",
+            "L-phenylalanine",
+            "proliferation",
+            "structural basis",
+        ):
+            self.assertIn(term, claims)
+        self.assertNotIn("CAIX", claims)
+
+        payload = {"comparison_json": {
+            "source_roles": [
+                {"source": "InhibitorA", "role": "route"},
+                {"source": "PeptideA", "role": "route"},
+                {"source": "StructureA", "role": "mechanism"},
+                {"source": "DeliveryA", "role": "route"},
+            ],
+            "direct_routes": [{
+                "source": "InhibitorA",
+                "route_phrase": "competitive JPH203 inhibition of LAT1",
+                "outcome": "blocked LAT1-mediated transport",
+            }, {
+                "source": "PeptideA",
+                "route_phrase": "self-assembling peptide suppression of LAT1",
+                "outcome": "inhibited cancer-cell proliferation",
+            }, {
+                "source": "DeliveryA",
+                "route_phrase": "LAT1-mediated BPA uptake",
+                "outcome": "delivered BPA into tumor cells",
+            }],
+            "supporting_mechanisms": [{
+                "source": "StructureA",
+                "claim": "The LAT1 structure provides a structural basis for inhibitor design.",
+                "evidence": "The LAT1 structure provides a structural basis for inhibitor design.",
+            }],
+            "review_comparison_sources": [],
+            "dimensions": {},
+            "central_tradeoff": {
+                "claim": "The strategies act on LAT1 through distinct mechanisms.",
+                "sources": ["InhibitorA", "PeptideA", "StructureA"],
+            },
+        }, "comparison_requirements": requirements}
+        normalized = json.loads(_normalize_comparison_json(
+            json.dumps(payload),
+            query,
+            requirements=requirements,
+        ))
+        comparison = normalized["comparison_json"]
+
+        self.assertEqual(
+            next(item["role"] for item in comparison["source_roles"] if item["source"] == "DeliveryA"),
+            "background",
+        )
+        self.assertNotIn("DeliveryA", {item["source"] for item in comparison["direct_routes"]})
+        self.assertFalse(_comparison_json_validation_errors(json.dumps(normalized), query))
 
     def test_mechanism_requirement_precedes_dense_anchor_paraphrase(self):
         query = "How do therapeutic strategies targeting LAT1 differ in mechanism?"

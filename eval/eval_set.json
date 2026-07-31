@@ -4,7 +4,7 @@
     "how_to_use": [
       "1. gold_papers：該題答案所在的論文；名稱須與 projects/boron_bnct/papers/ 的檔名（去掉 .pdf）完全一致。",
       "2. reference_answer：供閱讀的英文標準答案；correctness 優先比對翻譯前的英文 canonical draft。",
-      "3. reference_facts：人工、原子化的英文事實契約；correctness judge 逐項稽核並保存候選答案證據。",
+      "3. reference_facts：人工、原子化的英文事實契約；可用 {\"fact\": \"...\", \"required_terms\": [\"...\"]} 宣告不可省略的命名限定詞；correctness judge 逐項稽核並保存候選答案證據。",
       "4. gold_spans：一個以上、可在宣告來源的 UTF-8 index chunk 中逐字找到的原文片段，用於計算檢索覆蓋率。",
       "5. 現有 12 題均已填 reference_answer 與 reference_facts；有來源答案的題目另填 gold_papers 與 gold_spans，使用 Mode 2 評估。"
     ],
@@ -171,12 +171,23 @@
       ],
       "reference_answer": "The reported water-stable boroxine is derived from 2-hydroxyphenylboronic acid (HO-PBA). Under ambient conditions, HO-PBA spontaneously dehydrates into a dimer with dynamic covalent B-O bonds and aggregation-induced enhanced emission; exposure to water converts the dimer into water-stable HO-PBA trimer-H2O complexes containing boroxine rings. The trimer remains stable during a 7-day study, with HO-PBA trimer stable at 2.4 < pH < 9 and CH3-HO-PBA trimer at 2.4 < pH < 10. Its B-O bonds exchange rapidly in aqueous media at room temperature. The boroxine selectively binds fluoride more strongly than phenylboronic acid. In the hydrogel, boroxines act as reversible cross-links, giving acid-base stability including pH 2 and pH 10. Excess free HO-PBA trimer exchanges with the cross-linkers and de-crosslinks the network, causing gel-to-sol collapse; washing away the free trimer with excess THF reconstructs the boroxine network and reforms the gel.",
       "reference_facts": [
-        "Under ambient conditions, HO-PBA spontaneously dehydrates to a dimer with dynamic covalent B-O bonds and aggregation-induced enhanced emission.",
+        {
+          "fact": "Under ambient conditions, HO-PBA spontaneously dehydrates to a dimer with dynamic covalent B-O bonds and aggregation-induced enhanced emission.",
+          "required_terms": [
+            "spontaneous dehydration",
+            "aggregation-induced enhanced emission"
+          ]
+        },
         "Exposure to water converts the HO-PBA dimer into water-stable HO-PBA trimer-H2O complexes containing boroxine structures.",
         "HO-PBA trimer remains stable during a 7-day study and is stable at 2.4 < pH < 9, while CH3-HO-PBA trimer is stable at 2.4 < pH < 10.",
         "The dynamic B-O bonds can exchange rapidly in aqueous media at room temperature.",
         "The boroxine selectively binds fluoride ions in water with significantly stronger affinity than phenylboronic acid.",
-        "Boroxine structures cross-link the polymer hydrogel, which remains stable at pH 2 and pH 10.",
+        {
+          "fact": "Boroxine structures cross-link the polymer hydrogel, which remains stable at pH 2 and pH 10.",
+          "required_terms": [
+            "cross-link"
+          ]
+        },
         "Excess free HO-PBA trimer exchanges with boroxine cross-linkers and de-crosslinks the network, causing the hydrogel to collapse to a sol.",
         "Washing away free HO-PBA trimer with excess THF reconstructs the boroxine network and reforms the hydrogel."
       ],
@@ -199,9 +210,26 @@
       ],
       "reference_answer": "Across the papers, L-BPA is reached by several distinct routes, reflecting the difficulty of producing high-purity, isotopically enriched (10B) material. bbb0683 reports a hybrid chemo-enzymatic route (enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis) that delivers optically pure L-BPA at high e.e. CMDC-20-e202500059 reviews/compares multiple synthetic approaches and explicitly weighs scalability, cost-effectiveness and safety, especially the high cost of isotopically enriched boron precursors. The central trade-off is between routes that maximise enantiopurity/isotopic enrichment and those that are scalable and cost-effective given the expensive 10B-enriched starting materials.",
       "reference_facts": [
-        "Multiple distinct synthetic routes to L-BPA are reported across the papers.",
-        "Producing high-purity, isotopically enriched 10B material is a central challenge.",
-        "bbb0683 uses enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis.",
+        {
+          "fact": "Multiple distinct synthetic routes to L-BPA are reported across the papers.",
+          "required_terms": [
+            "multiple routes"
+          ]
+        },
+        {
+          "fact": "Producing high-purity, isotopically enriched 10B material is a central challenge.",
+          "required_terms": [
+            "high-purity",
+            "isotopically enriched",
+            "challenge"
+          ]
+        },
+        {
+          "fact": "bbb0683 uses enantioselective alkylation followed by chymotrypsin-catalysed enzymatic hydrolysis.",
+          "required_terms": [
+            "chymotrypsin"
+          ]
+        },
         "The bbb0683 route delivers optically pure or high-e.e. L-BPA.",
         "CMDC-20-e202500059 compares synthetic approaches in terms of scalability, cost-effectiveness, and safety.",
         "Isotopically enriched boron or 10B starting material is a major cost limitation.",
@@ -225,13 +253,38 @@
       ],
       "reference_answer": "The literature describes several mechanistically distinct LAT1-targeting cancer strategies: (1) small-molecule competitive inhibition - JPH203 blocks LAT1-mediated amino-acid transport; at minimally toxic concentrations it radiosensitizes cancer cells, and it downregulates mTOR activity and enhances cellular senescence; (2) structure-guided inhibition - the cryo-EM structure shows JPH203 binding the substrate pocket (halogen bond to Tyr259), giving a rational basis for inhibitor design; (3) a self-assembling peptide-based strategy that inhibits cancer-cell proliferation via LAT1. They differ in that JPH203 is a competitive transport inhibitor acting through downstream mTOR/senescence and radiosensitization, whereas the peptide approach relies on self-assembly at/through LAT1.",
       "reference_facts": [
-        "JPH203 is a selective small-molecule inhibitor that competitively inhibits LAT1-mediated amino-acid transport.",
-        "At minimally toxic concentrations, JPH203 significantly sensitizes cancer cells to radiation.",
+        {
+          "fact": "JPH203 is a selective small-molecule inhibitor that competitively inhibits LAT1-mediated amino-acid transport.",
+          "required_terms": [
+            "competitive"
+          ]
+        },
+        {
+          "fact": "At minimally toxic concentrations, JPH203 significantly sensitizes cancer cells to radiation.",
+          "required_terms": [
+            "minimally toxic"
+          ]
+        },
         "JPH203 radiosensitization is associated with mTOR downregulation and enhanced cellular senescence after irradiation.",
         "Cryo-EM shows JPH203 occupying the traditional LAT1 substrate-binding pocket.",
-        "The cryo-EM structure identifies a halogen bond between JPH203 and Tyr259, providing a structural basis for inhibitor design.",
-        "The LffVLKK-4Phe strategy uses a self-assembling peptide with an L-phenylalanine LAT1-targeting motif.",
-        "LffVLKK-4Phe suppresses LAT1-mediated amino-acid transport and thereby inhibits cancer-cell proliferation."
+        {
+          "fact": "The cryo-EM structure identifies a halogen bond between JPH203 and Tyr259, providing a structural basis for inhibitor design.",
+          "required_terms": [
+            "structural basis"
+          ]
+        },
+        {
+          "fact": "The LffVLKK-4Phe strategy uses a self-assembling peptide with an L-phenylalanine LAT1-targeting motif.",
+          "required_terms": [
+            "L-phenylalanine"
+          ]
+        },
+        {
+          "fact": "LffVLKK-4Phe suppresses LAT1-mediated amino-acid transport and thereby inhibits cancer-cell proliferation.",
+          "required_terms": [
+            "proliferation"
+          ]
+        }
       ],
       "gold_spans": [
         "JPH203 inhibits LAT1 in a competitive manner with its substrate",
