@@ -1,0 +1,65 @@
+# Eval Report — `q08_literal_scope_contract_rejudge`
+
+- 模式：Mode 2（對照 gold 真相）
+- 產生時間：2026-07-31 02:29
+- 題數：1
+
+## 彙總
+
+| 指標 | 值 |
+|------|-----|
+| 平均正確性（LLM-judge） | 0.5 |
+| Correctness judge 覆蓋 | 1/1（N/A 0） |
+| 平均翻譯忠實度（LLM-judge） | 1.0 |
+| Translation judge 覆蓋 | 1/1（N/A 0） |
+| 平均 grounding 分數 | 1.0 |
+| 平均論文選擇命中率 | 100.0% |
+| 平均 retriever candidate 覆蓋率 | 100.0% |
+| 平均 Stage 2 evidence 覆蓋率 | 100.0% |
+| 平均總延遲 | 706.7s |
+| 平均 planning 延遲 | 35.2s |
+| 平均 retrieval 延遲 | 7.6s |
+| └ Phase A embed/vector/BM25 | 7.5s |
+| └ Phase B 子答案生成 | 0.1s |
+| 平均 grounding 延遲 | 32.7s |
+| └ 其中 NLI | 2.5s |
+| └ 其中 gemma4 | 0.0s |
+
+## 逐題速覽
+
+| | ID | 類型 | correctness | 翻譯忠實度 | 選擇命中 | candidate recall | Stage 2 recall | grounding | 延遲 | 衝突/未支撐 |
+|---|----|------|-------------|------------|---------|------------------|----------------|-----------|------|------|
+| ⚠️ | Q08 | cross_paper | 0.5 | 1.0 | 100.0% | 100.0% | 100.0% | 1.0 | 706.7s | C0/U0 |
+
+## 逐題細節
+
+### ⚠️ Q08 · cross_paper
+
+**問題**：Compare the different synthetic routes to 4-borono-L-phenylalanine reported across the papers, focusing on isotopic enrichment, scalability, and cost-effectiveness.
+
+- detected_paper：`None`
+- 選出論文：['CMDC-20-e202500059', 'synthesis-and-biological-properties-of-water-soluble-p-boronophenylalanine-derivatives-relationship-between-water', 'bbb0683', 'cas0106-0279', '1-s2.0-S0378517325007926-main']
+- gold_papers：['CMDC-20-e202500059', 'bbb0683']
+- correctness candidate：`answer_for_judge`
+- correctness：0.5　raw：3/5　judge：`structured_fact_audit_v1`
+- judge reason：covered 5/7; missing F1, F2
+- translation fidelity：1.0　raw：5/5　judge：`translation_fidelity_v2`
+- translation reason：0 material and 0 minor semantic errors
+- 論文選擇命中率：100.0%　candidate 覆蓋率：100.0%　Stage 2 evidence 覆蓋率：100.0%　grounding：1.0
+- 延遲：706.7s　問題標記：{'conflicts': 0, 'unsupported': 0}
+
+**答案預覽**：
+
+> ⚠️ **資料可能不足**：檢索內容僅部分涵蓋此問題，以下回答可能不完整，請謹慎參考並自行查證。
+>
+> Comparison scaffold (比較框架)：
+> - Route (路徑)：【bbb0683】報導了一種涉及對映選擇性烷基化 (enantioselective alkylation) 以及隨後的酶促水解 (enzymatic hydrolysis) 的混合製程，產出光學純的 L-BPA 【bbb0683】。
+> - Route detail (路徑細節)：使用 chymotrypsin 進行水解，以提供光學純的 L-BPA 【bbb0683】。
+> - Review/comparison source (回顧/比較來源)：該回顧還強調了每種方法在可擴展性 (scalability)、成本效益 (cost-effectiveness) 和安全性方面的局限性，特別是考慮到同位素富集 10B 的高成本 【CMDC-20-e202500059】。
+> - Review dimensions (回顧維度)：該回顧強調了每種方法在可擴展性 (scalability)、成本效益 (cost-effectiveness) 和安全性方面的局限性 【CMDC-20-e202500059】。
+>
+> Central trade-off (high-purity/isotopic enrichment versus scalability and cost-effectiveness) (核心權衡：高純度/同位素富集與可擴展性及成本效益)：
+> - High-purity/isotopic enrichment (高純度/同位素富集)：在製備同位素富集化合物時，主要成本通常來自於同位素起始原料 【CMDC-20-e202500059】。
+> - Scalability (可擴展性)：在大規模生產中使用任何氧化劑 (o …（完整內容見 JSON）
+
+---
