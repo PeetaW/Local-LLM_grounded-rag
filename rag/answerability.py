@@ -38,6 +38,23 @@ _COMPARISON_ARM_RE = re.compile(
     r"(?:(?:that|those)\s+of\s+)?([^.;(\n]{2,80})",
     re.IGNORECASE,
 )
+_PREMISE_VALUE_QUERY_RE = re.compile(
+    r"^\s*(?:since|because|assuming|given\s+that)\b.*\bvalues?\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_REQUESTED_VALUE_RE = re.compile(
+    r"\bwhat\s+(?:are\s+)?(?:the\s+)?(?P<metric>[^?]{2,80}?)\s+values?\b",
+    re.IGNORECASE,
+)
+_FACT_LINE_RE = re.compile(
+    r"^\s*\[(?:Fact|事實)\s*\d+\]\s*(?P<claim>.*?)\s*"
+    r"\((?:Source|來源)\s*[:：]\s*(?P<source>.*?)\)\s*\.?\s*$",
+    re.IGNORECASE,
+)
+_ALTERNATIVE_ROUTE_RE = re.compile(
+    r"\b(?:infus\w*|inject\w*|intraven\w*)\b",
+    re.IGNORECASE,
+)
 
 
 def _missing_value_arm(question: str, knowledge_base: str) -> str:
@@ -104,6 +121,41 @@ def _missing_value_arm(question: str, knowledge_base: str) -> str:
                 return arm
     return ""
 
+
+def _missing_premise_value(question: str, knowledge_base: str) -> str:
+    if not _PREMISE_VALUE_QUERY_RE.search(question or ""):
+        return ""
+    match = _REQUESTED_VALUE_RE.search(question or "")
+    if not match:
+        return ""
+    metric = " ".join(match.group("metric").split()).strip(" ,.;:")
+    tokens = [
+        token for token in re.findall(r"[a-z0-9]+", metric.lower())
+        if len(token) > 3 and token not in {"reported", "paper", "papers", "these"}
+    ]
+    if not tokens:
+        return ""
+    for line in (knowledge_base or "").splitlines():
+        lower = line.lower()
+        if all(token in lower for token in tokens) and re.search(r"\d", line):
+            return ""
+    return metric
+
+
+def _reported_alternative_route(knowledge_base: str) -> tuple[str, str] | None:
+    candidates = []
+    for line in (knowledge_base or "").splitlines():
+        match = _FACT_LINE_RE.match(line)
+        if not match or not _ALTERNATIVE_ROUTE_RE.search(match.group("claim")):
+            continue
+        claim = match.group("claim").strip().rstrip(".")
+        score = len(_ALTERNATIVE_ROUTE_RE.findall(claim)) + 2 * bool(re.search(r"\d", claim))
+        candidates.append((score, claim, match.group("source").strip()))
+    if not candidates:
+        return None
+    _, claim, source = max(candidates, key=lambda item: item[0])
+    return claim, source
+
 # Phase 2 路由用的告示文字。
 ABSTAIN_NOTICE = (
     "⚠️ **誠實棄答**：檢索到的內容與此問題相關，但並不包含可直接回答的資訊。"
@@ -114,11 +166,28 @@ WEAK_NOTICE = (
 )
 
 
-def gate_route(verdict: str):
+def gate_route(verdict: str, question: str = "", knowledge_base: str = ""):
     """verdict → (abstain: bool, notice: str)。
     NOT_ANSWERABLE→硬棄答（跳生成）；PARTIAL→軟警告（照常生成、加橫幅）；其餘→正常。
     verdict=None（未判定/呼叫失敗）保守當正常，不棄答。"""
     if verdict == "NOT_ANSWERABLE":
+        if getattr(cfg, "FALSE_PREMISE_RECOVERY_ENABLED", False):
+            metric = _missing_premise_value(question, knowledge_base)
+            if metric:
+                route = _reported_alternative_route(knowledge_base)
+                correction = (
+                    "⚠️ **前提更正**：檢索文獻沒有報告可供回答的 "
+                    f"`{metric}` 數值，因此不能把問題中的前提視為已成立，也不會臆測數值。"
+                )
+                if route:
+                    claim, source = route
+                    correction += (
+                        "\n\n文獻實際報告的是不同的給藥途徑或 regimen：\n\n"
+                        f"- {claim} [{source}]\n"
+                    )
+                else:
+                    correction += "\n"
+                return True, correction
         return True, ABSTAIN_NOTICE
     if verdict == "PARTIAL":
         return False, WEAK_NOTICE
@@ -184,6 +253,14 @@ def assess_answerability(question: str, knowledge_base: str,
         if missing_arm:
             verdict = "PARTIAL"
             reason = f"The facts compare against '{missing_arm}' but do not report that arm's requested value."
+    if getattr(cfg, "FALSE_PREMISE_RECOVERY_ENABLED", False):
+        missing_metric = _missing_premise_value(question, knowledge_base)
+        if missing_metric:
+            verdict = "NOT_ANSWERABLE"
+            reason = (
+                "The facts do not report a requested value for "
+                f"'{missing_metric}', so the question premise cannot be accepted."
+            )
     return {"verdict": verdict, "reason": reason}
 
 

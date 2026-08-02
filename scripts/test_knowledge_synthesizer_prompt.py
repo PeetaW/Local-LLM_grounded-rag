@@ -394,6 +394,111 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         self.assertFalse(any("[lit." in text for text in texts))
         self.assertFalse(any("Received:" in text for text in texts))
 
+    def test_fact_contract_drops_reference_blocks_and_broken_column_fragments(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] PVA-BPA increased tumor retention for 6 hours. "
+                "[Snippet 2] Acute kidney injury associated with neutron capture therapy. "
+                "Doe et al., 2024. Journal A. https://doi.org/10.1/a. "
+                "Roe et al., 2023. Journal B. https://doi.org/10.1/b. "
+                "[Snippet 3] Optical purity was measured under the following conditions: column."
+            ),
+        }])
+
+        texts = [item["text"] for item in catalog]
+        self.assertEqual(texts, ["PVA-BPA increased tumor retention for 6 hours."])
+
+    def test_quantitative_completion_requires_a_measured_result(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] PVA was reported to extend BPA tumor retention (Nomoto et al., 2020). "
+                "The median survival was 85 days for PVA-BPA versus 46 days for BPA. "
+                "Tumor retention remained elevated for 6 hours after treatment."
+            ),
+        }])
+        requirements = build_fact_contract_requirements(
+            "How does PVA improve BPA tumor retention and survival? Give supporting data.",
+            evidence_catalog=catalog,
+        )
+        outcome = next(item for item in requirements if item["kind"] == "quantitative_outcome")
+        completed = complete_fact_contract(
+            validate_fact_contract({"evidence_ids": []}, catalog),
+            catalog,
+            [outcome],
+        )
+        claims = " ".join(item["claim"] for item in completed["facts"])
+
+        self.assertIn("85 days", claims)
+        self.assertIn("6 hours", claims)
+        self.assertNotIn("2020", claims)
+
+    def test_mechanism_with_data_contract_keeps_distinct_source_reported_facets(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] PVA forms a complex with BPA via boronate esters, confirmed by NMR. "
+                "PVA-BPA enters cells through endocytosis, increasing uptake and delaying efflux. "
+                "The optimized formulation reduced side effects to ignorable levels. "
+                "It achieved long-term intratumoral retention. "
+                "Median survival increased from 46 days to 85 days."
+            ),
+        }])
+        requirements = build_fact_contract_requirements(
+            "Explain the PVA-BPA therapeutic mechanism with supporting outcome data.",
+            evidence_catalog=catalog,
+        )
+        completed = complete_fact_contract(
+            validate_fact_contract({"evidence_ids": []}, catalog),
+            catalog,
+            requirements,
+        )
+        claims = " ".join(item["claim"] for item in completed["facts"])
+        facets = {
+            item.get("facet")
+            for item in completed["requirement_coverage"]
+            if item["kind"] == "mechanism_data_facet"
+        }
+
+        self.assertEqual(facets, {"association", "transport", "safety", "retention"})
+        self.assertNotIn("relation", {item["kind"] for item in requirements})
+        self.assertIn("boronate esters", claims)
+        self.assertIn("delaying efflux", claims)
+        self.assertIn("side effects", claims)
+        self.assertIn("intratumoral retention", claims)
+
+    def test_structural_binding_contract_completes_each_observed_interaction(self):
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] JPH203 forms a hydrogen-bond network with TM1 and TM6. "
+                "Its chlorine forms a halogen bond with Tyr259. "
+                "Phe252 is colored purple, and a dashed line represents a T-shaped pi-pi interaction. "
+                "The benzene ring makes a T-shaped pi-pi interaction with Phe252. "
+                "The hydrophobic tail occupies a hydrophobic pocket formed by Ile63 and Ile140."
+            ),
+        }])
+        requirements = build_fact_contract_requirements(
+            "According to the cryo-EM structure, how does JPH203 bind LAT1?",
+            evidence_catalog=catalog,
+        )
+        structural = [item for item in requirements if item["kind"] == "structural_interaction"]
+        completed = complete_fact_contract(
+            validate_fact_contract({"evidence_ids": []}, catalog),
+            catalog,
+            structural,
+        )
+        claims = " ".join(item["claim"] for item in completed["facts"])
+
+        self.assertEqual({item["facet"] for item in structural}, {
+            "hydrogen_bond", "halogen_bond", "pi_interaction", "hydrophobic_pocket",
+        })
+        self.assertIn("benzene ring", claims)
+        self.assertNotIn("colored purple", claims)
+        self.assertIn("Phe252", claims)
+        self.assertIn("hydrophobic pocket", claims)
+
     def test_fact_contract_preserves_figs_stability_and_salvages_scheme_prefix(self):
         catalog = build_evidence_catalog([{
             "source": "PaperA",
@@ -569,6 +674,37 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             "spontaneously dehydrates" in fact["claim"]
             for fact in contract["facts"]
         ))
+
+    def test_false_premise_contract_prefers_reported_route_over_unrelated_values(self):
+        query = (
+            "Since BPA is administered orally in BNCT, what oral bioavailability "
+            "values are reported in these papers?"
+        )
+        requirements = build_fact_contract_requirements(
+            query,
+            [
+                "What oral bioavailability values are reported?",
+                "Verify the administration premise and report the actual infusion regimen.",
+            ],
+        )
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] LAT1 transport had a Km of 20.3 µM and a Vmax of 1.32. "
+                "[Snippet 2] Clinically, a high-dose and longer-infusion regimen "
+                "of 900 mg BPA/kg with a 6-h infusion was reported."
+            ),
+        }])
+        contract = complete_fact_contract(
+            validate_fact_contract({"evidence_ids": []}, catalog, requirements),
+            catalog,
+            requirements,
+        )
+
+        self.assertEqual([item["kind"] for item in requirements], ["premise_route"])
+        self.assertEqual(len(contract["facts"]), 1)
+        self.assertIn("longer-infusion regimen", contract["facts"][0]["claim"])
+        self.assertTrue(contract["requirement_coverage"][0]["covered"])
 
     def test_synthesizer_structured_contract_is_ab_switch(self):
         cfg.STRUCTURED_FACT_CONTRACT_ENABLED = True
@@ -1141,6 +1277,53 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             "background",
         )
         self.assertNotIn("DeliveryA", {item["source"] for item in comparison["direct_routes"]})
+        self.assertFalse(_comparison_json_validation_errors(json.dumps(normalized), query))
+
+    def test_strategy_requirement_promotes_a_misclassified_background_route(self):
+        query = "How do therapeutic strategies targeting LAT1 differ in mechanism?"
+        requirements = {
+            "query_target": "LAT1",
+            "requested_dimensions": [],
+            "review_sources": [],
+            "dimension_sources": {},
+            "exact_isotopes": [],
+            "relation_requirements": [],
+            "mechanism_requirements": [],
+            "strategy_requirements": [{
+                "source": "RadiationA",
+                "claim": (
+                    "The LAT1 inhibitor JPH203 at minimally toxic concentrations "
+                    "sensitized cancer cells to radiation."
+                ),
+            }],
+        }
+        payload = {"comparison_json": {
+            "source_roles": [{
+                "source": "RadiationA",
+                "role": "background",
+                "claim": "Combination of JPH203 and radiation sensitizes cancer cells.",
+                "evidence": "LAT1 inhibition sensitized cancer cells to radiation.",
+            }],
+            "direct_routes": [],
+            "review_comparison_sources": [],
+            "supporting_mechanisms": [{
+                "source": "RadiationA",
+                "claim": "JPH203 sensitizes cells by inhibiting LAT1.",
+                "evidence": "LAT1 inhibition sensitized cancer cells to radiation.",
+            }],
+            "dimensions": {},
+            "central_tradeoff": {"claim": "Strategies differ.", "sources": ["RadiationA"]},
+        }}
+
+        normalized = json.loads(_normalize_comparison_json(
+            json.dumps(payload),
+            query,
+            requirements=requirements,
+        ))
+        comparison = normalized["comparison_json"]
+
+        self.assertEqual(comparison["source_roles"][0]["role"], "route")
+        self.assertEqual(comparison["direct_routes"][0]["source"], "RadiationA")
         self.assertFalse(_comparison_json_validation_errors(json.dumps(normalized), query))
 
     def test_mechanism_requirement_precedes_dense_anchor_paraphrase(self):

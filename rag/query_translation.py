@@ -2,7 +2,18 @@
 # Pipeline Stage 7: translate the verified English draft to Traditional Chinese.
 # Only used when EN_DRAFT_PIPELINE is enabled.
 
+import re
+
 import config as cfg
+
+
+_OCR_NORMALITY_RE = re.compile(
+    r"\b(?:I|l)\s+N(?=\s+(?:hydrochloric|sulfuric|nitric)\s+acid\b|\s+(?:HCl|NaOH|KOH)\b)"
+)
+
+
+def _normalize_ocr_measurements(text: str) -> str:
+    return _OCR_NORMALITY_RE.sub("1 N", text or "")
 
 
 def _term_fidelity_rules() -> str:
@@ -43,6 +54,7 @@ def translate_to_traditional_chinese(text: str, on_status=None) -> str:
         else:
             print(msg)
 
+    text = _normalize_ocr_measurements(text)
     _status("\n  🌏 翻譯英文答案為繁體中文...")
     prompt = (
         "Translate the following academic answer from English to Traditional Chinese (繁體中文).\n"

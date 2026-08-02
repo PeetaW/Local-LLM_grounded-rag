@@ -158,6 +158,8 @@ STAGE2_DIVERSE_EVIDENCE_ENABLED = False
 METHOD_RETRIEVAL_FACET_GUARD_ENABLED = True
 # A/B：療效/支持數據題額外檢索 survival、tumor burden、accumulation/retention 等量化結果。
 OUTCOME_RETRIEVAL_FACET_GUARD_ENABLED = True
+# A/B：帶 since/because/assuming 前提的數值題，補查前提與文獻實際報告的替代事實。
+FALSE_PREMISE_RECOVERY_ENABLED = True
 STAGE2_EVIDENCE_SNIPPETS_PER_TASK = 2
 COMPARISON_EVIDENCE_SNIPPETS_PER_TASK = 4
 

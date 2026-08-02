@@ -114,7 +114,7 @@ from rag.query_grounding_flow import (
 )
 from rag.query_prompts import build_synthesis_prompt, build_fallback_prompt
 from rag.query_translation import translate_to_traditional_chinese
-from rag.answerability import assess_answerability
+from rag.answerability import assess_answerability, gate_route
 import rag.query_pipeline as pipeline_module
 import metrics as eval_metrics
 import run_eval as eval_run
@@ -520,6 +520,31 @@ class TestPlanSubQuestions(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertIn("survival time", result[1]["sub_q"])
         self.assertIn("treatment and control groups", result[1]["sub_q"])
+
+    def test_false_premise_value_query_gets_verification_facet(self):
+        papers = ["paper_a"]
+        meta = {"paper_a": {"short_desc": "desc", "main_topic": "topic"}}
+        raw = json.dumps([{
+            "paper": "paper_a",
+            "sub_q": "What oral bioavailability values are reported?",
+        }])
+
+        with (
+            patch.object(cfg, "FALSE_PREMISE_RECOVERY_ENABLED", True),
+            patch("rag.metadata_manager.load_metadata", return_value=meta),
+            patch("rag.llm_client.planning_llm") as mock_llm,
+        ):
+            mock_llm.model = "planner"
+            mock_llm.complete.return_value = self._llm_resp(raw)
+            result = plan_sub_questions(
+                "Since the compound is administered orally, what oral bioavailability values are reported?",
+                papers,
+            )
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[1]["paper"], "paper_a")
+        self.assertIn("Verify the administration premise", result[1]["sub_q"])
+        self.assertIn("infusion regimen", result[1]["sub_q"])
 
     def test_water_stable_query_gets_quantitative_stability_facet(self):
         papers = ["paper_a"]
@@ -977,6 +1002,11 @@ class TestEvalMetrics(unittest.TestCase):
             any("\u4e00" <= char <= "\u9fff" for char in question["reference_answer"])
             for question in questions
         ))
+        q12 = next(question for question in questions if question["id"] == "Q12")
+        self.assertTrue(any(
+            "900 milligrams BPA per kilogram over a 6-hour infusion" in fact
+            for fact in q12["reference_facts"]
+        ))
 
     def test_parse_retrieval_timing(self):
         lat = eval_metrics.parse_stage_latencies([
@@ -1416,6 +1446,19 @@ class TestTranslateToTraditionalChinese(unittest.TestCase):
             cfg.TRANSLATION_FOLD_CHANGE_GUARD_ENABLED = old
 
     @patch("requests.post")
+    def test_normalizes_ocr_normality_before_translation(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {"response": "繁體中文翻譯結果"}
+        mock_post.return_value = mock_resp
+
+        translate_to_traditional_chinese("The sample used I N hydrochloric acid.")
+
+        prompt = mock_post.call_args.kwargs["json"]["prompt"]
+        self.assertIn("1 N hydrochloric acid", prompt)
+        self.assertNotIn("I N hydrochloric acid", prompt)
+
+    @patch("requests.post")
     def test_returns_original_on_connection_error(self, mock_post):
         mock_post.side_effect = Exception("connection refused")
         original = "English fallback text"
@@ -1486,6 +1529,34 @@ class TestAnswerability(unittest.TestCase):
             result = assess_answerability("Give the reported values.", knowledge_base)
 
         self.assertEqual(result["verdict"], "ANSWERABLE")
+
+    @patch("rag.answerability.requests.post")
+    def test_false_premise_value_guard_uses_reported_alternative(self, mock_post):
+        response = MagicMock()
+        response.json.return_value = {
+            "response": "VERDICT: ANSWERABLE\nREASON: an alternative regimen is present"
+        }
+        mock_post.return_value = response
+        question = (
+            "Since BPA is administered orally in BNCT, what oral bioavailability "
+            "values are reported in these papers?"
+        )
+        knowledge_base = (
+            "[Fact 1] Clinically, a high-dose and longer-infusion regimen "
+            "(900 mg BPA/kg, 6-h infusion) is reported (Source: PaperA)"
+        )
+
+        with patch.object(cfg, "FALSE_PREMISE_RECOVERY_ENABLED", True):
+            result = assess_answerability(question, knowledge_base)
+            abstain, notice = gate_route(
+                result["verdict"], question, knowledge_base
+            )
+
+        self.assertEqual(result["verdict"], "NOT_ANSWERABLE")
+        self.assertTrue(abstain)
+        self.assertIn("oral bioavailability", notice)
+        self.assertIn("900 mg BPA/kg", notice)
+        self.assertIn("[PaperA]", notice)
 
     def test_literal_recovery_facts_keep_query_relevant_measurement(self):
         evidence = [(
@@ -1771,6 +1842,23 @@ class TestExecuteStructuredQuery(unittest.TestCase):
 
         self.assertIn("Compound A was synthesized", answer)
         self.assertTrue(claims)
+        self.assertEqual(audit["missing_requirements"], [])
+
+    def test_method_fact_renderer_does_not_require_a_separate_overview_fact(self):
+        answer, claims, audit = pipeline_module._render_method_fact_list(
+            "\n".join([
+                "[Fact 1] Lithiated reagent was reacted with bromide to yield an adduct in 74% e.e. (Source: PaperA)",
+                "[Fact 2] Enantioselective alkylation was conducted in THF at -78 C. (Source: PaperA)",
+                "[Fact 3] The ester was hydrolyzed with chymotrypsin to furnish optically pure L-BPA. (Source: PaperA)",
+            ]),
+            "What hybrid process is used, and what are its key steps?",
+            [],
+        )
+
+        self.assertIn("THF at -78 C", answer)
+        self.assertIn("chymotrypsin", answer)
+        self.assertTrue(claims)
+        self.assertNotIn("overview", audit["requirements"])
         self.assertEqual(audit["missing_requirements"], [])
 
     def test_stage4_validator_flags_bad_comparison_answer(self):

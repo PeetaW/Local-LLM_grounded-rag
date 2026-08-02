@@ -60,6 +60,18 @@ _OUTCOME_QUERY_RE = re.compile(
     r"retention|potency|ic50|yield|selectivity|purity|impurit\w*|storage|stability)\b",
     re.IGNORECASE,
 )
+_PREMISE_QUERY_RE = re.compile(
+    r"^\s*(?:since|because|assuming|given\s+that)\b",
+    re.IGNORECASE,
+)
+_ADMIN_ROUTE_QUERY_RE = re.compile(
+    r"\b(?:administer\w*|oral(?:ly)?|bioavailability|dose|dosing|route)\b",
+    re.IGNORECASE,
+)
+_ADMIN_ROUTE_EVIDENCE_RE = re.compile(
+    r"\b(?:administer\w*|infus\w*|inject\w*|oral(?:ly)?|dosing|dose\s+regimen)\b",
+    re.IGNORECASE,
+)
 _METHOD_ACTION_RE = re.compile(
     r"\b(?:react(?:ed|ion)|treat(?:ed|ment)|convert(?:ed|sion)|hydroly\w*|"
     r"alkylat\w*|coupl\w*|deprotect\w*|esterif\w*|prepar\w*|synthesi\w*|"
@@ -87,6 +99,16 @@ _OUTCOME_EVIDENCE_RE = re.compile(
     r"afford(?:ed)?|furnish(?:ed)?|obtained|produced|survival|tumou?r|"
     r"accumulation|retention|inhibition|potency|ic50|vmax|km|degrad\w*|"
     r"impurit\w*|stability|stable|formation|formed|detected|concentration)\b",
+    re.IGNORECASE,
+)
+_QUANTITATIVE_RESULT_RE = re.compile(
+    r"(?:\b(?:p|n)\s*[=<>]\s*\d+(?:\.\d+)?|"
+    r"(?<![A-Za-z0-9])\d+(?:\.\d+)?"
+    r"(?:\s*(?:±|\+/-|[–-]|to)\s*\d+(?:\.\d+)?)?"
+    r"(?:\s*\([^)]{0,40}\))?\s*"
+    r"(?:%|°\s*[CF]\b|nM\b|µM\b|μM\b|mM\b|mg\b|µg\b|μg\b|g\b|"
+    r"mL\b|ml\b|days?\b|weeks?\b|months?\b|hours?\b|hrs?\b|h\b|"
+    r"minutes?\b|mins?\b|min\b|fold\b|times?\b))",
     re.IGNORECASE,
 )
 _CONTROL_EVIDENCE_RE = re.compile(
@@ -136,11 +158,40 @@ _ENZYMATIC_STEP_RE = re.compile(
     r"\b(?:enzyme|enzymatic|hydroly\w*|chymotrypsin|trypsin|aminoacylase)\b",
     re.IGNORECASE,
 )
+_STRUCTURAL_INTERACTION_PATTERNS = {
+    "hydrogen_bond": re.compile(r"\bhydrogen[- ]bond(?:s|ed|ing)?\b|\bhydrogen bond network\b", re.I),
+    "halogen_bond": re.compile(r"\bhalogen[- ]bond(?:s|ed|ing)?\b", re.I),
+    "pi_interaction": re.compile(r"\bT-shaped\b|(?:\bpi\b|π)\s*[–-]?\s*(?:\bpi\b|π)", re.I),
+    "hydrophobic_pocket": re.compile(r"\bhydrophobic\s+(?:tail|pocket|interaction)\b", re.I),
+}
+_STRUCTURAL_INTERACTION_LABELS = {
+    "hydrogen_bond": "Source-reported hydrogen-bond interaction",
+    "halogen_bond": "Source-reported halogen-bond interaction",
+    "pi_interaction": "Source-reported pi interaction",
+    "hydrophobic_pocket": "Source-reported hydrophobic pocket interaction",
+}
+_MECHANISM_DATA_PATTERNS = {
+    "association": re.compile(
+        r"\b(?:forms?|formation)\b.{0,100}\bcomplex\b.{0,160}\b(?:bond|ester|NMR)\b"
+        r"|\bcomplex\b.{0,100}\b(?:forms?|formation)\b.{0,160}\b(?:bond|ester|NMR)\b",
+        re.I,
+    ),
+    "transport": re.compile(r"\b(?:endocytosis|uptake|efflux|transporter-mediated transport)\b", re.I),
+    "safety": re.compile(r"\b(?:side effects?|toxicit\w*|safety|adverse effects?)\b", re.I),
+    "retention": re.compile(r"\b(?:tumou?r accumulation|intratumoral retention|long-term retention)\b", re.I),
+}
+_MECHANISM_DATA_LABELS = {
+    "association": "Source-reported molecular association or complex-formation mechanism",
+    "transport": "Source-reported uptake, endocytosis, transport, or efflux mechanism",
+    "safety": "Source-reported safety or side-effect outcome",
+    "retention": "Source-reported tumor accumulation or retention outcome",
+}
 
 
 def build_fact_contract_requirements(
     query: str,
     focus_questions: list[str] | None = None,
+    evidence_catalog: list[dict] | None = None,
 ) -> list[dict]:
     texts = list(dict.fromkeys(
         str(value).strip()
@@ -150,8 +201,8 @@ def build_fact_contract_requirements(
     combined = " ".join(texts)
     requirements = []
 
-    def add(kind: str, label: str, minimum: int = 1):
-        key = (kind, _plain(label))
+    def add(kind: str, label: str, minimum: int = 1, **metadata):
+        key = (kind, metadata.get("facet", ""), _plain(label))
         if any(item["_key"] == key for item in requirements):
             return
         requirements.append({
@@ -159,11 +210,22 @@ def build_fact_contract_requirements(
             "kind": kind,
             "label": label,
             "minimum": minimum,
+            **metadata,
         })
 
     method_query = bool(_METHOD_QUERY_RE.search(combined))
     relation_query = bool(_RELATION_QUERY_RE.search(combined))
     outcome_query = bool(_OUTCOME_QUERY_RE.search(combined))
+    premise_route_query = bool(
+        _PREMISE_QUERY_RE.search(query or "")
+        and _ADMIN_ROUTE_QUERY_RE.search(query or "")
+    )
+    if premise_route_query:
+        add(
+            "premise_route",
+            f"Source-reported administration route or infusion regimen relevant to: {query}",
+            1,
+        )
     if method_query:
         add("method_transform", "Exact reactants, reagents, and step-defining transformations", 2)
         hybrid_query = bool(re.search(
@@ -206,6 +268,38 @@ def build_fact_contract_requirements(
             add("relation", label or "Requested mechanism or relation", 2)
         if re.search(r"\bbind\w*\b", combined, re.IGNORECASE):
             add("binding_relation", label or "Requested binding relation", 1)
+        if (
+            evidence_catalog
+            and re.search(r"\b(?:cryo-?em|structur\w*)\b", combined, re.IGNORECASE)
+            and re.search(r"\bbind\w*\b", combined, re.IGNORECASE)
+        ):
+            evidence_text = " ".join(str(item.get("text", "")) for item in evidence_catalog)
+            for facet, pattern in _STRUCTURAL_INTERACTION_PATTERNS.items():
+                if pattern.search(evidence_text):
+                    add(
+                        "structural_interaction",
+                        _STRUCTURAL_INTERACTION_LABELS[facet],
+                        1,
+                        facet=facet,
+                    )
+        if (
+            evidence_catalog
+            and outcome_query
+            and re.search(r"\bmechanis\w*\b", combined, re.IGNORECASE)
+        ):
+            evidence_text = " ".join(str(item.get("text", "")) for item in evidence_catalog)
+            mechanism_facets = []
+            for facet, pattern in _MECHANISM_DATA_PATTERNS.items():
+                if pattern.search(evidence_text):
+                    add(
+                        "mechanism_data_facet",
+                        _MECHANISM_DATA_LABELS[facet],
+                        1,
+                        facet=facet,
+                    )
+                    mechanism_facets.append(facet)
+            if {"association", "transport"}.issubset(mechanism_facets):
+                requirements[:] = [item for item in requirements if item["kind"] != "relation"]
         if dynamic_network:
             add("dynamic_exchange", label or "Requested dynamic exchange", 1)
             add("network_formation", label or "Requested network formation", 1)
@@ -229,6 +323,8 @@ def build_fact_contract_requirements(
         add("quantitative_outcome", label or "Requested quantitative outcome", 2)
 
     for focus in texts[1:]:
+        if premise_route_query:
+            continue
         if (
             (method_query and _METHOD_QUERY_RE.search(focus))
             or (relation_query and _RELATION_QUERY_RE.search(focus))
@@ -240,12 +336,7 @@ def build_fact_contract_requirements(
         add("facet", query or (texts[0] if texts else "Requested answer"), 2)
 
     return [
-        {
-            "id": f"R{index}",
-            "kind": item["kind"],
-            "label": item["label"],
-            "minimum": item["minimum"],
-        }
+        {"id": f"R{index}", **{key: value for key, value in item.items() if key != "_key"}}
         for index, item in enumerate(requirements[:8], 1)
     ]
 
@@ -289,7 +380,10 @@ def _requirement_score(requirement: dict, evidence: str) -> int:
     if kind == "control":
         return 20 + 3 * overlap + 2 * numbers if _CONTROL_EVIDENCE_RE.search(evidence) else 0
     if kind == "relation":
-        return 20 + 4 * overlap + 2 * numbers if _RELATION_EVIDENCE_RE.search(evidence) else 0
+        markers = len(_RELATION_EVIDENCE_RE.findall(evidence))
+        if not markers or (len(focus_tokens) >= 3 and not overlap):
+            return 0
+        return 20 + 4 * markers + 2 * overlap + 2 * numbers
     if kind == "binding_relation":
         anchors = re.findall(
             r"([a-z0-9+.-]+)\s+bind(?:s|ing)?\b",
@@ -299,6 +393,47 @@ def _requirement_score(requirement: dict, evidence: str) -> int:
             return 0
         markers = len(_BINDING_EVIDENCE_RE.findall(evidence))
         return 20 + 5 * markers + 3 * overlap if markers else 0
+    if kind == "structural_interaction":
+        pattern = _STRUCTURAL_INTERACTION_PATTERNS.get(str(requirement.get("facet", "")))
+        if not pattern or not pattern.search(evidence):
+            return 0
+        residues = len(re.findall(r"\b[A-Z][a-z]{2}\d+\b|\bTM\d+\b", evidence))
+        actor = bool(re.search(
+            r"\b(?:JPH203|tail|benzene|chlorine|atom|group|moiety)\b",
+            evidence,
+            re.IGNORECASE,
+        ))
+        figure_legend = bool(re.search(
+            r"\b(?:colored|dashed line|represented|color-coded)\b",
+            evidence,
+            re.IGNORECASE,
+        ))
+        return 30 + 3 * overlap + min(12, 2 * residues) + 8 * actor - 12 * figure_legend
+    if kind == "mechanism_data_facet":
+        facet = str(requirement.get("facet", ""))
+        pattern = _MECHANISM_DATA_PATTERNS.get(facet)
+        if not pattern or not pattern.search(evidence):
+            return 0
+        quality = 0
+        if facet == "transport":
+            quality += 5 * len(set(re.findall(
+                r"\b(?:endocytosis|uptake|efflux|transport)\b",
+                evidence,
+                re.IGNORECASE,
+            )))
+            quality += 5 * bool(re.search(r"\bLAT1\b", evidence, re.IGNORECASE))
+        elif facet == "retention":
+            quality += 8 * bool(re.search(
+                r"\b(?:administered|exhibited|showed|achieved)\b",
+                evidence,
+                re.IGNORECASE,
+            ))
+            quality += 4 * bool(re.search(r"\b(?:PVA|BPA)\b", evidence, re.IGNORECASE))
+        elif facet == "safety":
+            quality += 6 * bool(re.search(r"\b(?:reduced|reduction|ignorable)\b", evidence, re.I))
+        elif facet == "association":
+            quality += 6 * bool(re.search(r"\bNMR\b", evidence, re.IGNORECASE))
+        return 30 + 3 * overlap + quality
     if kind == "dynamic_exchange":
         markers = len(_DYNAMIC_EXCHANGE_RE.findall(evidence))
         return 20 + 5 * markers + 3 * overlap if markers else 0
@@ -387,9 +522,35 @@ def _requirement_score(requirement: dict, evidence: str) -> int:
             else 0
         )
     if kind == "quantitative_outcome":
-        if not numbers or not _OUTCOME_EVIDENCE_RE.search(evidence):
+        if (
+            not _QUANTITATIVE_RESULT_RE.search(evidence)
+            or not _OUTCOME_EVIDENCE_RE.search(evidence)
+        ):
             return 0
-        return 20 + 4 * overlap
+        result_markers = len(re.findall(
+            r"\b(?:survival|control|compar\w*|versus|significant\w*|accumulation|retention)\b",
+            evidence,
+            re.IGNORECASE,
+        ))
+        incremental_comparison = bool(re.search(
+            r"\bfurther\b.{0,120}\b(?:than|from)\b",
+            evidence,
+            re.IGNORECASE,
+        ))
+        return (
+            20 + 4 * overlap + min(12, 2 * len(_numbers(evidence)))
+            + 3 * result_markers + 8 * incremental_comparison
+        )
+    if kind == "premise_route":
+        markers = len(_ADMIN_ROUTE_EVIDENCE_RE.findall(evidence))
+        if not markers:
+            return 0
+        clinically_reported = bool(re.search(
+            r"\b(?:clinically|reported|regimen|patients?)\b",
+            evidence,
+            re.IGNORECASE,
+        ))
+        return 30 + 5 * markers + 3 * overlap + 3 * numbers + 8 * clinically_reported
 
     minimum_overlap = 1 if len(focus_tokens) < 6 else 2
     return 5 * overlap + 2 * numbers if overlap >= minimum_overlap else 0
@@ -400,10 +561,21 @@ def _rank_requirement(requirement: dict, catalog: list[dict]) -> list[dict]:
         (_requirement_score(requirement, item["text"]), -index, item)
         for index, item in enumerate(catalog)
     ]
-    return [
-        item for score, _, item in sorted(ranked, reverse=True)
-        if score > 0
-    ]
+    selected = []
+    for score, _, item in sorted(ranked, reverse=True):
+        if score <= 0:
+            continue
+        tokens = _tokens(item["text"])
+        numbers = _numbers(item["text"])
+        if any(
+            item["source"] == prior["source"]
+            and tokens <= _tokens(prior["text"])
+            and numbers <= _numbers(prior["text"])
+            for prior in selected
+        ):
+            continue
+        selected.append(item)
+    return selected
 
 
 def _plain(text: str) -> str:
@@ -485,6 +657,8 @@ def _catalog_noise(sentence: str) -> bool:
         or ("department of" in plain and "university" in plain)
         or re.search(r"\b(?:supplementary\s+)?fig(?:ure)?\.?$", plain)
         or re.search(r"^\d+(?:\.\d+)?\s*(?:mmol|mg|ml|g)?\s*\)", plain)
+        or re.search(r"^\([a-z]\)\s+", plain)
+        or re.search(r":\s*(?:column|table|figure|scheme)\.?$", plain)
         or re.search(r"(?:~{4,}|~[^A-Za-z0-9]{0,3}~|\[\(?x\]|\[lit\.,)", sentence, re.IGNORECASE)
         or (
             sentence.count("[") > sentence.count("]")
@@ -495,6 +669,12 @@ def _catalog_noise(sentence: str) -> bool:
     plot_labels = re.search(r"\b(?:mau|time\s*\(min\))\b", plain, re.IGNORECASE)
     figure = re.search(r"\bfig\.", plain, re.IGNORECASE)
     return bool(plot_labels and figure)
+
+
+def _bibliography_block(text: str) -> bool:
+    doi_count = len(re.findall(r"https?\s*:\s*//\s*(?:dx\.)?doi\.org", text, re.I))
+    cited_author_count = len(re.findall(r"\bet\s+al\.,?\s*(?:19|20)\d{2}\b", text, re.I))
+    return doi_count >= 2 or cited_author_count >= 3
 
 
 def _trim_scheme_ocr(sentence: str) -> str:
@@ -513,6 +693,8 @@ def build_evidence_catalog(chunks: list[dict]) -> list[dict]:
         if not source:
             continue
         for block in _sentence_blocks(str(chunk.get("text", ""))):
+            if _bibliography_block(block):
+                continue
             block = re.sub(r"\x03(?=g(?:/|\b))", "µ", block)
             clean = re.sub(r"\s+", " ", block).strip()
             sentences = re.split(
@@ -694,9 +876,13 @@ def _requirement_coverage(
     for requirement in requirements:
         available = _rank_requirement(requirement, catalog)
         target = min(int(requirement.get("minimum", 1)), len(available))
+        top_ranked_kinds = {
+            "mechanism_data_facet", "premise_route", "stability_values",
+            "structural_interaction",
+        }
         required = (
             available[:target]
-            if requirement.get("kind") == "stability_values"
+            if requirement.get("kind") in top_ranked_kinds
             else available
         )
         matched = [item["id"] for item in required if item["id"] in selected_ids]
@@ -841,9 +1027,13 @@ def complete_fact_contract(
             minimum if structured_requirements else min(minimum, max_per_focus),
             len(ranked),
         )
+        top_ranked_kinds = {
+            "mechanism_data_facet", "premise_route", "stability_values",
+            "structural_interaction",
+        }
         required = (
             ranked[:target]
-            if requirement.get("kind") == "stability_values"
+            if requirement.get("kind") in top_ranked_kinds
             else ranked
         )
         matched = {item["id"] for item in required if item["id"] in selected_ids}

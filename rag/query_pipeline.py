@@ -331,7 +331,7 @@ def _method_fact_roles(claim: str) -> set[str]:
     )):
         roles.add("overview")
     if any(term in lower for term in (
-        "reacted", "reaction", "alkylation", "hydroly", "treatment", "treated",
+        "synthesized", "reacted", "reaction", "alkylation", "hydroly", "treatment", "treated",
         "furnish", "gave", "gives", "yielded", "produced", "converted",
     )):
         roles.add("steps")
@@ -361,7 +361,7 @@ def _method_fact_roles(claim: str) -> set[str]:
 def _method_requirements(question: str, sub_questions: list[dict]) -> set[str]:
     # Retrieval facets broaden evidence recall; only the user's question controls answer scope.
     plan_text = (question or "").lower()
-    requirements = {"overview", "steps", "outcome"}
+    requirements = {"steps", "outcome"}
     if any(term in plan_text for term in (
         "experimental condition", "reaction condition", "temperature", "solvent",
         "concentration", "reaction time", "stirring", "pressure", "ph",
@@ -1259,7 +1259,9 @@ def execute_structured_query(
     if cfg.ANSWERABILITY_GATE_ENABLED and rag_found_anything:
         from rag.answerability import assess_answerability, gate_route
         _ans = assess_answerability(question, knowledge_base)
-        gate_abstain, gate_notice = gate_route(_ans["verdict"])
+        gate_abstain, gate_notice = gate_route(
+            _ans["verdict"], question, knowledge_base
+        )
         _kb_head = " ".join((knowledge_base or "")[:240].split())
         _status(f"[answerability] verdict={_ans['verdict']} abstain={gate_abstain} "
                 f"kb_chars={len(knowledge_base or '')} kb_head={_kb_head} reason={_ans['reason'][:160]}")
@@ -1283,7 +1285,9 @@ def execute_structured_query(
                 literal_kb, recovery.get("literal_facts", "")
             )
             _ans = recovery["assessment"]
-            gate_abstain, gate_notice = gate_route(_ans["verdict"])
+            gate_abstain, gate_notice = gate_route(
+                _ans["verdict"], question, knowledge_base
+            )
             if on_artifact:
                 on_artifact("stage2_evidence", "\n\n".join(sub_answers))
                 on_artifact("knowledge_base", knowledge_base)
@@ -1611,7 +1615,9 @@ def execute_structured_query_stream(
     if cfg.ANSWERABILITY_GATE_ENABLED and rag_found_anything:
         from rag.answerability import assess_answerability, gate_route
         _ans = assess_answerability(question, knowledge_base)
-        gate_abstain, gate_notice = gate_route(_ans["verdict"])
+        gate_abstain, gate_notice = gate_route(
+            _ans["verdict"], question, knowledge_base
+        )
         yield f"[STATUS] [answerability] verdict={_ans['verdict']} abstain={gate_abstain}\n"
         recovery = _attempt_partial_recovery(
             question,
@@ -1634,7 +1640,9 @@ def execute_structured_query_stream(
                 literal_kb, recovery.get("literal_facts", "")
             )
             _ans = recovery["assessment"]
-            gate_abstain, gate_notice = gate_route(_ans["verdict"])
+            gate_abstain, gate_notice = gate_route(
+                _ans["verdict"], question, knowledge_base
+            )
 
     # ── Stage 4: LLM synthesis ───────────────────────────────────────
     t3 = time.perf_counter()

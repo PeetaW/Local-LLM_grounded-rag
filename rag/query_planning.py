@@ -29,6 +29,14 @@ _OUTCOME_QUERY_HINTS = (
     "treatment outcome", "antitumor", "anti-tumor", "survival",
 )
 _QUANTITATIVE_STABILITY_HINTS = ("water-stable", "water stable")
+_PREMISE_VALUE_QUERY_RE = re.compile(
+    r"^\s*(?:since|because|assuming|given\s+that)\b.*\b"
+    r"(?:value|values|rate|bioavailability|dose|how\s+many|how\s+much)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_ROUTE_PREMISE_HINTS = (
+    "administer", "administration", "oral", "bioavailability", "dose", "dosing",
+)
 
 
 def _is_comparison_query(question: str) -> bool:
@@ -135,6 +143,44 @@ def _add_outcome_retrieval_facet(
         "What quantitative treatment outcomes are reported, including survival time, "
         "tumor burden, accumulation or retention, and comparisons between treatment "
         "and control groups?"
+    )
+    return [*sub_questions, {"paper": paper, "sub_q": facet}]
+
+
+def _add_premise_retrieval_facet(
+    question: str,
+    paper_names: list,
+    sub_questions: list[dict],
+) -> list[dict]:
+    if (
+        not getattr(cfg, "FALSE_PREMISE_RECOVERY_ENABLED", False)
+        or not _PREMISE_VALUE_QUERY_RE.search(question or "")
+    ):
+        return sub_questions
+
+    existing = " ".join(
+        str(item.get("sub_q", "")).lower()
+        for item in sub_questions
+        if isinstance(item, dict)
+    )
+    if "verify" in existing and "premise" in existing:
+        return sub_questions
+
+    specific = list(dict.fromkeys(
+        str(item.get("paper", "")).strip()
+        for item in sub_questions
+        if isinstance(item, dict) and str(item.get("paper", "")).strip() not in {"", "ALL"}
+    ))
+    paper = specific[0] if len(specific) == 1 else (
+        paper_names[0] if len(paper_names) == 1 else "ALL"
+    )
+    route_query = any(term in (question or "").lower() for term in _ROUTE_PREMISE_HINTS)
+    facet = (
+        "Verify the administration premise in the user question. What administration route, "
+        "dosing or infusion regimen is actually reported, and are the requested values stated?"
+        if route_query else
+        "Verify the factual premise in the user question. What source-backed alternative fact "
+        "is actually reported, and are the requested values stated?"
     )
     return [*sub_questions, {"paper": paper, "sub_q": facet}]
 
@@ -358,6 +404,11 @@ def plan_sub_questions(question: str, paper_names: list) -> list:
                 paper_names,
                 sub_questions,
             )
+            sub_questions = _add_premise_retrieval_facet(
+                question,
+                paper_names,
+                sub_questions,
+            )
 
             print(f"  → 子問題內容：{[sq.get('sub_q', '')[:200] for sq in sub_questions]}")
             return sub_questions
@@ -372,4 +423,5 @@ def plan_sub_questions(question: str, paper_names: list) -> list:
         paper_names,
         [{"paper": "ALL", "sub_q": question}],
     )
-    return _add_outcome_retrieval_facet(question, paper_names, sub_questions)
+    sub_questions = _add_outcome_retrieval_facet(question, paper_names, sub_questions)
+    return _add_premise_retrieval_facet(question, paper_names, sub_questions)

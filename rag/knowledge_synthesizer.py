@@ -151,7 +151,40 @@ def _normalize_comparison_json(
     comparison.setdefault("review_comparison_sources", [])
     comparison.setdefault("supporting_mechanisms", [])
     source_roles = comparison["source_roles"] if isinstance(comparison["source_roles"], list) else []
+    direct_routes = comparison["direct_routes"] if isinstance(comparison["direct_routes"], list) else []
+    comparison["direct_routes"] = direct_routes
     target = str(requirements.get("query_target") or query_target(query)).strip()
+    strategy_claims = {
+        str(item.get("source", "")).strip(): re.sub(
+            r"\s+", " ", str(item.get("claim", ""))
+        ).strip()
+        for item in requirements.get("strategy_requirements", [])
+        if isinstance(item, dict) and item.get("source") and item.get("claim")
+    }
+    direct_route_sources = {
+        str(item.get("source", "")).strip()
+        for item in direct_routes
+        if isinstance(item, dict) and item.get("source")
+    }
+    for role_item in source_roles:
+        if not isinstance(role_item, dict) or "background" not in str(role_item.get("role", "")).lower():
+            continue
+        source = str(role_item.get("source", "")).strip()
+        requirement_claim = strategy_claims.get(source, "")
+        role_claim = re.sub(r"\s+", " ", str(role_item.get("claim", ""))).strip()
+        candidate = {
+            "source": source,
+            "route_phrase": role_claim or requirement_claim,
+            "outcome": requirement_claim,
+            "produces_target": False,
+            "evidence": requirement_claim,
+        }
+        if not target or not requirement_claim or not direct_route_targets_query_target(candidate, target):
+            continue
+        role_item["role"] = "route"
+        if source not in direct_route_sources:
+            direct_routes.append(candidate)
+            direct_route_sources.add(source)
     indirect_sources = {
         str(route.get("source", "")).strip()
         for route in comparison["direct_routes"]
@@ -688,6 +721,7 @@ class KnowledgeSynthesizer:
             build_fact_contract_requirements(
                 query,
                 [*(contract_focus or []), recovery_hint],
+                contract_catalog,
             )
             if fact_contract_mode else []
         )
