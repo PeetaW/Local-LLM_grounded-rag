@@ -1,3 +1,15 @@
+# Pipeline v4 Staged Indexing Spec
+
+> Status: planned, not started; reviewed against the live code on 2026-08-02.
+> Start after the v11 quality baseline is frozen and Maintainability M0/M1 has
+> made the pipeline boundary safer to change. This spec is the prerequisite for
+> Ingestion Health Phase 2.
+
+The ingestion split below remains the active product plan. Query-side NLI and
+early-exit ideas in this document are optional later experiments: current data
+shows retrieval at about `6.7s` versus `547.3s` total, so Stage 3 generation is
+the measured latency bottleneck.
+
 ## Summary
 
 Current indexing is doing several high-value but expensive tasks in one synchronous path:

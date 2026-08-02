@@ -61,11 +61,11 @@ rather than a black-box AI that changes without notice.
 
 ## Development Status
 
-As of **2026-07-27**, the pipeline uses source-bound structured evidence contracts and deterministic rendering for both comparison and non-comparison questions. The latest eight-question `baseline_v10_requirement_contract_smoke` reached correctness `0.906`, grounding `0.964`, paper selection `100%`, and Stage 2 evidence recall `0.811`. The latest complete 12-question run is still `baseline_v9_fact_contract_full`; the v10 architecture has not yet passed a full-set regression.
+As of **2026-08-02**, the product path uses source-bound structured fact contracts, validated comparison JSON, deterministic method/comparison rendering, and structured correctness/translation judges. The Q07/Q08/Q09 focused and stability gates now pass with correctness, grounding, and translation all at `1.0`, judge coverage `3/3`, and no unsupported or conflicting claims.
 
-Focused v10 runs confirmed Q02 and Q08 at correctness/grounding `1.0`, then exposed deterministic contract defects for Q07 stability witnesses and Q09 structural mechanisms. Those defects are fixed and pass offline replay against the saved artifacts, but still require a fresh Q07/Q09 model run. The next gates are that focused run, a Q07/Q08/Q09 stability regression, and then the full eval set. Retrieval is about six seconds in recent runs; Stage 3 generation and repair remain the main latency bottleneck.
+The full 12-question `baseline_v11_structured_contract_full` is currently running; its formal report is not yet available, so v11 is not yet declared the product baseline and partial-run averages are intentionally ignored. The last completed full run remains v9 (`0.646` correctness, `0.908` grounding, translation coverage `10/12`); the later eight-question v10 smoke reached `0.906` correctness and `0.964` grounding but is not equivalent to a full regression. Recent stability runs average `6.7s` retrieval versus `547.3s` total, confirming Stage 3 local-LLM generation as the main latency bottleneck.
 
-The active sequence and longer-term roadmap are tracked in [PENDING_TASKS.md](PENDING_TASKS.md).
+A 2026-08-02 maintainability audit counted 58 active tracked Python files and 22,904 lines. The refactor is deliberately staged after the v11 baseline freeze; see [maintainability_refactor_spec.md](maintainability_refactor_spec.md). The active sequence and longer-term roadmap are tracked in [PENDING_TASKS.md](PENDING_TASKS.md).
 
 ## System Architecture
 
@@ -293,10 +293,10 @@ python eval/run_eval.py --compare baseline experiment # side-by-side metric comp
 
 The question set lives in [eval/eval_set.json](eval/eval_set.json). It runs in two modes:
 
-- **Mode 1** (gold fields empty): reports grounding score, per-stage latency, and paper/sub-question counts — works immediately, no labeling needed.
-- **Mode 2** (fill `gold_papers` + `gold_spans`): additionally reports **paper-selection recall** (did the planner keep the right papers?) and **retrieval coverage** (did the retriever surface the source text?) — measured against your labeled ground truth.
+- **Mode 1** (reference fields empty): reports grounding, unsupported/conflicting claims, per-stage latency, and paper/sub-question counts — works immediately, no labeling needed.
+- **Mode 2** (fill `gold_papers`, `gold_spans`, `reference_answer`, and `reference_facts` in `eval_set.json`): additionally reports paper-selection recall, candidate retrieval recall, Stage 2 evidence recall, structured correctness, and translation fidelity against the labeled source-derived contract.
 
-> The harness calls the pipeline directly and does **not** write to ChromaDB memory, so it won't pollute episodic memory.
+> The harness calls the pipeline directly and does **not** write to ChromaDB memory, so it won't pollute episodic memory. Full `--run` and `--rejudge-existing` commands invoke local AI models and should be run from the project's `llm_env` Anaconda terminal; offline syntax/unit/replay checks do not require that pipeline run.
 
 ### Switch project
 
@@ -336,12 +336,13 @@ rag_project/
 │   ├── query_grounding_flow.py # NLI grounding flow orchestration
 │   ├── query_types.py         # Shared type definitions
 │   ├── query_embedding_guard.py # Embedding consistency guard
-│   ├── query_engine.py        # LlamaIndex query engine wrapper
-│   │
 │   ├── knowledge_synthesizer.py  # Stage 3: fact list distillation
+│   ├── fact_contract.py       # Source-bound requirements and fact validation
+│   ├── comparison_json_validator.py # Comparison schema and relation validation
 │   ├── answer_verifier.py     # Stage 5: verification + correction
 │   ├── answer_processor.py    # Answer post-processing utilities
 │   ├── citation_grounding.py  # Grounding score + speculation detection
+│   ├── corpus_health.py       # Ingestion duplicate/SI/extraction checks
 │   ├── plan_executor.py       # Plan-and-Execute architecture (experimental)
 │   ├── task_state.py          # Pipeline task state management
 │   ├── chunk_summarizer.py    # Contextual chunk summarization
@@ -366,10 +367,18 @@ rag_project/
 │       └── vl_quality_test-1.py   # Batch VL preprocessing with smart rasterization
 │
 ├── eval/                        # Tier 0 evaluation harness (regression ruler)
-│   ├── eval_set.json            # Labeled question set (gold papers + answer spans)
+│   ├── eval_set.json            # Gold sources/spans plus answer/fact contracts
 │   ├── metrics.py               # Selection recall, retrieval coverage, latency, grounding
+│   ├── judge.py                 # Structured correctness and translation judges
 │   ├── run_eval.py              # Run the set through the pipeline, compute & compare metrics
 │   └── results/                 # (auto-generated) saved metric runs for A/B comparison
+│
+├── PENDING_TASKS.md            # Current checkpoint and ordered roadmap
+├── maintainability_refactor_spec.md # Audited refactor phases and acceptance gates
+├── pipeline_v4_task_spec.md    # Staged indexing design
+├── ingestion_health_spec.md    # Corpus health MVP and Phase 2
+├── memory_redesign_spec.md     # Deferred research-memory redesign
+├── api-refactor-spec.md        # Deferred API boundary refactor
 │
 ├── projects/
 │   ├── zvi/
@@ -407,14 +416,19 @@ All parameters are centralized in `config.py`:
 | `RERANK_ENABLED` | `False` | Optional cross-encoder reranking A/B |
 | `GROUNDING_TOP_K` | `20` | Chunks retrieved for Stage 6 NLI grounding |
 | `STAGE2_LLM_SUBANSWERS_ENABLED` | `False` | Feed retrieval evidence blocks directly to Stage 3 |
+| `STAGE2_QUERY_AWARE_EVIDENCE_ENABLED` | `True` | Select source-bound Stage 2 evidence against query requirements |
+| `STRUCTURED_FACT_CONTRACT_ENABLED` | `True` | Validate non-comparison facts against explicit source requirements |
+| `METHOD_FACT_LIST_DIRECT_RENDER_ENABLED` | `True` | Deterministically render validated method facts |
 | `COMPARISON_JSON_DIRECT_RENDER_ENABLED` | `True` | Render validated atomic comparison JSON without Stage 4 LLM prose |
-| `ANSWERABILITY_GATE_ENABLED` | `False` | Temporarily off during the current comparison A/B |
+| `STRUCTURED_JUDGE_STABLE_PROTOCOL_ENABLED` | `True` | Require the stable structured judge response contract |
+| `ANSWERABILITY_GATE_ENABLED` | `True` | Route answerable, partial, and unsupported questions |
 | `EN_DRAFT_PIPELINE` | `True` | Reason, verify and run NLI in English |
-| `FINAL_TRANSLATION_ENABLED` | `False` | Temporarily keep the English draft during comparison testing |
+| `FINAL_TRANSLATION_ENABLED` | `True` | Translate the final English draft to Traditional Chinese |
 | `VL_AUTO_RUN` | `True` | Auto-run VL analysis on new PDFs |
 | `CONTEXT_SUMMARY_ENABLED` | `True` | Generate LLM summary header per chunk |
-| `NLI_TRANSLATE_TO_EN` | `True` | Translate hypotheses to English before NLI |
+| `NLI_TRANSLATE_TO_EN` | `True` | Translate non-English hypotheses before NLI (normally a no-op for the English draft) |
 | `NLI_CONTRADICTION_ENABLED` | `True` | Enable contradiction detection |
+| `NLI_DEVICE` | `"cuda"` | Run the NLI model on the GPU |
 | `PLAN_EXECUTE_ENABLED` | `False` | Plan-and-Execute architecture (experimental) |
 
 > ⚠️ If you change `CHUNK_SIZE`, `CHUNK_OVERLAP`, or `EMBED_MODEL`, delete `projects/<project>/index_storage/` and re-run to rebuild the index.
@@ -453,11 +467,11 @@ All parameters are centralized in `config.py`:
 
 ## 開發狀態
 
-截至 **2026-07-27**，比較題與非比較題都已採用 source-bound structured evidence contract 與確定性渲染。最新八題 `baseline_v10_requirement_contract_smoke` 達 correctness `0.906`、grounding `0.964`、論文選擇命中率 `100%`、Stage 2 evidence recall `0.811`。目前最新的完整 12 題仍是 `baseline_v9_fact_contract_full`，v10 架構尚未通過全題組回歸。
+截至 **2026-08-02**，產品主路徑已使用 source-bound structured fact contract、經驗證的 comparison JSON、method/comparison 確定性渲染，以及結構化 correctness/translation judges。Q07/Q08/Q09 的 focused 與 stability gates 已通過：correctness、grounding、translation 均為 `1.0`，judge coverage `3/3`，沒有 unsupported 或 conflicting claims。
 
-v10 focused runs 已確認 Q02、Q08 correctness/grounding `1.0`，之後也找出 Q07 stability witness 與 Q09 結構機制的確定性 contract 缺陷。修正已通過保存 artifact 的離線 replay，但仍需新的 Q07/Q09 模型流程驗證。下一個驗收依序是 focused run、Q07/Q08/Q09 穩定性回歸，再跑完整 eval set。近期 retrieval 約六秒，主要延遲仍在 Stage 3 生成與 repair。
+完整 12 題 `baseline_v11_structured_contract_full` 目前執行中，正式報告尚未產生，因此還不能把 v11 宣稱為產品 baseline，也不採用執行中的部分平均值。最後完成的完整題組仍是 v9（correctness `0.646`、grounding `0.908`、translation coverage `10/12`）；後續八題 v10 smoke 雖達 correctness `0.906`、grounding `0.964`，但不能等同完整回歸。近期 stability 平均 retrieval `6.7s`、總延遲 `547.3s`，主要瓶頸已確認是 Stage 3 本地 LLM 生成。
 
-目前推進順序與長期 roadmap 見 [PENDING_TASKS.md](PENDING_TASKS.md)。
+2026-08-02 維護性稽核共計 58 個 active tracked Python 檔、22,904 行。等 v11 baseline 凍結後才分階段整理，詳見 [maintainability_refactor_spec.md](maintainability_refactor_spec.md)；目前推進順序與長期 roadmap 見 [PENDING_TASKS.md](PENDING_TASKS.md)。
 
 ## 系統架構
 
@@ -682,10 +696,10 @@ python eval/run_eval.py --compare baseline experiment # 並排比較彙總指標
 
 題組放在 [eval/eval_set.json](eval/eval_set.json)，有兩種模式：
 
-- **Mode 1**（gold 欄位留空）：回報 grounding 分數、各階段延遲、論文/子問題數——馬上可跑，不需標註。
-- **Mode 2**（填好 `gold_papers` + `gold_spans`）：額外回報**論文選擇命中率**（planner 有沒有選對論文？）與**檢索覆蓋率**（檢索有沒有撈到原文？）——對照你標註的真相量測。
+- **Mode 1**（reference 欄位留空）：回報 grounding、unsupported/conflicting claims、各階段延遲與論文/子問題數，不需人工標註。
+- **Mode 2**（在 `eval_set.json` 填好 `gold_papers`、`gold_spans`、`reference_answer` 與 `reference_facts`）：額外回報論文選擇命中率、candidate retrieval recall、Stage 2 evidence recall、結構化 correctness 與 translation fidelity，並與忠於原文的標註 contract 比對。
 
-> 評估骨架直接呼叫 pipeline，**不會**寫入 ChromaDB 記憶，因此不會污染 episodic memory。
+> 評估骨架直接呼叫 pipeline，**不會**寫入 ChromaDB 記憶，因此不會污染 episodic memory。完整 `--run` 與 `--rejudge-existing` 會呼叫本地 AI 模型，請統一在專案的 `llm_env` Anaconda terminal 執行；離線語法、unit 與 artifact replay 則不需啟動 AI pipeline。
 
 ### 切換專案
 
@@ -725,12 +739,13 @@ rag_project/
 │   ├── query_grounding_flow.py # NLI Grounding 流程協調
 │   ├── query_types.py         # 共用型別定義
 │   ├── query_embedding_guard.py # Embedding 一致性守衛
-│   ├── query_engine.py        # LlamaIndex 查詢引擎封裝
-│   │
 │   ├── knowledge_synthesizer.py  # Stage 3：知識蒸餾
+│   ├── fact_contract.py       # source-bound requirements 與事實驗證
+│   ├── comparison_json_validator.py # 比較 schema 與關係驗證
 │   ├── answer_verifier.py     # Stage 5：答案驗證與修正
 │   ├── answer_processor.py    # 答案後處理工具
 │   ├── citation_grounding.py  # Grounding score + 推測語氣偵測
+│   ├── corpus_health.py       # 匯入重複/SI/抽取健康檢查
 │   ├── plan_executor.py       # Plan-and-Execute 架構（實驗性）
 │   ├── task_state.py          # Pipeline 任務狀態管理
 │   ├── chunk_summarizer.py    # 情境式 Chunk 摘要
@@ -755,10 +770,18 @@ rag_project/
 │       └── vl_quality_test-1.py   # 批次 VL 預處理（含智慧光柵化）
 │
 ├── eval/                        # Tier 0 評估骨架（回歸量尺）
-│   ├── eval_set.json            # 標準題組（gold 論文 + 答案 span）
+│   ├── eval_set.json            # gold 來源/span + answer/fact contracts
 │   ├── metrics.py               # 選擇命中率、檢索覆蓋率、延遲、grounding
+│   ├── judge.py                 # 結構化 correctness 與 translation judges
 │   ├── run_eval.py              # 跑題組過 pipeline、計算與比較指標
 │   └── results/                 # （自動生成）存放各次指標結果供 A/B 比較
+│
+├── PENDING_TASKS.md            # 目前 checkpoint 與排序後 roadmap
+├── maintainability_refactor_spec.md # 維護性稽核、拆分階段與驗收 gate
+├── pipeline_v4_task_spec.md    # 分階段索引設計
+├── ingestion_health_spec.md    # 語料健檢 MVP 與 Phase 2
+├── memory_redesign_spec.md     # 延後的研究記憶層重設計
+├── api-refactor-spec.md        # 延後的 API 邊界重構
 │
 ├── projects/
 │   ├── zvi/
@@ -796,14 +819,19 @@ rag_project/
 | `RERANK_ENABLED` | `False` | 選用的 Cross-encoder reranking A/B |
 | `GROUNDING_TOP_K` | `20` | Stage 6 NLI 比對用的 chunk 數 |
 | `STAGE2_LLM_SUBANSWERS_ENABLED` | `False` | 將 retrieval evidence blocks 直接交給 Stage 3 |
+| `STAGE2_QUERY_AWARE_EVIDENCE_ENABLED` | `True` | 依 query requirements 選取 source-bound Stage 2 證據 |
+| `STRUCTURED_FACT_CONTRACT_ENABLED` | `True` | 以明確來源要件驗證非比較題 facts |
+| `METHOD_FACT_LIST_DIRECT_RENDER_ENABLED` | `True` | 確定性渲染已驗證的 method facts |
 | `COMPARISON_JSON_DIRECT_RENDER_ENABLED` | `True` | atomic comparison JSON 通過驗證後跳過 Stage 4 LLM prose |
-| `ANSWERABILITY_GATE_ENABLED` | `False` | 比較題 A/B 期間暫時關閉 |
+| `STRUCTURED_JUDGE_STABLE_PROTOCOL_ENABLED` | `True` | 強制 stable structured judge response contract |
+| `ANSWERABILITY_GATE_ENABLED` | `True` | 路由可回答、部分可回答與缺乏依據問題 |
 | `EN_DRAFT_PIPELINE` | `True` | 推理、驗證與 NLI 全程英文 |
-| `FINAL_TRANSLATION_ENABLED` | `False` | 比較題測試期間暫時保留英文 draft |
+| `FINAL_TRANSLATION_ENABLED` | `True` | 將最終英文 draft 翻譯為繁體中文 |
 | `VL_AUTO_RUN` | `True` | 新增 PDF 時自動執行 VL 圖表分析 |
 | `CONTEXT_SUMMARY_ENABLED` | `True` | 為每個 chunk 生成 LLM 摘要標頭 |
-| `NLI_TRANSLATE_TO_EN` | `True` | NLI 前將 hypothesis 翻譯為英文 |
+| `NLI_TRANSLATE_TO_EN` | `True` | 非英文 hypothesis 才先翻譯；英文 draft 通常不需轉換 |
 | `NLI_CONTRADICTION_ENABLED` | `True` | 啟用矛盾偵測 |
+| `NLI_DEVICE` | `"cuda"` | 在 GPU 執行 NLI 模型 |
 | `PLAN_EXECUTE_ENABLED` | `False` | Plan-and-Execute 架構（實驗性） |
 
 > ⚠️ 若修改 `CHUNK_SIZE`、`CHUNK_OVERLAP` 或 `EMBED_MODEL`，請刪除 `projects/<project>/index_storage/` 後重新執行以重建索引。

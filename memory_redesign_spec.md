@@ -1,5 +1,10 @@
 # Memory Layer Redesign Spec
 
+> Status: planned, not started; reviewed 2026-08-02. The current memory layer
+> remains active. Implement this after the v11 baseline, maintainability work,
+> Pipeline v4, and Ingestion Health Phase 2 so it does not enlarge an unstable
+> orchestration boundary.
+
 ## Background & Design Intent
 
 The memory system is designed as a **research knowledge management layer**, not just a Q&A log.
