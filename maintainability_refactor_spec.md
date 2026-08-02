@@ -1,7 +1,8 @@
 # Maintainability Refactor Spec
 
 > Status: planned, audited 2026-08-02. Start only after the full 12-question
-> `baseline_v11_structured_contract_full` report is frozen.
+> `baseline_v11_structured_contract_full` is frozen as a diagnostic report, not
+> a product baseline. Start M0 only after P0/P1 produces a frozen V12 candidate.
 
 ## Goal
 
@@ -68,7 +69,7 @@ dependency removal is required.
 
 ### M0 - Hygiene and test layout
 
-Do first after the v11 baseline is frozen. These changes should not require an
+Do first after the P0/P1 quality gate and V12 candidate are frozen. These changes should not require an
 AI pipeline run.
 
 1. Delete the tracked VL backup and one-off debug patch.
@@ -181,7 +182,7 @@ because they are short; they have clear construction boundaries and active calle
 
 ## Roadmap Placement
 
-1. Finish and freeze the full v11 quality baseline.
+1. Finish P0/P1 and freeze the V12 candidate quality baseline; keep V11 as the diagnostic comparison.
 2. Run M0 hygiene/test-layout work.
 3. Perform Stage 3 latency work and M1 query-pipeline extraction in small,
    independently benchmarked commits.

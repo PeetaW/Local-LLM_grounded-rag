@@ -61,11 +61,11 @@ rather than a black-box AI that changes without notice.
 
 ## Development Status
 
-As of **2026-08-02**, the product path uses source-bound structured fact contracts, validated comparison JSON, deterministic method/comparison rendering, and structured correctness/translation judges. The Q07/Q08/Q09 focused and stability gates now pass with correctness, grounding, and translation all at `1.0`, judge coverage `3/3`, and no unsupported or conflicting claims.
+As of **2026-08-02**, the product path uses source-bound structured fact contracts, validated comparison JSON, deterministic method/comparison rendering, and structured correctness/translation judges. The full 12-question `baseline_v11_structured_contract_full` completed with correctness `0.708`, grounding `1.0`, translation fidelity `0.95`, paper selection `100%`, and Stage 2 evidence recall `88.2%`. It is frozen as a diagnostic report rather than promoted to the product baseline.
 
-The full 12-question `baseline_v11_structured_contract_full` is currently running; its formal report is not yet available, so v11 is not yet declared the product baseline and partial-run averages are intentionally ignored. The last completed full run remains v9 (`0.646` correctness, `0.908` grounding, translation coverage `10/12`); the later eight-question v10 smoke reached `0.906` correctness and `0.964` grounding but is not equivalent to a full regression. Recent stability runs average `6.7s` retrieval versus `547.3s` total, confirming Stage 3 local-LLM generation as the main latency bottleneck.
+The first V11 root-fix focus passed Q02/Q03/Q06/Q09 with correctness and grounding `1.0` on every question. The remaining Q02 translation issue is a source-OCR normality error; Q12 false-premise recovery and a full frozen-evaluator rejudge are the active quality tasks before a V12 candidate run. V11 retrieval averaged `6.3s`, while Stage 3 generation and final translation remained the measured latency bottlenecks.
 
-A 2026-08-02 maintainability audit counted 58 active tracked Python files and 22,904 lines. The refactor is deliberately staged after the v11 baseline freeze; see [maintainability_refactor_spec.md](maintainability_refactor_spec.md). The active sequence and longer-term roadmap are tracked in [PENDING_TASKS.md](PENDING_TASKS.md).
+A 2026-08-02 maintainability audit counted 58 active tracked Python files and 22,904 lines. The behavior-equivalent refactor is deliberately staged after the P0/P1 quality gate and V12 candidate freeze; see [maintainability_refactor_spec.md](maintainability_refactor_spec.md). [PENDING_TASKS.md](PENDING_TASKS.md) is the canonical master roadmap.
 
 ## System Architecture
 
@@ -467,11 +467,11 @@ All parameters are centralized in `config.py`:
 
 ## 開發狀態
 
-截至 **2026-08-02**，產品主路徑已使用 source-bound structured fact contract、經驗證的 comparison JSON、method/comparison 確定性渲染，以及結構化 correctness/translation judges。Q07/Q08/Q09 的 focused 與 stability gates 已通過：correctness、grounding、translation 均為 `1.0`，judge coverage `3/3`，沒有 unsupported 或 conflicting claims。
+截至 **2026-08-02**，產品主路徑已使用 source-bound structured fact contract、經驗證的 comparison JSON、method/comparison 確定性渲染，以及結構化 correctness/translation judges。完整 12 題 `baseline_v11_structured_contract_full` 已完成：correctness `0.708`、grounding `1.0`、translation fidelity `0.95`、paper selection `100%`、Stage 2 evidence recall `88.2%`。它凍結為 diagnostic report，不升格為產品 baseline。
 
-完整 12 題 `baseline_v11_structured_contract_full` 目前執行中，正式報告尚未產生，因此還不能把 v11 宣稱為產品 baseline，也不採用執行中的部分平均值。最後完成的完整題組仍是 v9（correctness `0.646`、grounding `0.908`、translation coverage `10/12`）；後續八題 v10 smoke 雖達 correctness `0.906`、grounding `0.964`，但不能等同完整回歸。近期 stability 平均 retrieval `6.7s`、總延遲 `547.3s`，主要瓶頸已確認是 Stage 3 本地 LLM 生成。
+第一批 V11 root-fix focused run 的 Q02/Q03/Q06/Q09 correctness 與 grounding 已全部達 `1.0`。剩餘 Q02 translation 問題是來源 OCR 的 normality 誤字；目前先完成 Q12 false-premise recovery 與 frozen evaluator 全題重判，再建立 V12 candidate。V11 retrieval 平均僅 `6.3s`，主要延遲瓶頸仍是 Stage 3 生成與最後翻譯。
 
-2026-08-02 維護性稽核共計 58 個 active tracked Python 檔、22,904 行。等 v11 baseline 凍結後才分階段整理，詳見 [maintainability_refactor_spec.md](maintainability_refactor_spec.md)；目前推進順序與長期 roadmap 見 [PENDING_TASKS.md](PENDING_TASKS.md)。
+2026-08-02 維護性稽核共計 58 個 active tracked Python 檔、22,904 行。等 P0/P1 品質 gate 與 V12 candidate 凍結後才做等價重構，詳見 [maintainability_refactor_spec.md](maintainability_refactor_spec.md)；[PENDING_TASKS.md](PENDING_TASKS.md) 是唯一 master roadmap。
 
 ## 系統架構
 
