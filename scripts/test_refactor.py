@@ -2118,7 +2118,7 @@ class TestExecuteStructuredQuery(unittest.TestCase):
                     "evidence": [{
                         "source": "ReviewA",
                         "claim": (
-                            "There is a high cost of isotopically enriched 10B; "
+                            "There is a high cost associated with isotopically enriched 10B; "
                             "when preparing enriched compounds, the major cost comes "
                             "from the isotope starting material."
                         ),

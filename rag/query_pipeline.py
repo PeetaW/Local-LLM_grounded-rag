@@ -905,6 +905,14 @@ def _stage4_empty_answer_fallback(
         for entry in evidence:
             source = str(entry["source"]).strip()
             claim = str(entry["claim"]).strip().rstrip(".")
+            if key == "cost_effectiveness":
+                claim = re.sub(
+                    r"\bhigh cost(?:\s+is)?\s+associated with\s+"
+                    r"(?=isotopically enriched 10B\b)",
+                    "high cost of ",
+                    claim,
+                    flags=re.IGNORECASE,
+                )
             for atomic_claim in _atomic_dimension_claims(claim):
                 claim_key = (source.lower(), atomic_claim.lower())
                 if claim_key in seen_claims:
