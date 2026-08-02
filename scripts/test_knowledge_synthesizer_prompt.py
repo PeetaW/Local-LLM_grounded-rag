@@ -534,6 +534,42 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
 
         self.assertIn("spontaneously dehydrates", contract["facts"][0]["claim"])
 
+    def test_water_stable_contract_requires_precursor_and_water_conversion(self):
+        query = (
+            "What is the water-stable boroxine structure reported, and what role do "
+            "the dynamic covalent bonds play in its fluoride binding and hydrogel formation?"
+        )
+        requirements = build_fact_contract_requirements(query)
+        catalog = build_evidence_catalog([{
+            "source": "PaperA",
+            "text": (
+                "[Snippet 1] Upon exposure to water, the dimer transforms into a boroxine. "
+                "The dimer converts in water into a stable trimer complex. "
+                "Under ambient conditions, HO-PBA spontaneously dehydrates into a dimer "
+                "with dynamic covalent bonds and aggregation-induced enhanced emission."
+            ),
+        }])
+        water_ids = [
+            item["id"]
+            for item in catalog
+            if "water" in item["text"].lower()
+        ]
+        contract = complete_fact_contract(
+            validate_fact_contract({"evidence_ids": water_ids}, catalog),
+            catalog,
+            requirements,
+        )
+        coverage = {item["kind"]: item for item in contract["requirement_coverage"]}
+
+        self.assertEqual(len(requirements), 8)
+        self.assertNotIn("relation", coverage)
+        self.assertTrue(coverage["precursor_formation"]["covered"])
+        self.assertTrue(coverage["water_conversion"]["covered"])
+        self.assertTrue(any(
+            "spontaneously dehydrates" in fact["claim"]
+            for fact in contract["facts"]
+        ))
+
     def test_synthesizer_structured_contract_is_ab_switch(self):
         cfg.STRUCTURED_FACT_CONTRACT_ENABLED = True
         synth = KnowledgeSynthesizer()

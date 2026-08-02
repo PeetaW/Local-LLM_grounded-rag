@@ -190,9 +190,6 @@ def build_fact_contract_requirements(
             add("control", "Control or comparison outcome", 1)
     if relation_query:
         label = next((text for text in texts if _RELATION_QUERY_RE.search(text)), query)
-        add("relation", label or "Requested mechanism or relation", 2)
-        if re.search(r"\bbind\w*\b", combined, re.IGNORECASE):
-            add("binding_relation", label or "Requested binding relation", 1)
         dynamic_network = bool(
             re.search(r"\b(?:dynamic|covalent|exchange\w*)\b", combined, re.IGNORECASE)
             and re.search(
@@ -201,16 +198,24 @@ def build_fact_contract_requirements(
                 re.IGNORECASE,
             )
         )
+        water_stable = bool(re.search(r"\bwater-?stable\b", combined, re.IGNORECASE))
+        boroxine_conversion = bool(
+            water_stable and re.search(r"\bboroxine\w*\b", combined, re.IGNORECASE)
+        )
+        if not (dynamic_network and boroxine_conversion):
+            add("relation", label or "Requested mechanism or relation", 2)
+        if re.search(r"\bbind\w*\b", combined, re.IGNORECASE):
+            add("binding_relation", label or "Requested binding relation", 1)
         if dynamic_network:
             add("dynamic_exchange", label or "Requested dynamic exchange", 1)
             add("network_formation", label or "Requested network formation", 1)
             add("network_disruption", label or "Requested network disruption", 1)
             add("network_recovery", label or "Requested network recovery", 1)
-        if re.search(
-            r"\bwater-?stable\b",
-            combined,
-            re.IGNORECASE,
-        ):
+        if boroxine_conversion:
+            add("precursor_formation", "Boroxine precursor formation before water exposure", 1)
+            add("water_conversion", "Water-triggered conversion into the stable boroxine", 1)
+            add("stability_values", label or "Requested stability evidence", 2)
+        elif water_stable:
             add("structure_identity", label or "Requested stable structure", 2)
             add("stability_values", label or "Requested stability evidence", 2)
         elif re.search(
@@ -303,6 +308,45 @@ def _requirement_score(requirement: dict, evidence: str) -> int:
         return 20 + 3 * overlap if _NETWORK_DISRUPTION_RE.search(evidence) else 0
     if kind == "network_recovery":
         return 20 + 3 * overlap if _NETWORK_RECOVERY_RE.search(evidence) else 0
+    if kind == "precursor_formation":
+        dehydration = bool(re.search(r"\bdehydrat\w*\b", evidence, re.IGNORECASE))
+        dimer = bool(re.search(r"\bdimer\w*\b", evidence, re.IGNORECASE))
+        if not (dehydration and dimer):
+            return 0
+        spontaneous = bool(re.search(
+            r"\b(?:spontaneous\w*|ambient)\b",
+            evidence,
+            re.IGNORECASE,
+        ))
+        dynamic_bond = bool(re.search(
+            r"\bdynamic\s+covalent(?:\s+B[–-]O)?\s+bonds?\b",
+            evidence,
+            re.IGNORECASE,
+        ))
+        emission = bool(re.search(
+            r"\baggregation-induced\s+(?:enhanced\s+)?emission\b",
+            evidence,
+            re.IGNORECASE,
+        ))
+        return 30 + 8 * spontaneous + 5 * dynamic_bond + 8 * emission + 3 * overlap
+    if kind == "water_conversion":
+        water = bool(re.search(
+            r"\b(?:water|aqueous|D2O|H2O)\b",
+            evidence,
+            re.IGNORECASE,
+        ))
+        dimer = bool(re.search(r"\bdimer\w*\b", evidence, re.IGNORECASE))
+        conversion = bool(re.search(
+            r"\b(?:convert(?:s|ed|ing)?|transform(?:s|ed|ing)?|react(?:s|ed|ing)?)\b",
+            evidence,
+            re.IGNORECASE,
+        ))
+        product = bool(re.search(r"\b(?:trimer\w*|boroxine\w*)\b", evidence, re.IGNORECASE))
+        if not (water and dimer and conversion and product):
+            return 0
+        trimer = bool(re.search(r"\btrimer\w*\b", evidence, re.IGNORECASE))
+        complex_ = bool(re.search(r"\bcomplex\w*\b", evidence, re.IGNORECASE))
+        return 30 + 8 * trimer + 4 * complex_ + 3 * overlap
     if kind == "structure_identity":
         label = _plain(str(requirement.get("label", "")))
         if "water-stable" in label and not re.search(
