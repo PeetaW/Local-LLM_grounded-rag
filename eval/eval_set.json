@@ -95,9 +95,19 @@
       "gold_papers": [
         "1-s2.0-S0731708511003451-main"
       ],
-      "reference_answer": "The paper reports two classes by HPLC. (1) Synthetic intermediates/impurities, which are boron-containing: BrPD (2-(4-bromophenyl)-1,3-dioxane), FBBA (4-formylbenzeneboronic acid) and BDPA (a Boc-protected dimethyl-dioxaborinane phenyl acrylic acid methyl ester); all three synthetic impurities were detectable down to ~0.1% of the BPA level. (2) Degradation-related impurities: tyrosine and phenylalanine (reported as BPA impurities by previous workers), with the principal degradation pathway being oxidative degradation of BPA to tyrosine (loss of the boronic acid group). These were characterised via forced-degradation and long-term stability studies. Storage conditions: as a raw powder BPA is stable, with no detectable degradation when stored at 55 C for 6 months or 40 C for 12 months, and it is also stable in acidic and FeCl3 solutions; the drug-product formulation (BPA with mannitol, pH ~8) was incubated at 4, 25 and 40 C for several months. Degradation/impurity formation is driven mainly by oxidative/basic conditions and solution handling rather than by the solid raw material.",
+      "reference_answer": "The paper distinguishes two classes by HPLC. (1) Synthetic intermediate/impurity reference compounds, which are boron-containing: BrPD (2-(4-bromophenyl)-1,3-dioxane), FBBA (4-formylbenzeneboronic acid) and BDPA (a Boc-protected dimethyl-dioxaborinane phenyl acrylic acid methyl ester); all three were detectable down to ~0.1% of the BPA level, but neither BrPD nor an FBBA/BDPA combination was observed in the available BPA samples. (2) Degradation-related impurities: tyrosine and phenylalanine (reported as BPA impurities by previous workers), with the principal degradation pathway being oxidative degradation of BPA to tyrosine (loss of the boronic acid group). These were characterised via forced-degradation and long-term stability studies. Storage conditions: as a raw powder BPA is stable, with no detectable degradation when stored at 55 C for 6 months or 40 C for 12 months, and it is also stable in acidic and FeCl3 solutions; the drug-product formulation (BPA with mannitol, pH ~8) was incubated at 4, 25 and 40 C for several months. Degradation/impurity formation is driven mainly by oxidative/basic conditions and solution handling rather than by the solid raw material.",
       "reference_facts": [
-        "The synthetic BPA impurities or intermediates identified by HPLC are BrPD, FBBA, and BDPA.",
+        {
+          "fact": "The HPLC method treats BrPD, FBBA, and BDPA as synthetic BPA intermediate or impurity reference compounds and reports that all three are detectable, while none were observed in the available BPA samples.",
+          "required_terms": [
+            "BrPD",
+            "FBBA",
+            "BDPA",
+            "synthetic impurities",
+            "detectable",
+            "available BPA samples"
+          ]
+        },
         "All three synthetic impurities are detectable at 0.5 micrograms per millilitre, equivalent to 0.1% of the BPA nominal working concentration.",
         "BPA degrades to tyrosine under alkaline and oxidative conditions, and oxidative degradation is extremely rapid.",
         "Lyophilized BPA-mannitol drug product slowly degrades to phenylalanine in a temperature-dependent manner, reaching about 1% at 40 C over 6 months.",
@@ -335,10 +345,10 @@
       "type": "false_premise",
       "question": "Since BPA is administered orally in BNCT, what oral bioavailability values are reported in these papers?",
       "gold_papers": [],
-      "reference_answer": "The premise is false. In these papers BPA for BNCT is not administered orally; it is given by intravenous infusion. The correct response is to flag the false premise (oral administration) and decline to provide 'oral bioavailability' values rather than hallucinating them.",
+      "reference_answer": "The premise is unsupported by the cited BNCT paper. It reports clinical BPA infusion regimens, including a high-dose 900 mg BPA/kg, 6-hour infusion regimen, rather than oral dosing. The correct response is to flag the unsupported oral-administration premise and decline to provide 'oral bioavailability' values rather than inventing them.",
       "reference_facts": [
-        "The premise that BPA is administered orally in the cited BNCT literature is false.",
-        "The relevant BPA administration route is intravenous infusion rather than oral dosing.",
+        "The premise that the cited BNCT paper reports oral BPA administration is unsupported.",
+        "The paper instead reports clinical BPA infusion regimens, including 900 milligrams BPA per kilogram over a 6-hour infusion.",
         "The papers do not report oral bioavailability values, so the answer must not invent any."
       ],
       "gold_spans": []

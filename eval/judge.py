@@ -229,6 +229,12 @@ def _covered_contract_missing(
     ))
     missing_facets = dependent_facets - _contract_tokens(evidence)
     evidence_text = _normalized(evidence)
+    missing_negation = set()
+    if (
+        re.search(r"\b(?:no|not|never|neither|none|without)\b", _normalized(fact))
+        and not re.search(r"\b(?:no|not|never|neither|none|without)\b", evidence_text)
+    ):
+        missing_negation.add("negation")
     def _required_term_present(term: str) -> bool:
         normalized = _normalized(term)
         if normalized in evidence_text:
@@ -247,6 +253,7 @@ def _covered_contract_missing(
         missing_numbers
         | missing_facets
         | missing_required
+        | missing_negation
         | _missing_contract_groups(
             fact,
             evidence,
@@ -352,7 +359,7 @@ def _positive_contract_witness(
         group for group in _POSITIVE_RECOVERY_GROUPS
         if any(alias in fact_text for alias in group[1])
     ]
-    if not active_groups:
+    if not active_groups and not required_terms:
         return None
     fact_tokens = _contract_tokens(fact)
     for item in candidate_items:
@@ -731,6 +738,12 @@ def _judge_structured(question: str, candidate: str, reference: str, reference_f
                 if item["verdict"] == "covered":
                     item["initial_verdict"] = original["verdict"]
                     initial[item["id"]] = item
+                elif original["verdict"] == "contradicted" and item["verdict"] == "missing":
+                    original["verdict"] = "missing"
+                    original["evidence"] = []
+                    original["evidence_ids"] = []
+                    original["review_verdict"] = "missing"
+                    original["review_reason"] = item["reason"]
                 else:
                     original["review_verdict"] = item["verdict"]
                     original["review_reason"] = item["reason"]
@@ -921,6 +934,12 @@ def _translation_omission_witness_present(
     source_text = _normalized(source)
     target_text = _normalized(target)
     reason_text = _normalized(reason)
+    translated_witnesses = re.findall(
+        r"[（(]([^()（）]*[\u3400-\u9fff][^()（）]*)[）)]",
+        reason or "",
+    )
+    if any(_normalized(value) in target_text for value in translated_witnesses):
+        return True
     identifiers = set(re.findall(
         r"\b(?=[a-z0-9-]*[a-z])(?=[a-z0-9-]*\d)[a-z0-9]+(?:-[a-z0-9]+)*\b",
         reason_text,

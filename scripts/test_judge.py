@@ -115,6 +115,28 @@ class TestStructuredJudge(unittest.TestCase):
         self.assertEqual(result["fact_audit"][0]["verdict"], "missing")
         self.assertEqual(result["fact_audit"][0]["review_verdict"], "contradicted")
 
+    def test_review_must_confirm_an_initial_contradiction(self):
+        first = {"facts": [{
+            "id": "F1", "verdict": "contradicted", "evidence_ids": ["C1"], "reason": "opposite",
+        }]}
+        review = {"facts": [{
+            "id": "F1", "verdict": "missing", "evidence_ids": [], "reason": "not enough evidence",
+        }]}
+        client = MagicMock()
+        client.post.side_effect = [_response(first), _response(review)]
+        with patch.object(judge, "requests", client):
+            result = judge.judge_correctness(
+                "question",
+                "The candidate discusses a related condition.",
+                "Reference fact.",
+                model="test",
+                base_url="http://test",
+                reference_facts=["Reference fact."],
+            )
+
+        self.assertEqual(result["fact_audit"][0]["verdict"], "missing")
+        self.assertEqual(result["fact_audit"][0]["review_verdict"], "missing")
+
     def test_unknown_candidate_id_is_rejected(self):
         facts = judge._fact_items(["A fact"])
         _, errors = judge._validate_fact_audit({"facts": [{
@@ -302,6 +324,33 @@ class TestStructuredJudge(unittest.TestCase):
             purity_facts[0]["required_terms"],
         )
         self.assertEqual(challenging[0], "covered")
+
+    def test_required_terms_recover_explicit_impurity_witness(self):
+        facts = judge._fact_items([{
+            "fact": (
+                "BrPD, FBBA, and BDPA are synthetic impurities that are detectable, "
+                "but were not observed in the available samples."
+            ),
+            "required_terms": [
+                "BrPD", "FBBA", "BDPA", "synthetic impurities", "detectable", "available BPA samples",
+            ],
+        }])
+        candidate = (
+            "All three synthetic impurities were detectable at 0.5 micrograms per millilitre, "
+            "and neither BrPD nor the FBBA/BDPA combination were observed in the available BPA samples."
+        )
+        audit, errors = judge._validate_fact_audit(
+            {"facts": [{
+                "id": "F1", "verdict": "missing", "evidence_ids": [], "reason": "not found",
+            }]},
+            facts,
+            candidate,
+            stable_protocol=True,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit[0]["verdict"], "covered")
+        self.assertEqual(audit[0]["judge_verdict"], "missing")
 
         competitive = judge._apply_fact_contract(
             "JPH203 is a competitive inhibitor of LAT1.",
@@ -649,6 +698,24 @@ class TestTranslationJudge(unittest.TestCase):
                     "reason": "The detail 'later-stage cell membrane disruption' is omitted.",
                 },
             ]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_discards_parenthesized_chinese_witness_already_present(self):
+        source = "Three boronic acid units are incorporated into a flexible macrocycle."
+        target = "三個 boronic acid 單元併入一個靈活的 macrocycle。"
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "omission",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": "The target omits flexible (靈活的) from the macrocycle description.",
+            }]},
             source,
             target,
         )
