@@ -1459,6 +1459,19 @@ class TestTranslateToTraditionalChinese(unittest.TestCase):
         self.assertNotIn("I N hydrochloric acid", prompt)
 
     @patch("requests.post")
+    def test_decodes_valid_utf8_byte_fallbacks_in_translation(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "response": "D-<0xE7><0xBA><0x88>胺酸；<0xE9><0x88><0x80>催化；<0xE9><0x88>"
+        }
+        mock_post.return_value = mock_resp
+
+        result = translate_to_traditional_chinese("English source")
+
+        self.assertEqual(result, "D-纈胺酸；鈀催化；<0xE9><0x88>")
+
+    @patch("requests.post")
     def test_returns_original_on_connection_error(self, mock_post):
         mock_post.side_effect = Exception("connection refused")
         original = "English fallback text"

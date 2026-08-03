@@ -10,10 +10,26 @@ import config as cfg
 _OCR_NORMALITY_RE = re.compile(
     r"\b(?:I|l)\s+N(?=\s+(?:hydrochloric|sulfuric|nitric)\s+acid\b|\s+(?:HCl|NaOH|KOH)\b)"
 )
+_BYTE_FALLBACK_SEQUENCE_RE = re.compile(r"(?:<0[xX][0-9A-Fa-f]{2}>)+")
+_BYTE_FALLBACK_TOKEN_RE = re.compile(r"<0[xX]([0-9A-Fa-f]{2})>")
 
 
 def _normalize_ocr_measurements(text: str) -> str:
     return _OCR_NORMALITY_RE.sub("1 N", text or "")
+
+
+def _decode_utf8_byte_fallbacks(text: str) -> str:
+    def decode(match: re.Match) -> str:
+        raw = bytes(
+            int(value, 16)
+            for value in _BYTE_FALLBACK_TOKEN_RE.findall(match.group(0))
+        )
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return match.group(0)
+
+    return _BYTE_FALLBACK_SEQUENCE_RE.sub(decode, text or "")
 
 
 def _term_fidelity_rules() -> str:
@@ -87,7 +103,9 @@ def translate_to_traditional_chinese(text: str, on_status=None) -> str:
             timeout=cfg.LLM_TIMEOUT,
         )
         if resp.ok:
-            translated = resp.json().get("response", "").strip()
+            translated = _decode_utf8_byte_fallbacks(
+                resp.json().get("response", "")
+            ).strip()
             if translated:
                 _status(f"  ✅ 翻譯完成（{len(translated):,} 字元）")
                 return translated
