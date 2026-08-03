@@ -360,6 +360,43 @@ class TestStructuredJudge(unittest.TestCase):
         )
         self.assertEqual(competitive[0], "covered")
 
+    def test_contract_accepts_traditional_chinese_negation_witness(self):
+        fact = "The papers do not report oral bioavailability values."
+
+        for evidence in (
+            "檢索文獻沒有報告 oral bioavailability 數值，也不會臆測數值。",
+            "現有內容並不包含可直接回答的資訊，系統選擇不作答。",
+        ):
+            verdict, _ = judge._apply_fact_contract(fact, "covered", [evidence])
+            self.assertEqual(verdict, "covered")
+
+    def test_numeric_unit_relation_witness_recovers_only_matching_fact(self):
+        facts = judge._fact_items([
+            "The clinical regimen used 900 milligrams compound per kilogram over a 6-hour infusion."
+        ])
+        matching = (
+            "Clinically, a 900 mg compound/kg, 6-h infusion regimen was reported."
+        )
+        unrelated = (
+            "A stability assay used 900 mg compound/kg during a 6-hour storage interval."
+        )
+        payload = {"facts": [{
+            "id": "F1", "verdict": "missing", "evidence_ids": [], "reason": "not found",
+        }]}
+
+        recovered, recovered_errors = judge._validate_fact_audit(
+            payload, facts, matching, stable_protocol=True,
+        )
+        rejected, rejected_errors = judge._validate_fact_audit(
+            payload, facts, unrelated, stable_protocol=True,
+        )
+
+        self.assertEqual(recovered_errors, [])
+        self.assertEqual(recovered[0]["verdict"], "covered")
+        self.assertEqual(recovered[0]["judge_verdict"], "missing")
+        self.assertEqual(rejected_errors, [])
+        self.assertEqual(rejected[0]["verdict"], "missing")
+
     def test_contract_numbers_ignore_identifier_digits_and_latex_parameter_subscripts(self):
         plain = "JPH203 preincubation alone had an IC50 of 193 +/- 50 nM."
         latex = r"JPH203 preincubation alone had an $\text{IC}_{50}$ of $193 \pm 50$ nM."
@@ -722,6 +759,17 @@ class TestTranslationJudge(unittest.TestCase):
 
         self.assertEqual(errors, [])
         self.assertEqual(audit, [])
+
+    def test_translation_audit_detects_unresolved_encoding_artifact(self):
+        result = judge.judge_translation_fidelity(
+            "D-valine methyl ester was isolated.",
+            "得到 D-<0xE7><0xBA><0x88>胺酸甲基酯。",
+        )
+
+        self.assertEqual(result["score"], 0.75)
+        self.assertEqual(result["judge_attempts"], 0)
+        self.assertEqual(result["error_audit"][0]["type"], "untranslated")
+        self.assertEqual(result["error_audit"][0]["severity"], "minor")
 
     def test_translation_audit_ignores_citation_only_omissions(self):
         source = "The major cost comes from isotope starting material [ReviewA]."

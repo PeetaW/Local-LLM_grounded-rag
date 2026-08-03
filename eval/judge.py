@@ -93,6 +93,9 @@ _TRANSLATION_AUDIT_SCHEMA = {
     "required": ["errors"],
     "additionalProperties": False,
 }
+_TRANSLATION_ENCODING_ARTIFACT_RE = re.compile(
+    r"(?:<0[xX][0-9A-Fa-f]{2}>)+|\ufffd"
+)
 
 
 def _generate(system: str, prompt: str, model: str, base_url: str,
@@ -150,6 +153,23 @@ _CONTRACT_STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "in", "is",
     "it", "of", "on", "or", "that", "the", "their", "this", "to", "under", "was", "were", "with",
 }
+_NUMERIC_WITNESS_STOPWORDS = {
+    "clinical", "clinically", "include", "included", "including", "instead",
+    "paper", "papers", "per", "report", "reported", "reports", "use", "used", "using",
+    "value", "values",
+}
+_CONTRACT_UNIT_PATTERNS = (
+    ("mg", re.compile(r"(?<![a-z])(?:mg|milligrams?)(?![a-z])")),
+    ("kg", re.compile(r"(?<![a-z])(?:kg|kilograms?)(?![a-z])")),
+    ("ug", re.compile(r"(?<![a-z])(?:ug|micrograms?)(?![a-z])")),
+    ("g", re.compile(r"(?<![a-z])(?:g|grams?)(?![a-z])")),
+    ("ml", re.compile(r"(?<![a-z])(?:ml|millilit(?:er|re)s?)(?![a-z])")),
+    ("h", re.compile(r"(?<![a-z])(?:h|hrs?|hours?)(?![a-z])")),
+    ("min", re.compile(r"(?<![a-z])(?:min|mins?|minutes?)(?![a-z])")),
+    ("day", re.compile(r"(?<![a-z])days?(?![a-z])")),
+    ("month", re.compile(r"(?<![a-z])months?(?![a-z])")),
+    ("year", re.compile(r"(?<![a-z])years?(?![a-z])")),
+)
 _CONTRACT_CONDITION_GROUPS = (
     ("combined", (
         "combined", "combination", "addition of preincubation", "pre-plus",
@@ -174,6 +194,12 @@ _CONTRACT_RELATION_GROUPS = (
         ),
     ),
 )
+_NEGATION_RE = re.compile(
+    r"\b(?:no|not|never|neither|none|without)\b|"
+    r"(?:沒有|並不(?:包含|存在|提供|報告|表示|代表|支援|支持|成立)|"
+    r"並未|未曾|未能|未有|未提供|未報告|未發現|未觀察到|"
+    r"不會|不能|不可|無法|不存在|不包含|不作答|避免(?:編造|捏造))"
+)
 _POSITIVE_RECOVERY_GROUPS = (
     ("enhancement", ("enhanc", "augment")),
 )
@@ -197,6 +223,15 @@ def _contract_numbers(text: str) -> set[str]:
     plain = re.sub(r"(?<=[A-Za-z])_\{?(\d+)\}?", r"\1", plain)
     values = re.findall(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?(?![A-Za-z0-9])", plain)
     return {value.rstrip("0").rstrip(".") if "." in value else value for value in values}
+
+
+def _contract_units(text: str) -> set[str]:
+    normalized = _normalized(_without_citations(text)).replace("μ", "u").replace("µ", "u")
+    return {
+        canonical
+        for canonical, pattern in _CONTRACT_UNIT_PATTERNS
+        if pattern.search(normalized)
+    }
 
 
 def _contract_tokens(text: str) -> set[str]:
@@ -231,8 +266,8 @@ def _covered_contract_missing(
     evidence_text = _normalized(evidence)
     missing_negation = set()
     if (
-        re.search(r"\b(?:no|not|never|neither|none|without)\b", _normalized(fact))
-        and not re.search(r"\b(?:no|not|never|neither|none|without)\b", evidence_text)
+        _NEGATION_RE.search(_normalized(fact))
+        and not _NEGATION_RE.search(evidence_text)
     ):
         missing_negation.add("negation")
     def _required_term_present(term: str) -> bool:
@@ -359,15 +394,23 @@ def _positive_contract_witness(
         group for group in _POSITIVE_RECOVERY_GROUPS
         if any(alias in fact_text for alias in group[1])
     ]
-    if not active_groups and not required_terms:
+    fact_numbers = _contract_numbers(fact)
+    fact_units = _contract_units(fact)
+    numeric_contract = len(fact_numbers) >= 2 and bool(fact_units)
+    if not active_groups and not required_terms and not numeric_contract:
         return None
     fact_tokens = _contract_tokens(fact)
+    numeric_fact_tokens = fact_tokens - _NUMERIC_WITNESS_STOPWORDS - {
+        token
+        for token in fact_tokens
+        if any(pattern.fullmatch(token) for _, pattern in _CONTRACT_UNIT_PATTERNS)
+    }
     for item in candidate_items:
         evidence = str(item.get("text", ""))
         evidence_text = _normalized(evidence)
         if (
-            re.search(r"\b(?:no|not|never|without)\b", evidence_text)
-            and not re.search(r"\b(?:no|not|never|without)\b", fact_text)
+            _NEGATION_RE.search(evidence_text)
+            and not _NEGATION_RE.search(fact_text)
         ):
             continue
         if _missing_contract_groups(fact, evidence, active_groups):
@@ -380,7 +423,24 @@ def _positive_contract_witness(
         )[0] != "covered":
             continue
         overlap = len(fact_tokens & _contract_tokens(evidence)) / len(fact_tokens) if fact_tokens else 0.0
-        if overlap >= 0.4:
+        evidence_tokens = _contract_tokens(evidence) - _NUMERIC_WITNESS_STOPWORDS
+        numeric_relation_overlap = sum(
+            any(
+                fact_token == evidence_token
+                or (
+                    min(len(fact_token), len(evidence_token)) >= 6
+                    and fact_token[:6] == evidence_token[:6]
+                )
+                for evidence_token in evidence_tokens
+            )
+            for fact_token in numeric_fact_tokens
+        )
+        numeric_match = (
+            numeric_contract
+            and fact_units <= _contract_units(evidence)
+            and numeric_relation_overlap >= 2
+        )
+        if overlap >= 0.4 or numeric_match:
             return item
     return None
 
@@ -793,6 +853,25 @@ def _translation_items(text: str, prefix: str) -> list[dict]:
     return [{"id": f"{prefix}{i}", "text": item} for i, item in enumerate(items, 1)]
 
 
+def _translation_encoding_artifacts(target: str) -> list[dict]:
+    audit = []
+    for item in _translation_items(target, "T"):
+        artifact = _TRANSLATION_ENCODING_ARTIFACT_RE.search(item["text"])
+        if not artifact:
+            continue
+        token = artifact.group(0)
+        audit.append({
+            "type": "untranslated",
+            "severity": "material" if "\ufffd" in token else "minor",
+            "source_ids": [],
+            "target_ids": [item["id"]],
+            "source": [],
+            "target": [item["text"]],
+            "reason": f"Target contains an unresolved encoding artifact: {token}",
+        })
+    return audit
+
+
 def _number_unit_signature(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     normalized = unicodedata.normalize("NFKC", _without_citations(text)).lower().replace("μ", "u").replace("µ", "u")
     numbers = tuple(sorted(re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", normalized)))
@@ -1148,6 +1227,17 @@ def judge_translation_fidelity(source: str, target: str, model: str = None,
     base_url = base_url or cfg.OLLAMA_BASE_URL
     if not (source or "").strip() or not (target or "").strip():
         return {"score": None, "raw": None, "reason": "missing source or translation", "mode": "translation_fidelity_v2"}
+    encoding_audit = _translation_encoding_artifacts(target)
+    if encoding_audit:
+        raw, score, reason = _score_translation_audit(encoding_audit)
+        return {
+            "score": score,
+            "raw": raw,
+            "reason": reason,
+            "mode": "translation_fidelity_v2",
+            "error_audit": encoding_audit,
+            "judge_attempts": 0,
+        }
     correction = ""
     last_output = ""
     for attempt in range(1, 3):
