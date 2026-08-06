@@ -91,13 +91,10 @@ def direct_route_targets_query_target(route: dict, target: str) -> bool:
     target_pattern = rf"\b{re.escape(target)}\b"
     if not re.search(target_pattern, text, re.IGNORECASE):
         return bool(re.search(_TARGET_ACTION, text, re.IGNORECASE))
-    return bool(
-        re.search(rf"{_TARGET_ACTION}[^.!?]{{0,80}}{target_pattern}", text, re.IGNORECASE)
-        or re.search(
-            rf"{target_pattern}(?:-mediated)?[^.!?]{{0,60}}{_TARGET_ACTION}",
-            text,
-            re.IGNORECASE,
-        )
+    return any(
+        re.search(target_pattern, sentence, re.IGNORECASE)
+        and re.search(_TARGET_ACTION, sentence, re.IGNORECASE)
+        for sentence in re.split(r"(?<=[.!?])\s+", text)
     )
 
 

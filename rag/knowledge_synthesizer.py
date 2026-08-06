@@ -142,10 +142,12 @@ def _normalize_comparison_json(
     if not isinstance(comparison, dict):
         return text
     if requirements is None:
-        requirements = build_comparison_requirements(
-            query,
-            [{"text": evidence_text, "source": "retrieved evidence"}],
-        )
+        requirements = data.get("comparison_requirements")
+        if not isinstance(requirements, dict):
+            requirements = build_comparison_requirements(
+                query,
+                [{"text": evidence_text, "source": "retrieved evidence"}],
+            )
     comparison.setdefault("source_roles", [])
     comparison.setdefault("direct_routes", [])
     comparison.setdefault("review_comparison_sources", [])
@@ -211,6 +213,17 @@ def _normalize_comparison_json(
             and "review/comparison" in str(item.get("role", "")).lower()
         )
     }
+    live_direct_route_sources = {
+        str(item.get("source", "")).strip()
+        for item in comparison["direct_routes"]
+        if isinstance(item, dict) and item.get("source")
+    }
+    for item in source_roles:
+        if not isinstance(item, dict) or not item.get("source"):
+            continue
+        source = str(item["source"]).strip()
+        if source in live_direct_route_sources and source not in review_sources:
+            item["role"] = "route"
     background_sources = {
         str(item.get("source", "")).strip() for item in source_roles
         if (
@@ -333,7 +346,6 @@ def _normalize_comparison_json(
         if (
             source in direct_route_sources
             and "review/comparison" not in role
-            and "background" not in role
         ):
             item["role"] = "route"
     for source in sorted(direct_route_sources - known_role_sources):
@@ -367,7 +379,7 @@ def _normalize_comparison_json(
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
-def _comparison_json_repair_prompt(original_prompt: str, current_json: str, errors: list[str]) -> str:
+def _comparison_json_repair_prompt(current_json: str, errors: list[str]) -> str:
     return f"""
 Repair the comparison_json below. Return exactly one valid JSON object and no Markdown fence.
 
@@ -376,7 +388,7 @@ Validation errors:
 
 Rules:
 - Keep the same schema.
-- Use only evidence from the original prompt below.
+- Use only evidence already present in the current JSON and its comparison_requirements.
 - Set `requested=true` for dimensions asked by the question.
 - Set `evidence_found=true` only when the retrieved evidence supports that dimension; otherwise set it false and leave `evidence` empty.
 - Every dimension evidence item must contain exactly one source and one atomic claim. Split claims from different sources into separate items.
@@ -392,9 +404,6 @@ Rules:
 
 Current JSON:
 {current_json}
-
-Original extraction prompt and retrieved evidence:
-{original_prompt}
 """.strip()
 
 
@@ -859,7 +868,7 @@ class KnowledgeSynthesizer:
                             "  🔧 [comparison-json] validator failed; "
                             f"repair {attempt + 1}/{retries}: {'; '.join(errors[:3])}"
                         )
-                        repair_prompt = _comparison_json_repair_prompt(user_prompt, result, errors)
+                        repair_prompt = _comparison_json_repair_prompt(result, errors)
                         candidate = _generate_attempt(repair_prompt, f"json_repair_{attempt + 1}")
                         candidate = _canonicalize_chunk_sources(candidate, chunks)
                         candidate = _normalize_comparison_json(

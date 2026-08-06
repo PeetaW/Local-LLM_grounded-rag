@@ -32,6 +32,7 @@ from rag.fact_contract import (
 from rag.knowledge_synthesizer import (
     _build_user_prompt,
     _append_isotope_cost_fact,
+    _comparison_json_repair_prompt,
     _comparison_json_validation_errors,
     KnowledgeSynthesizer,
     _normalize_comparison_json,
@@ -1292,8 +1293,9 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             "strategy_requirements": [{
                 "source": "RadiationA",
                 "claim": (
-                    "The LAT1 inhibitor JPH203 at minimally toxic concentrations "
-                    "sensitized cancer cells to radiation."
+                    "In summary, X-irradiation increased cellular neutral amino acid uptake, "
+                    "and the LAT1 inhibitor JPH203, at minimally toxic concentrations, "
+                    "significantly sensitized the cancer cells to radiation."
                 ),
             }],
         }
@@ -1313,18 +1315,27 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             }],
             "dimensions": {},
             "central_tradeoff": {"claim": "Strategies differ.", "sources": ["RadiationA"]},
-        }}
+        }, "comparison_requirements": requirements}
 
         normalized = json.loads(_normalize_comparison_json(
             json.dumps(payload),
             query,
-            requirements=requirements,
         ))
         comparison = normalized["comparison_json"]
 
         self.assertEqual(comparison["source_roles"][0]["role"], "route")
         self.assertEqual(comparison["direct_routes"][0]["source"], "RadiationA")
         self.assertFalse(_comparison_json_validation_errors(json.dumps(normalized), query))
+
+    def test_comparison_repair_prompt_is_bounded_to_structured_state(self):
+        prompt = _comparison_json_repair_prompt(
+            '{"comparison_json": {}, "comparison_requirements": {}}',
+            ["source role mismatch"],
+        )
+
+        self.assertIn("source role mismatch", prompt)
+        self.assertIn("comparison_requirements", prompt)
+        self.assertNotIn("Original extraction prompt", prompt)
 
     def test_mechanism_requirement_precedes_dense_anchor_paraphrase(self):
         query = "How do therapeutic strategies targeting LAT1 differ in mechanism?"

@@ -894,6 +894,16 @@ _TRANSLATION_PHRASE_EQUIVALENTS = (
     ("later-stage", ("later-stage", "later stage", "後期", "後階段")),
     ("supplementary fig", ("supplementary fig", "supplementary figure", "補充圖")),
     (
+        "no detectable degradation",
+        (
+            "no detectable degradation",
+            "未檢測到降解",
+            "未偵測到降解",
+            "未檢測到可偵測的降解",
+            "未偵測到可偵測的降解",
+        ),
+    ),
+    (
         "cell membrane disruption",
         ("cell membrane disruption", "細胞膜破裂", "細胞膜破壞", "細胞膜受損"),
     ),
@@ -958,14 +968,56 @@ def _translation_self_refuting_false_positive(kind: str, reason: str) -> bool:
     )
 
 
-def _translation_citation_false_positive(reason: str) -> bool:
+def _translation_reason_ids_out_of_scope(
+    reason: str,
+    source_ids: list[str],
+    target_ids: list[str],
+) -> bool:
+    referenced = {value.upper() for value in re.findall(r"\b[ST]\d+\b", reason or "", re.I)}
+    allowed = {str(value).upper() for value in source_ids + target_ids}
+    return bool(referenced - allowed)
+
+
+def _translation_emphasis_false_positive(kind: str, reason: str) -> bool:
     return bool(
-        re.search(
-            r"\b(?:citation|reference|source label|source attribution|paper attribution)\b",
+        kind in {"omission", "mistranslation"}
+        and re.search(r"\b(?:clearly show|rhetorical emphasis|emphasis)\b", reason, re.I)
+        and not re.search(
+            r"\b(?:number|unit|negation|condition|sequence|causal|dose|temperature|concentration)\b",
             reason,
-            re.IGNORECASE,
+            re.I,
         )
     )
+
+
+def _translation_citation_false_positive(
+    kind: str,
+    reason: str,
+    source: str,
+    target: str,
+) -> bool:
+    if re.search(
+        r"\b(?:citation|reference|source label|source attribution|paper attribution)\b",
+        reason,
+        re.IGNORECASE,
+    ):
+        return True
+    if kind not in {"omission", "mistranslation"} or not re.search(
+        r"\b(?:subject|paper|author|reporting action|attribution)\b",
+        reason,
+        re.IGNORECASE,
+    ):
+        return False
+
+    def labels(text: str) -> set[str]:
+        matches = re.findall(r"\[([^\]]+)\]|【([^】]+)】|`([^`]+)`", text or "")
+        return {
+            _normalized(next(value for value in match if value))
+            for match in matches
+            if any(match)
+        }
+
+    return bool(labels(source) & labels(target))
 
 
 def _translation_metadata_false_positive(kind: str, reason: str, source: str) -> bool:
@@ -1008,7 +1060,7 @@ def _translation_omission_witness_present(
     source: str,
     target: str,
 ) -> bool:
-    if kind not in {"omission", "mistranslation"}:
+    if kind not in {"omission", "mistranslation", "negation_relation"}:
         return False
     source_text = _normalized(source)
     target_text = _normalized(target)
@@ -1133,9 +1185,15 @@ def _validate_translation_audit(data: dict | list | None, source: str, target: s
         source_text = " ".join(source_lookup[value] for value in source_ids)
         target_text = " ".join(target_lookup[value] for value in target_ids)
         reason = str(row.get("reason", "")).strip()[:300]
+        if _translation_reason_ids_out_of_scope(reason, source_ids, target_ids):
+            continue
+        if _translation_emphasis_false_positive(kind, reason):
+            continue
         if _translation_term_false_positive(kind, reason, source_text, target):
             continue
-        if _translation_citation_false_positive(reason):
+        if _translation_citation_false_positive(
+            kind, reason, source_text, target_text
+        ):
             continue
         if _translation_metadata_false_positive(kind, reason, source_text):
             continue

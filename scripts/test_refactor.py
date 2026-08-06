@@ -1408,7 +1408,7 @@ class TestTranslateToTraditionalChinese(unittest.TestCase):
         self.assertEqual(result, "繁體中文翻譯結果")
 
     @patch("requests.post")
-    def test_term_fidelity_preserves_route_defining_phrase(self, mock_post):
+    def test_term_fidelity_preserves_route_and_conjugation_terms(self, mock_post):
         old = cfg.TERM_FIDELITY_GUARD_ENABLED
         try:
             cfg.TERM_FIDELITY_GUARD_ENABLED = True
@@ -1420,6 +1420,8 @@ class TestTranslateToTraditionalChinese(unittest.TestCase):
             prompt = mock_post.call_args.kwargs["json"]["prompt"]
             self.assertIn("chymotrypsin-catalysed enzymatic hydrolysis", prompt)
             self.assertIn("Preserve route-defining phrases", prompt)
+            self.assertIn('translate "conjugated to" as "偶聯至"', prompt)
+            self.assertIn('never the generic "結合"', prompt)
         finally:
             cfg.TERM_FIDELITY_GUARD_ENABLED = old
 
@@ -1470,6 +1472,21 @@ class TestTranslateToTraditionalChinese(unittest.TestCase):
         result = translate_to_traditional_chinese("English source")
 
         self.assertEqual(result, "D-纈胺酸；鈀催化；<0xE9><0x88>")
+
+    @patch("requests.post")
+    def test_canonicalizes_redundant_undetectable_translation(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "response": "儲存期間未檢測到可偵測的降解。"
+        }
+        mock_post.return_value = mock_resp
+
+        result = translate_to_traditional_chinese(
+            "Storage produced no detectable degradation."
+        )
+
+        self.assertEqual(result, "儲存期間未檢測到降解。")
 
     @patch("requests.post")
     def test_returns_original_on_connection_error(self, mock_post):
@@ -2098,7 +2115,14 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             "comparison_json": {
                 "target_compound": "LAT1",
                 "source_roles": [
-                    {"source": "InhibitorA", "role": "route"},
+                    {
+                        "source": "InhibitorA",
+                        "role": "route",
+                        "evidence": (
+                            "LAT1 inhibition sensitizes cancer cells through enhanced cellular "
+                            "senescence via mTOR downregulation."
+                        ),
+                    },
                     {"source": "PeptideA", "role": "route"},
                     {
                         "source": "StructureA",
@@ -2163,9 +2187,99 @@ class TestExecuteStructuredQuery(unittest.TestCase):
 
         for term in ("competitively", "L-phenylalanine", "proliferation", "structural basis"):
             self.assertIn(term, answer)
+        self.assertIn("cellular senescence via mTOR downregulation", answer)
         self.assertIn("reports JPH203 forms a halogen bond with Tyr259", answer)
         self.assertNotIn("Furthermore", answer)
         self.assertNotIn("DeliveryA", answer)
+
+    def test_stage4_renderer_preserves_agreement_evidence_and_conclusion(self):
+        route_source = "Ono"
+        review_source = "WaterStableReview"
+        kb = json.dumps({"comparison_json": {
+            "source_roles": [{
+                "source": route_source,
+                "role": "route",
+            }, {
+                "source": review_source,
+                "role": "review/comparison source",
+                "evidence": "We report a water-stable boroxine structure.",
+            }],
+            "direct_routes": [{
+                "source": route_source,
+                "route_phrase": "intramolecular boroxine formation",
+                "outcome": "great stability against hydrolysis",
+                "evidence": (
+                    "Tricyclic boroxine 2, from intramolecular formation... exhibits "
+                    "great stability against hydrolysis "
+                    "compared with intermolecular boroxine 4."
+                ),
+            }],
+            "supporting_mechanisms": [{
+                "source": route_source,
+                "claim": (
+                    "Hydrolytic resistance is enhanced by entropic factors and a decrease "
+                    "in Lewis acidity, or via bulky substituents."
+                ),
+                "evidence": (
+                    "This is because of entropic factors and a decrease in Lewis acidity. "
+                    "... Typically, bulky groups can also protect boron atoms."
+                ),
+            }],
+            "review_comparison_sources": [{
+                "source": review_source,
+                "claim": "Boroxines are generally hydrolytically unstable.",
+                "evidence": (
+                    "Their utilization in aqueous media is a formidable task due to "
+                    "hydrolytic instability."
+                ),
+            }],
+            "dimensions": {},
+            "central_tradeoff": {
+                "claim": (
+                    "The papers are complementary rather than contradictory: ordinary "
+                    "boroxines are unstable, while specifically stabilized structures resist hydrolysis."
+                ),
+                "sources": [route_source, review_source],
+            },
+        }})
+
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question=(
+                "Do the papers agree on hydrolytic stability? Describe agreements or differences."
+            ),
+        )
+
+        self.assertIn(
+            "reports intramolecular boroxine formation, resulting in great stability against hydrolysis",
+            answer,
+        )
+        self.assertIn(
+            "Hydrolytic resistance is enhanced by entropic factors and a decrease in Lewis acidity",
+            answer,
+        )
+        self.assertNotIn("This is because", answer)
+        self.assertIn("formidable task due to hydrolytic instability", answer)
+        self.assertIn("Comparison conclusion: The papers are complementary", answer)
+        self.assertNotIn("We report a water-stable boroxine structure", answer)
+        claims = pipeline_module._comparison_grounding_claims(answer, kb)
+        self.assertFalse(any("Comparison conclusion:" in claim for claim in claims))
+        self.assertTrue(all("[" in claim and "]" in claim for claim in claims))
+
+        old = cfg.STAGE4_ANSWER_VALIDATION_ENABLED
+        try:
+            cfg.STAGE4_ANSWER_VALIDATION_ENABLED = True
+            self.assertEqual(
+                pipeline_module._stage4_answer_validation_issues(
+                    answer,
+                    kb,
+                    "Do the papers agree on hydrolytic stability?",
+                ),
+                "",
+            )
+        finally:
+            cfg.STAGE4_ANSWER_VALIDATION_ENABLED = old
 
     def test_stage4_renderer_splits_semicolon_dimension_claims(self):
         kb = json.dumps({"comparison_json": {
@@ -2449,6 +2563,30 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         )
 
         self.assertIn("binds within the traditional substrate-binding pocket", answer)
+        self.assertNotIn("high specificity", answer)
+
+    def test_stage4_renderer_prunes_unsupported_trailing_role_qualifier(self):
+        kb = json.dumps({"comparison_json": {
+            "source_roles": [{
+                "source": "StructureA",
+                "role": "mechanism",
+                "claim": "JPH203 binds within the LAT1 substrate-binding pocket with high specificity",
+                "evidence": "JPH203 forms hydrogen bonds with TM1 and TM6 and a halogen bond with Tyr259.",
+            }],
+            "direct_routes": [],
+            "supporting_mechanisms": [],
+            "review_comparison_sources": [],
+            "dimensions": {},
+            "central_tradeoff": {"claim": "The binding mechanism differs.", "sources": ["StructureA"]},
+        }})
+
+        answer = pipeline_module._stage4_empty_answer_fallback(
+            kb,
+            atomic_only=True,
+            question="How do therapeutic strategies targeting LAT1 differ in mechanism?",
+        )
+
+        self.assertIn("binds within the LAT1 substrate-binding pocket", answer)
         self.assertNotIn("high specificity", answer)
 
     def test_stage4_direct_render_is_concise_for_high_level_question(self):

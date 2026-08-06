@@ -12,6 +12,9 @@ _OCR_NORMALITY_RE = re.compile(
 )
 _BYTE_FALLBACK_SEQUENCE_RE = re.compile(r"(?:<0[xX][0-9A-Fa-f]{2}>)+")
 _BYTE_FALLBACK_TOKEN_RE = re.compile(r"<0[xX]([0-9A-Fa-f]{2})>")
+_REDUNDANT_UNDETECTABLE_RE = re.compile(
+    r"未(?P<verb>檢測|偵測)到可(?:檢測|偵測)的"
+)
 
 
 def _normalize_ocr_measurements(text: str) -> str:
@@ -32,6 +35,13 @@ def _decode_utf8_byte_fallbacks(text: str) -> str:
     return _BYTE_FALLBACK_SEQUENCE_RE.sub(decode, text or "")
 
 
+def _normalize_translation_semantics(text: str) -> str:
+    return _REDUNDANT_UNDETECTABLE_RE.sub(
+        lambda match: f"未{match.group('verb')}到",
+        text or "",
+    )
+
+
 def _term_fidelity_rules() -> str:
     if not getattr(cfg, "TERM_FIDELITY_GUARD_ENABLED", False):
         return ""
@@ -42,6 +52,8 @@ def _term_fidelity_rules() -> str:
         "keep whichever term appears in the source answer.\n"
         "- Preserve route-defining phrases verbatim in English when present, especially "
         "\"chymotrypsin-catalysed enzymatic hydrolysis\"; add Chinese explanation after it if helpful.\n"
+        "- For chemical or peptide conjugation, translate \"conjugated to\" as \"偶聯至\" or \"與...偶聯\", "
+        "never the generic \"結合\"; preserve that the components are chemically linked.\n"
     )
 
 
@@ -103,8 +115,8 @@ def translate_to_traditional_chinese(text: str, on_status=None) -> str:
             timeout=cfg.LLM_TIMEOUT,
         )
         if resp.ok:
-            translated = _decode_utf8_byte_fallbacks(
-                resp.json().get("response", "")
+            translated = _normalize_translation_semantics(
+                _decode_utf8_byte_fallbacks(resp.json().get("response", ""))
             ).strip()
             if translated:
                 _status(f"  ✅ 翻譯完成（{len(translated):,} 字元）")

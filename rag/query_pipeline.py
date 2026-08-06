@@ -553,6 +553,10 @@ _LEADING_DISCOURSE_RE = re.compile(
     r"^(?:furthermore|moreover|additionally|in addition|in summary|also)\s*,?\s*",
     re.IGNORECASE,
 )
+_DEICTIC_CAUSE_RE = re.compile(
+    r"^(?:this|that|these|those|it)\s+(?:is|was|are|were)\s+because\b",
+    re.IGNORECASE,
+)
 
 # ponytail: lexical ranking until comparison_json has an explicit overview field.
 _REVIEW_OVERVIEW_MARKERS = (
@@ -565,11 +569,19 @@ _REVIEW_OVERVIEW_MARKERS = (
     "challenge",
 )
 
+_TRAILING_QUALIFIER_RE = re.compile(
+    r"\s+(?:with|showing|demonstrating|indicating)\s+"
+    r"(?P<qualifier>(?:(?:high|low|strong|greater|enhanced|improved)\s+)?[^.;]+)$",
+    re.IGNORECASE,
+)
+
 
 def _source_close_evidence(text: str) -> str:
     value = _LEADING_DISCOURSE_RE.sub("", str(text or "").strip())
     value = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "", value)
     value = re.sub(r"\s*\(Fig\.?\s*$", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"(?<=\.)\s+\.{2,}\s*", " ", value)
+    value = re.sub(r"\s*\.{2,}\s*", ". ", value)
     if re.fullmatch(
         r"snippets?\s+\d+(?:\s*(?:,|and)\s*(?:snippets?\s+)?\d+)*",
         value.rstrip("."),
@@ -579,7 +591,7 @@ def _source_close_evidence(text: str) -> str:
     sentences = split_into_sentences(value)
     atomic = (sentences[0] if sentences else value).strip().rstrip(".")
     head = re.split(
-        r";\s+|,\s+(?=with limitations\b)",
+        r";\s+|,\s+(?=with limitations\b|or\s+(?:via|through|by)\b)",
         atomic,
         maxsplit=1,
         flags=re.IGNORECASE,
@@ -587,6 +599,33 @@ def _source_close_evidence(text: str) -> str:
     if len(head.split()) >= 4:
         atomic = head
     return atomic if len(atomic.split()) >= 4 else ""
+
+
+def _prune_unsupported_trailing_qualifier(claim: str, evidence: str) -> str:
+    match = _TRAILING_QUALIFIER_RE.search(claim or "")
+    if not match:
+        return claim
+    qualifier_tokens = set(re.findall(
+        r"[a-z][a-z0-9-]{3,}", match.group("qualifier").lower()
+    ))
+    evidence_tokens = set(re.findall(r"[a-z][a-z0-9-]{3,}", (evidence or "").lower()))
+    return claim[:match.start()].rstrip() if qualifier_tokens - evidence_tokens else claim
+
+
+def _comparison_grounding_claims(answer: str, knowledge_base: str) -> list[str]:
+    sentences = split_into_sentences(answer)
+    premises = [
+        sentence for sentence in sentences
+        if not re.match(r"(?:-\s*)?Comparison conclusion:", sentence, re.IGNORECASE)
+    ]
+    if len(premises) == len(sentences):
+        return sentences
+
+    comparison = _comparison_json_from_knowledge_base(knowledge_base)
+    tradeoff = comparison.get("central_tradeoff", {}) if comparison else {}
+    sources = tradeoff.get("sources", []) if isinstance(tradeoff, dict) else []
+    premise_text = "\n".join(premises).lower()
+    return premises if sources and all(str(source).lower() in premise_text for source in sources) else sentences
 
 
 def _atomic_hydrolysis_route(route_phrase: str, evidence: str) -> tuple[str, str]:
@@ -632,6 +671,10 @@ def _stage4_empty_answer_fallback(
     requirements = requirements if isinstance(requirements, dict) else {}
 
     q_lower = (question or "").lower()
+    agreement_comparison = any(term in q_lower for term in (
+        "agree", "agreement", "consensus", "contradict", "reconcile",
+        "一致", "共識", "矛盾",
+    ))
     route_text = " ".join(
         str(route.get("route_phrase", ""))
         for route in comparison.get("direct_routes", [])
@@ -699,9 +742,9 @@ def _stage4_empty_answer_fallback(
         if atomic_only and (not source or not phrase or not outcome):
             return ""
         if source and phrase and source not in background_sources:
-            result = (
+            result = (f", resulting in {outcome}" if agreement_comparison else (
                 f", yielding {outcome}" if is_synthesis_comparison else f", with {outcome}"
-            ) if outcome else ""
+            )) if outcome else ""
             label = "Route" if is_synthesis_comparison else "Strategy"
             lines.append(f"- {label}: `{source}` reports {phrase}{result} [{source}].")
             rendered_source_text[source] = f"{phrase} {outcome}"
@@ -725,7 +768,14 @@ def _stage4_empty_answer_fallback(
             rendered_source_text[source] = (
                 f"{rendered_source_text.get(source, '')} {role.get('claim', '')} {role.get('evidence', '')}"
             ).strip()
-    for requirement in requirements.get("strategy_requirements", []):
+    strategy_witnesses = list(requirements.get("strategy_requirements", []))
+    if "mechanism" in q_lower or "mechanistic" in q_lower or "機制" in q_lower:
+        strategy_witnesses.extend(
+            {"source": role.get("source", ""), "claim": role.get("evidence", "")}
+            for role in source_roles
+            if isinstance(role, dict) and str(role.get("role", "")).strip().lower() == "route"
+        )
+    for requirement in strategy_witnesses:
         if not isinstance(requirement, dict):
             continue
         source = str(requirement.get("source", "")).strip()
@@ -749,9 +799,15 @@ def _stage4_empty_answer_fallback(
         if not isinstance(mechanism, dict):
             continue
         source = str(mechanism.get("source", "")).strip()
-        claim = _LEADING_DISCOURSE_RE.sub(
-            "", str(mechanism.get("claim", "")).strip().rstrip(".")
-        )
+        raw_claim = str(mechanism.get("claim", "")).strip().rstrip(".")
+        if agreement_comparison:
+            evidence_claim = _source_close_evidence(mechanism.get("evidence", ""))
+            raw_claim = (
+                _source_close_evidence(raw_claim)
+                if not evidence_claim or _DEICTIC_CAUSE_RE.match(evidence_claim)
+                else evidence_claim
+            )
+        claim = _LEADING_DISCOURSE_RE.sub("", raw_claim)
         if (
             not source
             or not claim
@@ -779,6 +835,7 @@ def _stage4_empty_answer_fallback(
                 < 0.5
             ):
                 atomic_evidence = ""
+                claim = _prune_unsupported_trailing_qualifier(role_claim, role_evidence)
         if atomic_evidence:
             claim = atomic_evidence
         claim = _LEADING_DISCOURSE_RE.sub("", claim)
@@ -818,12 +875,10 @@ def _stage4_empty_answer_fallback(
         if source and source not in background_sources:
             claim = str(review.get("claim", "")).strip().rstrip(".")
             role = review_roles.get(source, {})
-            evidence_candidates = (
-                _source_close_evidence(role.get("evidence", "")),
-                _source_close_evidence(review.get("evidence", "")),
-            )
-            atomic_evidence = max(
-                evidence_candidates,
+            role_evidence = _source_close_evidence(role.get("evidence", ""))
+            review_evidence = _source_close_evidence(review.get("evidence", ""))
+            atomic_evidence = review_evidence or role_evidence if agreement_comparison else max(
+                (role_evidence, review_evidence),
                 key=lambda value: (
                     sum(marker in value.lower() for marker in _REVIEW_OVERVIEW_MARKERS),
                     bool(value),
@@ -855,6 +910,10 @@ def _stage4_empty_answer_fallback(
                     "- Review dimensions: The review highlights limitations of each method "
                     f"regarding {dimension_text} [{source}]."
                 )
+
+    if agreement_comparison and tradeoff and tradeoff_sources:
+        sources = ", ".join(dict.fromkeys(tradeoff_sources))
+        lines.extend(("", f"- Comparison conclusion: {tradeoff.rstrip('.')} [{sources}]."))
 
     dimensions = comparison.get("dimensions") if isinstance(comparison.get("dimensions"), dict) else {}
     labels = {
@@ -1318,7 +1377,9 @@ def execute_structured_query(
                 question=question,
             )
             if direct_answer:
-                direct_grounding_claims = split_into_sentences(direct_answer)
+                direct_grounding_claims = _comparison_grounding_claims(
+                    direct_answer, knowledge_base
+                )
                 synthesis_prompt = "[deterministic comparison_json renderer]"
         if (
             not direct_answer
@@ -1668,7 +1729,9 @@ def execute_structured_query_stream(
                 question=question,
             )
             if direct_answer:
-                direct_grounding_claims = split_into_sentences(direct_answer)
+                direct_grounding_claims = _comparison_grounding_claims(
+                    direct_answer, knowledge_base
+                )
         if (
             not direct_answer
             and rag_found_anything

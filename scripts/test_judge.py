@@ -360,6 +360,50 @@ class TestStructuredJudge(unittest.TestCase):
         )
         self.assertEqual(competitive[0], "covered")
 
+    def test_fact_contract_enforces_only_explicit_strategy_qualifiers(self):
+        fact = (
+            "JPH203 is a selective small-molecule inhibitor that competitively inhibits "
+            "LAT1-mediated amino-acid transport."
+        )
+        candidate = (
+            "JPH203 acts as a non-substrate blocker, although its inhibition mode is competitive. "
+            "The LAT1 structure provides a basis for designing selective potent inhibitors."
+        )
+        audit, errors = judge._validate_fact_audit(
+            {"facts": [{
+                "id": "F1",
+                "verdict": "covered",
+                "evidence_ids": ["C1"],
+                "reason": "competitive inhibition is stated",
+            }]},
+            judge._fact_items([{
+                "fact": fact,
+                "required_terms": ["competitive"],
+            }]),
+            candidate,
+            stable_protocol=True,
+        )
+        explicit_missing = judge._apply_fact_contract(
+            fact,
+            "covered",
+            [candidate],
+            ("competitive", "small molecule"),
+        )
+        complete = judge._apply_fact_contract(
+            fact,
+            "covered",
+            [
+                "JPH203 is a selective small-molecule inhibitor that competitively "
+                "inhibits LAT1-mediated amino-acid transport."
+            ],
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit[0]["verdict"], "covered")
+        self.assertEqual(explicit_missing[0], "missing")
+        self.assertIn("term:small molecule", explicit_missing[1])
+        self.assertEqual(complete[0], "covered")
+
     def test_contract_accepts_traditional_chinese_negation_witness(self):
         fact = "The papers do not report oral bioavailability values."
 
@@ -709,6 +753,38 @@ class TestTranslationJudge(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(len(audit), 1)
 
+    def test_translation_audit_discards_reason_outside_declared_sentence_ids(self):
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "omission",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": "S1 loses emphasis, and S2's dehydration sequence is missing from T2.",
+            }]},
+            "The results clearly show route A. Route B proceeds by dehydration.",
+            "結果顯示路徑 A。路徑 B 經由脫水進行。",
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_ignores_rhetorical_emphasis_omission(self):
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "omission",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": "The phrase 'clearly show' adds emphasis that is omitted in T1.",
+            }]},
+            "The results clearly show that route A improves hydrolytic stability.",
+            "結果顯示路徑 A 可提高水解穩定性。",
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
     def test_translation_audit_discards_omission_when_named_witness_exists(self):
         source = (
             "Boc protection can be removed with TFA within 5-10 min at room temperature "
@@ -1021,7 +1097,7 @@ class TestTranslationJudge(unittest.TestCase):
 
     def test_translation_audit_uses_only_source_side_quoted_witnesses(self):
         source = "Strategy: `Ono` reports intramolecular boroxine formation [Ono]."
-        target = "策略：【Ono】報導了分子內 boroxine 形成 [Ono]。"
+        target = "策略：報導了分子內 boroxine 形成 [Ono]。"
         audit, errors = judge._validate_translation_audit(
             {"errors": [{
                 "type": "omission",
@@ -1029,8 +1105,8 @@ class TestTranslationJudge(unittest.TestCase):
                 "source_ids": ["S1"],
                 "target_ids": ["T1"],
                 "reason": (
-                    "The source subject 'Ono' is omitted because the target starts "
-                    "directly with '報導了...'."
+                    "The source reports a finding, but the target omits the paper or author "
+                    "as the subject of the reporting action."
                 ),
             }]},
             source,
@@ -1039,6 +1115,31 @@ class TestTranslationJudge(unittest.TestCase):
 
         self.assertEqual(errors, [])
         self.assertEqual(audit, [])
+
+    def test_translation_audit_accepts_equivalent_no_detectable_degradation(self):
+        source = "The powder was stable, producing no detectable degradation."
+        target = "粉末保持穩定，未檢測到可偵測的降解。"
+        row = {
+            "type": "negation_relation",
+            "severity": "material",
+            "source_ids": ["S1"],
+            "target_ids": ["T1"],
+            "reason": (
+                "The phrase 'producing no detectable degradation' was translated as "
+                "'未檢測到可偵測的降解', which is claimed to be contradictory."
+            ),
+        }
+
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [row]}, source, target
+        )
+        retained, _ = judge._validate_translation_audit(
+            {"errors": [row]}, source, "粉末保持穩定，但檢測到降解。"
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+        self.assertEqual(len(retained), 1)
 
     def test_translation_audit_discards_present_unquoted_witnesses(self):
         source = (
