@@ -1,7 +1,7 @@
 # Pipeline v4 Staged Indexing Spec
 
-> Status: planned, not started; reviewed against the live code on 2026-08-02.
-> Start after the v11 quality baseline is frozen and Maintainability M0/M1 has
+> Status: planned, not started; reviewed against the live code on 2026-08-06.
+> Start after the V12.1 product baseline is frozen and Maintainability M0/M1 has
 > made the pipeline boundary safer to change. This spec is the prerequisite for
 > Ingestion Health Phase 2.
 

@@ -1,6 +1,6 @@
 # API Refactor Spec
 
-> Status: planned, not started; reviewed 2026-08-02. The 2026-04
+> Status: planned, not started; reviewed 2026-08-06. The 2026-04
 > `api-refractor` work cleaned up status streaming and query orchestration, but
 > it predates and does not complete this service-boundary spec. This remains a
 > lower priority because it is not the current quality or latency bottleneck.

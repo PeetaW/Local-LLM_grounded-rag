@@ -3,7 +3,7 @@
 > **歷史文件，核心任務已完成。** 本檔保留 V3 與早期 query-engine
 > refactor 的原始執行紀錄，不是目前 roadmap，也不要依其中舊檔名或預設值
 > 開始新工作。現行狀態以 `PENDING_TASKS.md` 與 repository root 的 active
-> specs 為準（2026-08-02 複核）。
+> specs 為準（2026-08-06 複核）。
 
 > 整合 Pipeline V3 升級 + Code Review 重構
 > 請按任務編號順序執行，每完成一個子任務先回報確認，再繼續下一個。

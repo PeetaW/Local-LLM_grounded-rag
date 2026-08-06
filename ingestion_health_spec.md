@@ -1,6 +1,6 @@
 # 匯入健檢 Ingestion Health Check — Spec
 
-> 狀態：MVP 已完成（2026-06-26；2026-08-02 重新核對）。Phase 2 等待
+> 狀態：MVP 已完成（2026-06-26；2026-08-06 重新核對）。Phase 2 等待
 > `pipeline_v4_task_spec.md` 的 per-paper state 與 staged indexing 地基。
 > 起因：語料審計發現 31 篇索引項有 4 項污染（~13%）。
 

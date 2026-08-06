@@ -1,8 +1,9 @@
 # Maintainability Refactor Spec
 
-> Status: planned, audited 2026-08-02. Start only after the full 12-question
-> `baseline_v11_structured_contract_full` is frozen as a diagnostic report, not
-> a product baseline. Start M0 only after P0/P1 produces a frozen V12 candidate.
+> Status: planned, audit refreshed 2026-08-06. The first full V12 candidate is
+> complete but not frozen; start M0 only after the Q04/Q09/Q10 stability gate
+> and full V12.1 product regression pass. Do not mix this equivalence refactor
+> with the current product/evaluator fixes.
 
 ## Goal
 
@@ -19,11 +20,11 @@ indexes, logs, and eval artifacts are excluded.
 
 | Area | Files | Lines | Notes |
 |---|---:|---:|---|
-| Root entry points (`main.py`, `api.py`, `config.py`) | 3 | 883 | Runtime/bootstrap/config |
-| `rag/` runtime | 29 | 9,855 | Core product pipeline |
-| `eval/` runtime | 4 | 2,075 | Evaluation and judges |
-| `scripts/` tests and tools | 22 | 10,091 | Unit tests, probes, historical utilities |
-| **Total active Python** | **58** | **22,904** | 2026-08-02 snapshot |
+| Root entry points (`main.py`, `api.py`, `config.py`) | 3 | 885 | Runtime/bootstrap/config |
+| `rag/` runtime | 29 | 10,327 | Core product pipeline |
+| `eval/` runtime | 4 | 2,242 | Evaluation and judges |
+| `scripts/` tests and tools | 22 | 10,740 | Unit tests, probes, historical utilities |
+| **Total active Python** | **58** | **24,194** | 2026-08-06 snapshot |
 
 Line count is only a triage signal. A large file is a refactor target only when
 it also mixes responsibilities, contains long routines, duplicates flow, or has
@@ -35,23 +36,23 @@ high coupling.
 
 | File | Lines | Composition / observed pressure | Priority |
 |---|---:|---|---|
-| `rag/query_pipeline.py` | 1,854 | Orchestration plus fact/method/comparison rendering, recovery, Stage 4 validation; non-stream and stream entry points are 360/341 lines, comparison renderer is 330 lines | P0 |
-| `eval/judge.py` | 1,195 | Correctness contract judge and translation fidelity judge in one module | P1 |
+| `rag/query_pipeline.py` | 1,925 | Orchestration plus fact/method/comparison rendering, recovery, Stage 4 validation; current V12 fixes further increased coupling | P0 |
+| `eval/judge.py` | 1,362 | Correctness contract judge and translation fidelity judge in one module | P1 |
 | `rag/citation_grounding.py` | 1,062 | NLI lifecycle/inference, lexical support, citation scoring/reporting, self-correction, decomposition and joint verification; circular dependency with `query_grounding_flow.py` | P1 |
-| `rag/fact_contract.py` | 969 | Requirement detection/scoring, evidence catalog cleanup, schema, validation, completion, deduplication and rendering | P2 |
-| `rag/knowledge_synthesizer.py` | 879 | Comparison normalization/schema/repair plus model generation and synthesis orchestration; `synthesize()` is 229 lines | P2 |
+| `rag/fact_contract.py` | 1,159 | Requirement detection/scoring, evidence catalog cleanup, schema, validation, completion, deduplication and rendering | P2 |
+| `rag/knowledge_synthesizer.py` | 922 | Comparison normalization/schema/repair plus model generation and synthesis orchestration | P2 |
 | `eval/run_eval.py` | 645 | Runner, debug artifacts, Markdown reporting, rejudge and compare CLI | P2 |
 | `rag/query_retrieval.py` | 607 | Retrieval execution and evidence-window construction; currently cohesive enough | Monitor |
-| `rag/comparison_json_validator.py` | 601 | Requirement extraction plus a 256-line validator | P2 |
+| `rag/comparison_json_validator.py` | 598 | Requirement extraction plus a large validator | P2 |
 | `api.py` | 475 | One 246-line OpenAI chat endpoint plus schemas/session/guardrails/runtime state | Existing API spec |
 
 ### Tests and tools
 
 | File | Lines | Action |
 |---|---:|---|
-| `scripts/test_refactor.py` | 3,101 | Split by production module/behavior; keep assertions unchanged |
-| `scripts/test_knowledge_synthesizer_prompt.py` | 1,573 | Split fact-contract, comparison-contract, and synthesizer tests |
-| `scripts/test_judge.py` | 972 | Split correctness and translation judge tests |
+| `scripts/test_refactor.py` | 3,340 | Split by production module/behavior; keep assertions unchanged |
+| `scripts/test_knowledge_synthesizer_prompt.py` | 1,767 | Split fact-contract, comparison-contract, and synthesizer tests |
+| `scripts/test_judge.py` | 1,188 | Split correctness and translation judge tests |
 | `scripts/test_nli_extensions.py` | 687 | Keep together until grounding modules are split |
 | `scripts/preprocessing/vl_quality_test-1.py` | 612 | Keep as the canonical VL CLI, then rename cleanly |
 | `scripts/preprocessing/vl_quality_test-1 backup.py` | 411 | Delete; Git history is the backup |
@@ -69,7 +70,7 @@ dependency removal is required.
 
 ### M0 - Hygiene and test layout
 
-Do first after the P0/P1 quality gate and V12 candidate are frozen. These changes should not require an
+Do first after the P0/P1 quality gate and V12.1 product baseline are frozen. These changes should not require an
 AI pipeline run.
 
 1. Delete the tracked VL backup and one-off debug patch.
@@ -182,7 +183,7 @@ because they are short; they have clear construction boundaries and active calle
 
 ## Roadmap Placement
 
-1. Finish P0/P1 and freeze the V12 candidate quality baseline; keep V11 as the diagnostic comparison.
+1. Finish Q04/Q09/Q10 stability and freeze the full V12.1 product baseline; keep V11 and the first V12 candidate as diagnostic comparisons.
 2. Run M0 hygiene/test-layout work.
 3. Perform Stage 3 latency work and M1 query-pipeline extraction in small,
    independently benchmarked commits.

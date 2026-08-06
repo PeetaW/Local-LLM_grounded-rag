@@ -61,11 +61,11 @@ rather than a black-box AI that changes without notice.
 
 ## Development Status
 
-As of **2026-08-02**, the product path uses source-bound structured fact contracts, validated comparison JSON, deterministic method/comparison rendering, and structured correctness/translation judges. The full 12-question `baseline_v11_structured_contract_full` completed with correctness `0.708`, grounding `1.0`, translation fidelity `0.95`, paper selection `100%`, and Stage 2 evidence recall `88.2%`. It is frozen as a diagnostic report rather than promoted to the product baseline.
+As of **2026-08-06**, the first full 12-question V12 candidate has completed. `baseline_v12_candidate_full` scored correctness `0.938`, grounding `0.921`, translation fidelity `0.90`, paper selection `100%`, Stage 2 evidence recall `88.2%`, and mean latency `422.3s`. It is a strong candidate but is not yet the product baseline: that run still had a Q09 product failure, Q10 grounding failure, and Q04/Q10 translation-evaluator failures.
 
-The first V11 root-fix focus passed Q02/Q03/Q06/Q09 with correctness and grounding `1.0` on every question. The remaining Q02 translation issue is a source-OCR normality error; Q12 false-premise recovery and a full frozen-evaluator rejudge are the active quality tasks before a V12 candidate run. V11 retrieval averaged `6.3s`, while Stage 3 generation and final translation remained the measured latency bottlenecks.
+The subsequent fixes are deterministic and source-bound rather than prompt-only. Current focused evidence has Q04, Q09, and Q10 at correctness/translation/grounding `1.0`: Q04 translation normalization passed in `baseline_v12_deterministic_contract_r1`; Q09 passed a fresh product run in `baseline_v12_deterministic_contract_r2` and the scoped `required_terms` rejudge; Q10 passed `baseline_v12_q10_self_contained_mechanism_r1` with three self-contained grounding claims and no rewrite/corrector fallback. The remaining quality gate is repeated Q04/Q09/Q10 stability followed by a full V12.1 regression.
 
-A 2026-08-02 maintainability audit counted 58 active tracked Python files and 22,904 lines. The behavior-equivalent refactor is deliberately staged after the P0/P1 quality gate and V12 candidate freeze; see [maintainability_refactor_spec.md](maintainability_refactor_spec.md). [PENDING_TASKS.md](PENDING_TASKS.md) is the canonical master roadmap.
+Retrieval remains fast at roughly `6.3s` per question; Stage 3 generation and final translation are still the measured latency bottlenecks. A refreshed maintainability audit counts 58 active tracked Python files and 24,194 lines. Behavior-equivalent Maintainability M0 starts only after the V12.1 gate is frozen; see [maintainability_refactor_spec.md](maintainability_refactor_spec.md). [PENDING_TASKS.md](PENDING_TASKS.md) is the canonical master roadmap.
 
 ## System Architecture
 
@@ -467,11 +467,11 @@ All parameters are centralized in `config.py`:
 
 ## 開發狀態
 
-截至 **2026-08-02**，產品主路徑已使用 source-bound structured fact contract、經驗證的 comparison JSON、method/comparison 確定性渲染，以及結構化 correctness/translation judges。完整 12 題 `baseline_v11_structured_contract_full` 已完成：correctness `0.708`、grounding `1.0`、translation fidelity `0.95`、paper selection `100%`、Stage 2 evidence recall `88.2%`。它凍結為 diagnostic report，不升格為產品 baseline。
+截至 **2026-08-06**，第一輪完整 12 題 V12 candidate 已完成。`baseline_v12_candidate_full` 的 correctness `0.938`、grounding `0.921`、translation fidelity `0.90`、paper selection `100%`、Stage 2 evidence recall `88.2%`、平均延遲 `422.3s`。這是一個很強的 candidate，但尚未升格為產品 baseline：該輪仍有 Q09 產品輸出、Q10 grounding，以及 Q04/Q10 translation evaluator 的缺口。
 
-第一批 V11 root-fix focused run 的 Q02/Q03/Q06/Q09 correctness 與 grounding 已全部達 `1.0`。剩餘 Q02 translation 問題是來源 OCR 的 normality 誤字；目前先完成 Q12 false-premise recovery 與 frozen evaluator 全題重判，再建立 V12 candidate。V11 retrieval 平均僅 `6.3s`，主要延遲瓶頸仍是 Stage 3 生成與最後翻譯。
+後續修正均採 source-bound deterministic contract，而不是繼續靠 prompt 勸模型。最新 focused 證據中，Q04、Q09、Q10 的 correctness/translation/grounding 都已達 `1.0`：Q04 翻譯正規化通過 `baseline_v12_deterministic_contract_r1`；Q09 在 `baseline_v12_deterministic_contract_r2` 新流程與 scoped `required_terms` rejudge 通過；Q10 在 `baseline_v12_q10_self_contained_mechanism_r1` 以三個自足 grounding claims、零 rewrite/corrector fallback 通過。剩餘品質 gate 是 Q04/Q09/Q10 重複 stability，通過後再跑完整 V12.1。
 
-2026-08-02 維護性稽核共計 58 個 active tracked Python 檔、22,904 行。等 P0/P1 品質 gate 與 V12 candidate 凍結後才做等價重構，詳見 [maintainability_refactor_spec.md](maintainability_refactor_spec.md)；[PENDING_TASKS.md](PENDING_TASKS.md) 是唯一 master roadmap。
+Retrieval 仍約 `6.3s`，主要延遲瓶頸依然是 Stage 3 生成與最後翻譯。最新維護性盤點為 58 個 active tracked Python 檔、24,194 行；V12.1 gate 凍結後才啟動等價重構 Maintainability M0，詳見 [maintainability_refactor_spec.md](maintainability_refactor_spec.md)。[PENDING_TASKS.md](PENDING_TASKS.md) 是唯一 master roadmap。
 
 ## 系統架構
 
