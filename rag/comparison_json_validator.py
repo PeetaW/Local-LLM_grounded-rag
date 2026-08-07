@@ -41,6 +41,12 @@ _NAMED_INTERACTION_RE = re.compile(
     r"Met|Phe|Pro|Ser|Thr|Trp|Tyr|Val)\d+)\b",
     re.IGNORECASE,
 )
+_BINDING_SITE_RE = re.compile(
+    r"\b(?P<relation>bind(?:s|ing)?|bound|occup(?:y|ies|ied|ying))\b"
+    r"[^.!?]{0,100}?\b(?P<site>(?:traditional\s+)?(?:substrate[- ]binding|binding)\s+"
+    r"(?:pocket|site))\b",
+    re.IGNORECASE,
+)
 _STRATEGY_QUALIFIER_RE = re.compile(
     r"\b(?:competitiv\w*|minimally toxic|self[- ]?assembl\w*|proliferat\w*|"
     r"structural basis|targeting motif)\b",
@@ -240,21 +246,21 @@ def build_comparison_requirements(query: str, chunks: list[dict]) -> dict:
     mechanism_requirements = []
     if query_requests_mechanism(query):
         for row in rows:
-            found = None
-            for sentence in _evidence_sentences(row["evidence"]):
-                match = _NAMED_INTERACTION_RE.search(sentence)
-                if match:
-                    found = {
+            sentences = _evidence_sentences(row["evidence"])
+            for pattern, anchor_groups in (
+                (_NAMED_INTERACTION_RE, ("relation", "anchor")),
+                (_BINDING_SITE_RE, ("relation", "site")),
+            ):
+                for sentence in sentences:
+                    match = pattern.search(sentence)
+                    if not match:
+                        continue
+                    mechanism_requirements.append({
                         "source": row["source"],
-                        "anchors": [
-                            match.group("relation"),
-                            match.group("anchor"),
-                        ],
+                        "anchors": [match.group(group) for group in anchor_groups],
                         "claim": re.sub(r"\s+", " ", sentence).strip(),
-                    }
+                    })
                     break
-            if found:
-                mechanism_requirements.append(found)
 
     target = query_target(query)
     strategy_requirements = []

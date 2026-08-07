@@ -2057,6 +2057,10 @@ class TestExecuteStructuredQuery(unittest.TestCase):
                 "evidence": "JPH203 forms a halogen bond with Tyr259",
             }, {
                 "source": "StructureA",
+                "claim": "JPH203 binds within the traditional LAT1 substrate-binding pocket",
+                "evidence": "JPH203 binds within the traditional LAT1 substrate-binding pocket",
+            }, {
+                "source": "StructureA",
                 "claim": "JPH203 causes a 4.34 degree shift in TM1",
                 "evidence": "JPH203 causes a 4.34 degree shift in TM1",
             }, {
@@ -2073,7 +2077,13 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             "review_comparison_sources": [],
             "dimensions": {},
             "central_tradeoff": {"claim": "The mechanisms differ.", "sources": ["InhibitorA"]},
-        }})
+        }, "comparison_requirements": {"mechanism_requirements": [{
+            "source": "StructureA",
+            "claim": "JPH203 forms a halogen bond with Tyr259",
+        }, {
+            "source": "StructureA",
+            "claim": "JPH203 binds within the traditional LAT1 substrate-binding pocket",
+        }]}})
         answer = pipeline_module._stage4_empty_answer_fallback(
             kb,
             atomic_only=True,
@@ -2565,7 +2575,7 @@ class TestExecuteStructuredQuery(unittest.TestCase):
         self.assertIn("binds within the traditional substrate-binding pocket", answer)
         self.assertNotIn("high specificity", answer)
 
-    def test_stage4_renderer_prunes_unsupported_trailing_role_qualifier(self):
+    def test_stage4_renderer_drops_role_claim_without_relation_witness(self):
         kb = json.dumps({"comparison_json": {
             "source_roles": [{
                 "source": "StructureA",
@@ -2586,8 +2596,7 @@ class TestExecuteStructuredQuery(unittest.TestCase):
             question="How do therapeutic strategies targeting LAT1 differ in mechanism?",
         )
 
-        self.assertIn("binds within the LAT1 substrate-binding pocket", answer)
-        self.assertNotIn("high specificity", answer)
+        self.assertEqual(answer, "")
 
     def test_stage4_direct_render_is_concise_for_high_level_question(self):
         kb = """

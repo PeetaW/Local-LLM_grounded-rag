@@ -569,13 +569,6 @@ _REVIEW_OVERVIEW_MARKERS = (
     "challenge",
 )
 
-_TRAILING_QUALIFIER_RE = re.compile(
-    r"\s+(?:with|showing|demonstrating|indicating)\s+"
-    r"(?P<qualifier>(?:(?:high|low|strong|greater|enhanced|improved)\s+)?[^.;]+)$",
-    re.IGNORECASE,
-)
-
-
 def _source_close_evidence(text: str) -> str:
     value = _LEADING_DISCOURSE_RE.sub("", str(text or "").strip())
     value = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "", value)
@@ -601,15 +594,12 @@ def _source_close_evidence(text: str) -> str:
     return atomic if len(atomic.split()) >= 4 else ""
 
 
-def _prune_unsupported_trailing_qualifier(claim: str, evidence: str) -> str:
-    match = _TRAILING_QUALIFIER_RE.search(claim or "")
-    if not match:
-        return claim
-    qualifier_tokens = set(re.findall(
-        r"[a-z][a-z0-9-]{3,}", match.group("qualifier").lower()
-    ))
-    evidence_tokens = set(re.findall(r"[a-z][a-z0-9-]{3,}", (evidence or "").lower()))
-    return claim[:match.start()].rstrip() if qualifier_tokens - evidence_tokens else claim
+def _claim_evidence_overlap(claim: str, evidence: str) -> float:
+    claim_tokens = set(re.findall(r"[a-z][a-z0-9-]+", (claim or "").lower()))
+    evidence_tokens = set(re.findall(r"[a-z][a-z0-9-]+", (evidence or "").lower()))
+    return len(claim_tokens & evidence_tokens) / max(
+        1, min(len(claim_tokens), len(evidence_tokens))
+    )
 
 
 def _comparison_grounding_claims(answer: str, knowledge_base: str) -> list[str]:
@@ -794,26 +784,44 @@ def _stage4_empty_answer_fallback(
         lines.append(f"- {label}: {claim} [{source}].")
         rendered_source_text[source] = f"{rendered_source_text.get(source, '')} {claim}"
 
+    required_mechanisms = {
+        (
+            str(item.get("source", "")).strip(),
+            re.sub(r"\s+", " ", str(item.get("claim", ""))).strip().rstrip(".").lower(),
+        )
+        for item in requirements.get("mechanism_requirements", [])
+        if isinstance(item, dict) and item.get("source") and item.get("claim")
+    }
     supporting_by_source = {}
     for mechanism in comparison.get("supporting_mechanisms", []):
         if not isinstance(mechanism, dict):
             continue
         source = str(mechanism.get("source", "")).strip()
         raw_claim = str(mechanism.get("claim", "")).strip().rstrip(".")
+        evidence_claim = _source_close_evidence(mechanism.get("evidence", ""))
         if agreement_comparison:
-            evidence_claim = _source_close_evidence(mechanism.get("evidence", ""))
             raw_claim = (
                 _source_close_evidence(raw_claim)
                 if not evidence_claim or _DEICTIC_CAUSE_RE.match(evidence_claim)
                 else evidence_claim
             )
+        elif (
+            not evidence_claim
+            or _DEICTIC_CAUSE_RE.match(evidence_claim)
+            or _claim_evidence_overlap(raw_claim, evidence_claim) < 0.5
+        ):
+            continue
         claim = _LEADING_DISCOURSE_RE.sub("", raw_claim)
+        required = (
+            source,
+            re.sub(r"\s+", " ", raw_claim).strip().rstrip(".").lower(),
+        ) in required_mechanisms
         if (
             not source
             or not claim
             or source in background_sources
             or (not speculative_requested and _SPECULATIVE_MECHANISM_RE.search(claim))
-            or (concise and source in supporting_by_source)
+            or (concise and source in supporting_by_source and not required)
         ):
             continue
         lines.append(f"- Mechanism: `{source}` reports {claim} [{source}].")
@@ -827,15 +835,10 @@ def _stage4_empty_answer_fallback(
         role_evidence = str(role.get("evidence", ""))
         atomic_evidence = _source_close_evidence(role_evidence)
         if atomic_evidence and role_claim:
-            evidence_tokens = set(re.findall(r"[a-z][a-z0-9-]+", atomic_evidence.lower()))
-            role_tokens = set(re.findall(r"[a-z][a-z0-9-]+", role_claim.lower()))
-            if (
-                len(evidence_tokens & role_tokens)
-                / max(1, min(len(evidence_tokens), len(role_tokens)))
-                < 0.5
-            ):
-                atomic_evidence = ""
-                claim = _prune_unsupported_trailing_qualifier(role_claim, role_evidence)
+            if _claim_evidence_overlap(role_claim, atomic_evidence) < 0.5:
+                continue
+        elif not atomic_evidence:
+            continue
         if atomic_evidence:
             claim = atomic_evidence
         claim = _LEADING_DISCOURSE_RE.sub("", claim)

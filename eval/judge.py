@@ -968,6 +968,42 @@ def _translation_self_refuting_false_positive(kind: str, reason: str) -> bool:
     )
 
 
+def _translation_stability_relation_false_positive(
+    kind: str,
+    reason: str,
+    source: str,
+    target: str,
+) -> bool:
+    if kind not in {"omission", "mistranslation"}:
+        return False
+    if not (
+        re.search(r"\b(?:enhanc\w*|improv\w*|increas\w*)\b", reason, re.I)
+        and re.search(r"\bstabil\w*\b", reason, re.I)
+        and re.search(
+            r"\b(?:enhanc\w*|improv\w*|increas\w*)\b[^.!?]{0,100}\bstabil\w*\b",
+            source,
+            re.I,
+        )
+        and re.search(
+            r"(?:提高|提升|增強|改善|增加)[^。！？]{0,100}穩定|"
+            r"穩定[^。！？]{0,100}(?:提高|提升|增強|改善|增加)",
+            target,
+        )
+    ):
+        return False
+    if re.search(r"\bhydroly\w*\b", source, re.I) and "水解" not in target:
+        return False
+    source_content = re.sub(r"`[^`]+`", " ", source)
+    target_content = re.sub(r"`[^`]+`", " ", target)
+    if _contract_numbers(source_content) - _contract_numbers(target_content):
+        return False
+    if re.search(r"\b(?:no|not|without)\b", source, re.I) and not re.search(
+        r"(?:不|未|無|沒有|without|\bno\b|\bnot\b)", target, re.I
+    ):
+        return False
+    return True
+
+
 def _translation_reason_ids_out_of_scope(
     reason: str,
     source_ids: list[str],
@@ -1200,6 +1236,10 @@ def _validate_translation_audit(data: dict | list | None, source: str, target: s
         if _translation_structural_omission_false_positive(kind, reason):
             continue
         if _translation_self_refuting_false_positive(kind, reason):
+            continue
+        if _translation_stability_relation_false_positive(
+            kind, reason, source_text, target_text
+        ):
             continue
         if _translation_reason_quote_mismatch(
             kind, reason, source_text, target_text

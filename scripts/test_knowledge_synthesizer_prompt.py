@@ -1187,7 +1187,12 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
             requirements["mechanism_requirements"][0]["anchors"],
             ["halogen bond", "Tyr259"],
         )
+        self.assertEqual(
+            requirements["mechanism_requirements"][1]["anchors"],
+            ["binds", "traditional substrate-binding pocket"],
+        )
         self.assertIn("halogen bond with Tyr259", mechanisms[0]["claim"])
+        self.assertIn("binds within the traditional substrate-binding pocket", mechanisms[1]["claim"])
         self.assertFalse(_comparison_json_validation_errors(
             json.dumps(normalized),
             query,
@@ -1378,7 +1383,8 @@ class TestKnowledgeSynthesizerPrompt(unittest.TestCase):
         required_claim = requirements["mechanism_requirements"][0]["claim"].rstrip(".")
 
         self.assertEqual(mechanisms[0]["claim"], required_claim)
-        self.assertEqual(mechanisms[1]["claim"], dense_claim)
+        self.assertIn("traditional substrate-binding pocket", mechanisms[1]["claim"])
+        self.assertEqual(mechanisms[2]["claim"], dense_claim)
 
     def test_validator_accepts_source_close_generic_isotope_claim(self):
         query = "Compare routes focusing on isotopic enrichment and cost-effectiveness."

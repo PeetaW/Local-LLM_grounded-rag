@@ -1043,6 +1043,50 @@ class TestTranslationJudge(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(audit, [])
 
+    def test_translation_audit_accepts_enhanced_hydrolytic_stability_relation(self):
+        source = (
+            "Incorporating three boronic acid units into a flexible macrocycle resulted "
+            "in enhancing the stability of boroxines with respect to hydrolysis."
+        )
+        target = "將三個硼酸單元併入柔性大環，從而提高硼氧環對於水解的穩定性。"
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "omission",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": (
+                    "The source says 'enhancing' stability, while the target uses "
+                    "'提高' and loses that improvement."
+                ),
+            }]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(audit, [])
+
+    def test_translation_audit_keeps_reversed_hydrolytic_stability_relation(self):
+        source = "The macrocycle enhances boroxine stability with respect to hydrolysis."
+        target = "該大環降低硼氧環對於水解的穩定性。"
+        audit, errors = judge._validate_translation_audit(
+            {"errors": [{
+                "type": "mistranslation",
+                "severity": "material",
+                "source_ids": ["S1"],
+                "target_ids": ["T1"],
+                "reason": (
+                    "The source says 'enhances boroxine stability', but the target reverses it."
+                ),
+            }]},
+            source,
+            target,
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(audit), 1)
+
     def test_translation_audit_accepts_retained_english_term_in_omission_report(self):
         source = (
             "Mechanism: `s41421-024-00697-6` reports JPH203 induces distinct "
