@@ -1,8 +1,7 @@
 # Maintainability Refactor Spec
 
-> Status: planned, audit refreshed 2026-08-06. The first full V12 candidate is
-> complete but not frozen; start M0 only after the Q04/Q09/Q10 stability gate
-> and full V12.1 product regression pass. Do not mix this equivalence refactor
+> Status: planned, audit refreshed 2026-08-07. The focused stability gate is
+> complete; start M0 only after the full V12.1 product regression passes. Do not mix this equivalence refactor
 > with the current product/evaluator fixes.
 
 ## Goal
@@ -21,10 +20,10 @@ indexes, logs, and eval artifacts are excluded.
 | Area | Files | Lines | Notes |
 |---|---:|---:|---|
 | Root entry points (`main.py`, `api.py`, `config.py`) | 3 | 885 | Runtime/bootstrap/config |
-| `rag/` runtime | 29 | 10,327 | Core product pipeline |
-| `eval/` runtime | 4 | 2,242 | Evaluation and judges |
-| `scripts/` tests and tools | 22 | 10,740 | Unit tests, probes, historical utilities |
-| **Total active Python** | **58** | **24,194** | 2026-08-06 snapshot |
+| `rag/` runtime | 29 | 10,336 | Core product pipeline |
+| `eval/` runtime | 4 | 2,282 | Evaluation and judges |
+| `scripts/` tests and tools | 22 | 10,799 | Unit tests, probes, historical utilities |
+| **Total active Python** | **58** | **24,302** | 2026-08-07 snapshot |
 
 Line count is only a triage signal. A large file is a refactor target only when
 it also mixes responsibilities, contains long routines, duplicates flow, or has
@@ -36,23 +35,23 @@ high coupling.
 
 | File | Lines | Composition / observed pressure | Priority |
 |---|---:|---|---|
-| `rag/query_pipeline.py` | 1,925 | Orchestration plus fact/method/comparison rendering, recovery, Stage 4 validation; current V12 fixes further increased coupling | P0 |
-| `eval/judge.py` | 1,362 | Correctness contract judge and translation fidelity judge in one module | P1 |
+| `rag/query_pipeline.py` | 1,928 | Orchestration plus fact/method/comparison rendering, recovery, Stage 4 validation; current V12 fixes further increased coupling | P0 |
+| `eval/judge.py` | 1,402 | Correctness contract judge and translation fidelity judge in one module | P1 |
 | `rag/citation_grounding.py` | 1,062 | NLI lifecycle/inference, lexical support, citation scoring/reporting, self-correction, decomposition and joint verification; circular dependency with `query_grounding_flow.py` | P1 |
 | `rag/fact_contract.py` | 1,159 | Requirement detection/scoring, evidence catalog cleanup, schema, validation, completion, deduplication and rendering | P2 |
 | `rag/knowledge_synthesizer.py` | 922 | Comparison normalization/schema/repair plus model generation and synthesis orchestration | P2 |
 | `eval/run_eval.py` | 645 | Runner, debug artifacts, Markdown reporting, rejudge and compare CLI | P2 |
 | `rag/query_retrieval.py` | 607 | Retrieval execution and evidence-window construction; currently cohesive enough | Monitor |
-| `rag/comparison_json_validator.py` | 598 | Requirement extraction plus a large validator | P2 |
+| `rag/comparison_json_validator.py` | 604 | Requirement extraction plus a large validator | P2 |
 | `api.py` | 475 | One 246-line OpenAI chat endpoint plus schemas/session/guardrails/runtime state | Existing API spec |
 
 ### Tests and tools
 
 | File | Lines | Action |
 |---|---:|---|
-| `scripts/test_refactor.py` | 3,340 | Split by production module/behavior; keep assertions unchanged |
-| `scripts/test_knowledge_synthesizer_prompt.py` | 1,767 | Split fact-contract, comparison-contract, and synthesizer tests |
-| `scripts/test_judge.py` | 1,188 | Split correctness and translation judge tests |
+| `scripts/test_refactor.py` | 3,349 | Split by production module/behavior; keep assertions unchanged |
+| `scripts/test_knowledge_synthesizer_prompt.py` | 1,773 | Split fact-contract, comparison-contract, and synthesizer tests |
+| `scripts/test_judge.py` | 1,232 | Split correctness and translation judge tests |
 | `scripts/test_nli_extensions.py` | 687 | Keep together until grounding modules are split |
 | `scripts/preprocessing/vl_quality_test-1.py` | 612 | Keep as the canonical VL CLI, then rename cleanly |
 | `scripts/preprocessing/vl_quality_test-1 backup.py` | 411 | Delete; Git history is the backup |
@@ -183,7 +182,7 @@ because they are short; they have clear construction boundaries and active calle
 
 ## Roadmap Placement
 
-1. Finish Q04/Q09/Q10 stability and freeze the full V12.1 product baseline; keep V11 and the first V12 candidate as diagnostic comparisons.
+1. Freeze the full V12.1 product baseline; focused Q04/Q09/Q10 stability is complete, while V11 and the first V12 candidate remain diagnostic comparisons.
 2. Run M0 hygiene/test-layout work.
 3. Perform Stage 3 latency work and M1 query-pipeline extraction in small,
    independently benchmarked commits.
