@@ -2,7 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from rag.research_tools.presentation import DeckSpec, SlideSpec, STYLE, export_research_deck
+from rag.research_tools.presentation import DeckSpec, SlideSpec, STYLE, export_research_deck, _blank_layout
 
 
 class PresentationTests(unittest.TestCase):
@@ -16,6 +16,16 @@ class PresentationTests(unittest.TestCase):
             DeckSpec("", ())
         with self.assertRaises(ValueError):
             SlideSpec(" ")
+
+
+    def test_selects_named_blank_layout(self):
+        try:
+            from pptx import Presentation
+        except ImportError:
+            self.skipTest("Install optional python-pptx")
+        prs = Presentation()
+        layout = _blank_layout(prs)
+        self.assertEqual(layout.name.lower(), "blank")
 
     def test_editable_deck(self):
         try:
