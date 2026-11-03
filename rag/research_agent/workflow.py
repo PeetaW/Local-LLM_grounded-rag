@@ -14,6 +14,7 @@ from .controller import (
     RepairDirective, ResearchResult,
 )
 from .evaluator import IndependentReviewer, ResearchEvaluator
+from .intent_router import IntentRouter
 from .expert_profiles import profiles_for
 from .outcome_planner import OutcomePlan, OutcomePlanner
 from .tool_router import ResearchToolRouter
@@ -33,6 +34,7 @@ class ResearchWorkflow:
         self.router = router or ResearchToolRouter(workspace_root)
         self.rag_backend = rag_backend
         self.llm = planning_llm
+        self.intent_router = IntentRouter()
         self.planner = planner or OutcomePlanner(planning_llm)
         self.reviewer = IndependentReviewer(review_llm)
         self.evaluator = evaluator or ResearchEvaluator()
@@ -52,6 +54,7 @@ class ResearchWorkflow:
         references: list[str] = []
         parts: list[str] = []
         meta = {"intent": plan.intent.value, "plan_outcome": plan.outcome,
+                "verification_level": "artifact_and_provenance_only",
                 "completed_tasks": [], "review": None,
                 "evidence_available": False}
         try:
@@ -170,7 +173,10 @@ class ResearchWorkflow:
         # No unbounded task expansion, and plan is fixed across repairs.
         validated = dict(inputs)
         validated["rag_available"] = self.rag_backend is not None
+        route = self.intent_router.route(request, validated)
         plan = self.planner.plan(request, validated)
+        if plan.intent != route.intent:
+            raise ValueError('Planner intent diverged from validated route')
         self.last_plan = plan
         planning_tokens = int(getattr(self.llm, "last_tokens", 0) or 0) if self.llm else 0
         first = True
