@@ -1,0 +1,33 @@
+{
+  "measurements": [
+    {
+      "path": "data/sample1_xrd.txt",
+      "technique": "xrd",
+      "sample_id": "S1",
+      "measurement_id": "xrd_measurement",
+      "min_prominence": 55
+    },
+    {
+      "path": "data/sample2_xrd.txt",
+      "technique": "xrd",
+      "sample_id": "S2",
+      "measurement_id": "xrd_measurement",
+      "min_prominence": 55
+    },
+    {
+      "path": "data/sample1_raman_spot1.asc",
+      "technique": "raman",
+      "sample_id": "S1",
+      "measurement_id": "spot1",
+      "min_prominence": 130
+    },
+    {
+      "path": "data/sample2_ftir_spot1.csv",
+      "technique": "ftir",
+      "sample_id": "S2",
+      "measurement_id": "spot1",
+      "signal_mode": "transmittance",
+      "min_prominence": 5
+    }
+  ]
+}
