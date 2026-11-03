@@ -13,12 +13,19 @@ from pathlib import Path
 
 from .controller import ResearchMode, ResearchRequest
 from .workflow import ResearchWorkflow
+from pydantic import BaseModel, Field
+
+
+class AgentInput(BaseModel):
+    question: str = Field(min_length=1, max_length=6000)
+    mode: ResearchMode = ResearchMode.ADAPTIVE
+    inputs: dict = Field(default_factory=dict)
+
 
 
 def create_app(workspace_root: str | Path, auth_token: str, *,
                rag_backend=None, planning_llm=None, router=None):
     from fastapi import FastAPI, Header, HTTPException
-    from pydantic import BaseModel, Field
     from starlette.concurrency import run_in_threadpool
 
     if not isinstance(auth_token, str) or len(auth_token) < 24:
@@ -28,15 +35,6 @@ def create_app(workspace_root: str | Path, auth_token: str, *,
         raise ValueError("Research Agent workspace does not exist")
     workflow = ResearchWorkflow(root, rag_backend=rag_backend,
                                 planning_llm=planning_llm, router=router)
-
-    class AgentInput(BaseModel):
-        question: str = Field(min_length=1, max_length=6000)
-        mode: ResearchMode = ResearchMode.ADAPTIVE
-        inputs: dict = Field(default_factory=dict)
-
-    # Pydantic resolves type annotations inside FastAPI route closures from
-    # module globals. Set a stable public class name for this generated model.
-    AgentInput.__name__ = "AgentInput"
 
     app = FastAPI(title="Local Research Agent", docs_url=None, redoc_url=None)
 
