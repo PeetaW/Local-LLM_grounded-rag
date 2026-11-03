@@ -139,7 +139,7 @@ def export_research_deck(
     if deck.conclusion or deck.future_work:
         slide = prs.slides.add_slide(layout)
         lines = tuple(deck.conclusion) + tuple("Future work: " + v for v in deck.future_work)
-        _slide_content(slide, SlideSpec("Conclusions & future work", lines), len(prs.slides) + 1)
+        _slide_content(slide, SlideSpec("Conclusions & future work", lines), len(prs.slides))
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
