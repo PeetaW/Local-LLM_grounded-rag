@@ -74,13 +74,32 @@ def _add_text(slide, rect, text, font_size, *, bold=False):
     return shape
 
 
-def _blank_layout(presentation):
-    """Prefer an actual blank layout, including PowerPoint's Traditional Chinese name."""
+def _layout_for(presentation, kind: str = "content"):
+    """Select the intended user-template layout, not the one with fewest placeholders.
+
+    The owner's title slide layout contains triangular background decorations,
+    while the Title Only content layout has a modest top-left chevron and
+    dashed divider. Using Blank for all slides changes the actual design.
+    """
+    if kind == "cover":
+        preferred = ("標題投影片", "title slide")
+    elif kind == "content":
+        preferred = ("只有標題", "title only")
+    else:
+        raise ValueError("kind must be cover or content")
+    for label in preferred:
+        for layout in presentation.slide_layouts:
+            if (layout.name or "").strip().lower() == label.lower():
+                return layout
     for layout in presentation.slide_layouts:
-        name = (layout.name or "").strip().lower()
-        if name in {"blank", "空白"}:
+        if (layout.name or "").strip().lower() in {"空白", "blank"}:
             return layout
     return min(presentation.slide_layouts, key=lambda layout: len(layout.placeholders))
+
+
+def _blank_layout(presentation):
+    """Legacy adapter for older offline tests; prefer _layout_for."""
+    return _layout_for(presentation, "content")
 
 
 def _slide_content(slide, spec: SlideSpec, number: int):
@@ -151,18 +170,19 @@ def export_research_deck(
         prs.slide_width = Inches(STYLE["slide_width_inches"])
         prs.slide_height = Inches(STYLE["slide_height_inches"])
 
-    layout = _blank_layout(prs)
-    cover = prs.slides.add_slide(layout)
+    cover_layout = _layout_for(prs, "cover")
+    content_layout = _layout_for(prs, "content")
+    cover = prs.slides.add_slide(cover_layout)
     _add_text(cover, STYLE["cover_title_rect"], deck.title, 38, bold=True)
     _add_text(cover, STYLE["cover_presenter_rect"], f"Presenter: {deck.presenter}", 28)
     _add_text(cover, STYLE["page_number_rect"], "1", 13)
 
     for idx, spec in enumerate(deck.slides, start=2):
-        slide = prs.slides.add_slide(layout)
+        slide = prs.slides.add_slide(content_layout)
         _slide_content(slide, spec, idx)
 
     if deck.conclusion or deck.future_work:
-        slide = prs.slides.add_slide(layout)
+        slide = prs.slides.add_slide(content_layout)
         lines = tuple(deck.conclusion) + tuple("Future work: " + v for v in deck.future_work)
         _slide_content(slide, SlideSpec("Conclusions & future work", lines), len(prs.slides))
 
