@@ -76,5 +76,26 @@ class MCPTests(unittest.TestCase):
         self.assertTrue(Path(result["json"]).is_file())
 
 
+    def test_complete_research_workflow_using_mcp_backend(self):
+        from rag.research_agent.workflow import ResearchWorkflow
+        from rag.research_agent.controller import ResearchRequest, ResearchMode, StopReason
+        workflow = ResearchWorkflow(self.root, router=MCPToolBackend(self.root))
+        result = workflow.run(
+            ResearchRequest("Analyze Raman and generate PPTX", mode=ResearchMode.DEEP),
+            {
+                "measurements": [{"path": "sample.asc", "sample_id": "S1",
+                                  "measurement_id": "spot1", "technique": "raman",
+                                  "min_prominence": 15}],
+                "output_dir": "complete/data", "pptx_output": "complete/research.pptx",
+            }
+        )
+        self.assertEqual(result.stop_reason, StopReason.SUCCESS)
+        self.assertTrue((self.root / "complete/research.pptx").is_file())
+        self.assertEqual(
+            [t.kind for t in workflow.last_plan.steps],
+            ["spectroscopy.report", "presentation.from_discussion", "evidence.review"]
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
