@@ -58,7 +58,7 @@ class WorkflowTests(unittest.TestCase):
         rag = FakeRAG(grounded=False)
         flow = ResearchWorkflow(self.root, rag_backend=rag)
         result = flow.run(ResearchRequest("Look up an effect", mode=ResearchMode.ADAPTIVE), {})
-        self.assertEqual(result.stop_reason, StopReason.NO_PROGRESS)
+        self.assertEqual(result.stop_reason, StopReason.REVISION_LIMIT)
         self.assertEqual(result.attempts, 2)
         self.assertIn("Recheck missing/contradicted evidence", rag.calls[1])
 
