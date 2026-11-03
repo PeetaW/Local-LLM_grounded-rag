@@ -3,6 +3,17 @@
 > 用途：跟 spec 雙邊對照，確保任務推進。完成的 spec 已移至 `archive/specs/`（見該處 STATUS.md）。
 > 最後盤點：2026-08-07（對照 code、git history、config、模組大小與最新 eval/debug artifacts 驗證）。
 
+## Experimental research-agent expansion (2026-11-03; isolated feature branch)
+
+- **Branch:** `feature/research-agent-adaptive-iteration`. Current code is experimental, not merged into the production RAG API.
+- **Scope:** opt-in outcome-oriented Research Agent, bounded failure-aware iteration, deterministic XRD/Raman/FTIR peak-screening utilities, local PPTX export matching saved presentation style, and structured discussion-to-slide planning.
+- **Module contracts:** `rag/research_agent/`, `rag/research_tools/`. Local usage, scientific limits, validation and rollout gates: [docs/research_agent_spectroscopy_ppt_spec.md](docs/research_agent_spectroscopy_ppt_spec.md).
+- **Tests:** separate offline unittest targets and GitHub Actions workflow `research-agent-offline.yml`; results and CI status need verification.
+- **Do not merge/enable:** until V12.1 baseline is frozen, optional tools are validated on real files, PDF/PPT rendering is checked, secure tool path roots are added, and local RTX 3090 benchmarks are compared against the existing pipeline.
+- **Sequencing:** Step RA-0 scaffolding and unit tests; RA-1 file metadata + multi-spot dataset validation; RA-2 domain references and instrument-specific preprocessing; RA-3 local template regression & chart editing; RA-4 bounded agent tool selection and opt-in API; RA-5 held-out scientific correctness/latency evaluation.
+
+---
+
 ## 已完成（歸檔，僅供回顧）
 - ✅ pipeline_v2（Stage 3/4/5）
 - ✅ pipeline_v3（NLI 擴展、Plan-Execute；後者預設關閉）
