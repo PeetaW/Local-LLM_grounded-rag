@@ -26,3 +26,12 @@ are **not** committed to this public repository.
   layouts, placeholders, margins and fonts should be visually QA-checked.
 - The first MVP uses editable text boxes; spectrum plots are PNG images, not
   embedded editable native PowerPoint chart series. Native chart export is later work.
+
+## Visual QA finding (2026-11-03)
+
+The owner's actual PowerPoint theme has **different inherited layout decorations**:
+cover slides use `標題投影片` (Title Slide, large background geometry), while
+experimental content pages use `只有標題` (Title Only, small left chevrons and
+dashed top rule). Do NOT use the `空白` (Blank) layout for content merely
+because its placeholder count is low; that incorrectly inherits cover geometry.
+See `docs/TEST_REPORT_2026-11-03.md` for the private template comparison.
