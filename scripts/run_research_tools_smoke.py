@@ -1,7 +1,7 @@
 """Private local spectroscopy -> PPTX smoke test, without uploading raw data.
 
 Usage:
-    python scripts/run_research_tools_smoke.py ^
+    python -m scripts.run_research_tools_smoke ^
       --manifest "C:\Data\smoke_manifest.json" ^
       --output "C:\Data\out" ^
       --template "C:\Templates\Shuo_Hung_Research_Presentation_Template.pptx"
