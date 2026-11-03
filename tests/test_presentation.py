@@ -2,7 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from rag.research_tools.presentation import DeckSpec, SlideSpec, STYLE, export_research_deck, _blank_layout
+from rag.research_tools.presentation import DeckSpec, SlideSpec, STYLE, export_research_deck, _layout_for
 
 
 class PresentationTests(unittest.TestCase):
@@ -18,14 +18,14 @@ class PresentationTests(unittest.TestCase):
             SlideSpec(" ")
 
 
-    def test_selects_named_blank_layout(self):
+    def test_selects_title_only_content_and_title_slide_cover(self):
         try:
             from pptx import Presentation
         except ImportError:
             self.skipTest("Install optional python-pptx")
         prs = Presentation()
-        layout = _blank_layout(prs)
-        self.assertEqual(layout.name.lower(), "blank")
+        self.assertEqual(_layout_for(prs, 'content').name.lower(), 'title only')
+        self.assertEqual(_layout_for(prs, 'cover').name.lower(), 'title slide')
 
     def test_editable_deck(self):
         try:
