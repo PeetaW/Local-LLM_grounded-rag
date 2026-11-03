@@ -72,7 +72,8 @@ class ResearchToolRouter:
                 raise ToolSecurityError("Need 1-32 measurements")
             normalized = []
             sample_keys = {"path", "technique", "sample_id", "signal_mode",
-                           "min_prominence", "min_distance_points", "measurement_id", "x_unit"}
+                           "min_prominence", "min_distance_points", "min_distance_x",
+                           "smoothing_window_points", "measurement_id", "x_unit"}
             for item in samples:
                 if not isinstance(item, dict) or set(item) - sample_keys:
                     raise ToolSecurityError("Invalid measurement fields")
@@ -95,15 +96,19 @@ class ResearchToolRouter:
                 raise ToolSecurityError("Unexpected presentation tool argument")
             if not isinstance(args.get("findings"), list) or not 1 <= len(args["findings"]) <= 40:
                 raise ToolSecurityError("Need 1-40 findings")
+            normalized_findings = []
             for finding in args["findings"]:
                 if not isinstance(finding, dict):
                     raise ToolSecurityError("Invalid finding")
                 if len(finding.get("figure_paths", [])) > 2:
                     raise ToolSecurityError("At most two figures per slide")
-                finding["figure_paths"] = [
+                clean = dict(finding)
+                clean["figure_paths"] = [
                     str(self._input(p, IMAGE_EXTENSIONS, MAX_SPECTRUM_BYTES))
                     for p in finding.get("figure_paths", ())
                 ]
+                normalized_findings.append(clean)
+            args["findings"] = normalized_findings
             args["output_path"] = str(self._output(args.get("output_path", "results/report.pptx"), ".pptx"))
         if args.get("template_path"):
             args["template_path"] = str(
