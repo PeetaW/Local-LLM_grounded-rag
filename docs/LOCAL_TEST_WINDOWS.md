@@ -88,6 +88,13 @@ Fe₃O₄/γ-Fe₂O₃/α-Fe₂O₃ 的可靠 wt.%、純度或定量比例。
 ## E. 下一道 GPU/V12.1 Baseline（僅在通知後執行）
 
 需使用原本的 RAG 專案論文索引、Ollama 模型與實際 NVIDIA GPU。
+**重要：前面建立的全新 Git worktree 不會自動包含被 .gitignore 排除的私人 PDF、索引與研究資料。V12.1 原始 RAG Benchmark 應回到你原有、已建立完整專案資料的工作目錄執行；只有已確認 worktree 能連到相同資料與索引時才可在 worktree 執行。**
+
+```powershell
+cd "E:\Projects\rag_project"  # 原始 RAG 工作目錄，依實際路徑調整
+git status
+```
+
 **不要在本階段任意調整** \`config.py\`、
 embedding/reranker/top-k/num_ctx 或重新建索引。
 
