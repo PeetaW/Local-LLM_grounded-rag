@@ -46,7 +46,20 @@ def run_cli(args) -> dict:
     planning_llm = (OllamaAdapter(model=args.model) if args.ollama_planner else None)
     rag = None
     if args.use_rag:
-        # Heavy initialization, indexes and GPU models only when explicitly asked.
+        # Existing RAG uses cfg.PAPERS_DIR / INDEX_BASE_DIR relative to process
+        # CWD. Point the isolated branch runner at the owner's original indexed
+        # project without copying private PDFs into the feature worktree.
+        if args.rag_working_dir:
+            import os
+            project_dir = Path(args.rag_working_dir).expanduser().resolve(strict=True)
+            if not project_dir.is_dir() or not (project_dir / "main.py").is_file():
+                raise ValueError("rag-working-dir must contain an existing original RAG checkout")
+            import config as cfg
+            required = project_dir / cfg.INDEX_CONFIG_PATH
+            papers = project_dir / cfg.PAPERS_DIR
+            if not required.is_file() or not papers.is_dir():
+                raise ValueError("Refusing to initialize RAG without existing index config and papers")
+            os.chdir(project_dir)
         from main import paper_engines
         rag = GroundedRagAdapter(paper_engines)
     router = MCPToolBackend(root) if args.mcp else None
@@ -100,6 +113,7 @@ def main(argv=None) -> int:
     p.add_argument("--ollama-planner", action="store_true", help="Use local Ollama JSON goal planner")
     p.add_argument("--model", default="qwen3.5:27b")
     p.add_argument("--use-rag", action="store_true", help="Load original indexed RAG; can be slow")
+    p.add_argument("--rag-working-dir", help="Existing original RAG project location for private indexes")
     p.add_argument("--mcp", action="store_true", help="Invoke tools through local MCP stdio")
     args = p.parse_args(argv)
     report = run_cli(args)
