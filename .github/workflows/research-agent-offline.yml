@@ -15,6 +15,9 @@ on:
       - 'scripts/run_research_tools_smoke.py'
       - 'examples/research_tools_manifest.example.json'
       - 'requirements-research-tools.txt'
+      - 'docs/LOCAL_TEST_WINDOWS.md'
+      - 'docs/TEST_REPORT_2026-11-03.md'
+      - 'rag/research_tools/STYLE_PROFILE.md'
       - '.github/workflows/research-agent-offline.yml'
   workflow_dispatch:
 
