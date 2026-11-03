@@ -27,9 +27,13 @@ def _within_workspace(workspace: Path, value: str | Path, must_exist: bool) -> P
     target = Path(value).expanduser()
     if not target.is_absolute():
         target = workspace / target
-    target = target.resolve(strict=must_exist)
+    # Validate the absolute target BEFORE strict path lookup so traversal never
+    # probes filenames outside the approved research workspace.
+    target = target.resolve(strict=False)
     if not target.is_relative_to(workspace):
         raise ToolSecurityError("Path outside approved research workspace")
+    if must_exist and not target.exists():
+        raise ToolSecurityError("Input file not found within research workspace")
     return target
 
 
