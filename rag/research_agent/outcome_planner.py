@@ -156,7 +156,9 @@ class OutcomePlanner:
                 PlanStep("T2", "presentation.from_discussion", "Generate research slides from findings",
                          depends_on=("T1",), acceptance_criteria=("Editable PPTX exists",)),
             ))
-        if request.mode == ResearchMode.DEEP and intent == Intent.QUESTION:
-            tasks.append(PlanStep("T2", "evidence.review", "Challenge evidence completeness",
-                                  depends_on=("T1",), acceptance_criteria=("Review report",)))
+        if request.mode == ResearchMode.DEEP and tasks:
+            last_id = tasks[-1].id
+            tasks.append(PlanStep(f"T{len(tasks) + 1}", "evidence.review",
+                                  "Review assumptions, source limitations and alternative explanations",
+                                  depends_on=(last_id,), acceptance_criteria=("Advisory review available",)))
         return OutcomePlan(request.question, intent, outcome, tuple(tasks), tuple(criteria), ())
