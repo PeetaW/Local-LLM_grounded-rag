@@ -57,5 +57,54 @@ class SpectrumTests(unittest.TestCase):
             load_spectrum(path, "raman", "one")
 
 
+    def test_vendor_raw4_text_xrd_section(self):
+        # Synthetic representation of real Bruker RAW4.00 text export.
+        raw = (
+            ";RAW4.00\n[RawHeader]\nDate=11/02/2026\n"
+            "[RangeHeader]\nStart=5\nSteps=5\n[Data]\n"
+            "Angle, PSD,\n5.0, 2,\n5.1, 8,\n5.2, 120,\n5.3, 8,\n5.4, 2,\n"
+        )
+        path = self.write(raw, ".txt")
+        spectrum = load_spectrum(path, "xrd", "Fe3O4-S1")
+        result = analyze_spectrum(spectrum, min_prominence=50)
+        self.assertEqual(spectrum.x, (5.0, 5.1, 5.2, 5.3, 5.4))
+        self.assertEqual([round(p.x, 1) for p in result.peaks], [5.2])
+
+    def test_broad_peak_survives_noise(self):
+        from math import exp
+        # Alternating noise that defeated the original neighbor-prominence detector.
+        lines = []
+        for i in range(250):
+            x = 20 + 0.05 * i
+            y = 100 + 600 * exp(-0.5 * ((x - 28) / 0.35) ** 2) + (10 if i % 2 else -10)
+            lines.append(f"{x:.4f},{y:.3f}")
+        spectrum = load_spectrum(self.write("\n".join(lines)), "xrd", "noisy")
+        result = analyze_spectrum(spectrum, min_prominence=120)
+        self.assertTrue(any(abs(p.x - 28) < 0.2 for p in result.peaks))
+        self.assertLessEqual(len(result.peaks), 2)
+
+    def test_metadata_header_and_ftir_mode(self):
+        raw = (
+            "Created as New Dataset,Sample 001 By PEService\n"
+            "cm-1,%T\n"
+            "4004,90\n4003,88\n4002,40\n4001,88\n4000,90\n"
+        )
+        spectrum = load_spectrum(
+            self.write(raw), "ftir", "Fe3O4-S2",
+            signal_mode="transmittance", measurement_id="spot2"
+        )
+        result = analyze_spectrum(spectrum, min_prominence=20)
+        self.assertEqual(result.measurement_id, "spot2")
+        self.assertEqual([p.x for p in result.peaks], [4002.0])
+
+    def test_irregular_x_reports_warning(self):
+        spectrum = load_spectrum(
+            self.write("1,1\n2,5\n3,2\n4,7\n5,1\n6,3\n7,2\n25,6\n26,1\n"),
+            "raman", "spot"
+        )
+        result = analyze_spectrum(spectrum, min_prominence=1)
+        self.assertTrue(any("Irregular X spacing" in w for w in result.warnings))
+
+
 if __name__ == "__main__":
     unittest.main()
