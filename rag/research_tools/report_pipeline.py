@@ -53,7 +53,7 @@ def analyze_spectra_to_deck(
                 "Phase assignment and purity require independent confirmation",
             ),
             figure_paths=(str(plot_path),),
-            evidence_refs=(str(row["path"]),),
+            evidence_refs=(Path(row["path"]).name,),
         ))
     summary = {
         "measurements": [r.as_dict() for r in results],
