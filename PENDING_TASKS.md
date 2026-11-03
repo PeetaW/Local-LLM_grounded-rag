@@ -3,6 +3,18 @@
 > 用途：跟 spec 雙邊對照，確保任務推進。完成的 spec 已移至 `archive/specs/`（見該處 STATUS.md）。
 > 最後盤點：2026-08-07（對照 code、git history、config、模組大小與最新 eval/debug artifacts 驗證）。
 
+## Research Agent integration checkpoint (2026-11-04; Draft PR #10)
+
+- **New opt-in entrypoints**: `scripts/run_research_agent.py` (CLI); `rag/research_agent/http_app.py` (token-required 127.0.0.1-only API); `rag/research_agent/mcp_server.py` and `mcp_client.py` (official MCP v2 stdio); `mcp_backend.py` (optional protocol routing). Main `api.py` and `rag/query_pipeline.py` remain untouched.
+- **Planning**: `intent_router.py` performs safe deterministic route selection; `outcome_planner.py` builds validated dependent steps, with an optional Ollama JSON planner. Model cannot authorize arbitrary filesystem paths, shell commands or arbitrary tool types.
+- **Execution**: `workflow.py` connects existing seven-stage RAG through a lazy adapter, private-workspace spectral analysis, editable PPTX and advisory evidence review.
+- **Iteration**: `controller.py` retains FAST/ADAPTIVE/DEEP bounded retries; `evaluator.py` performs structural/provenance gating only. Scientific correctness must be checked separately with a held-out human/reference benchmark; the LLM's self-review is advisory.
+- **Offline gate**: `eval/research_agent_eval.py` contains an 8-case deterministic mock benchmark for grounded/ungrounded RAG, missing input, spectroscopy, PPTX, end-to-end workflow and prompt-injection routing. GitHub CI verifies tests; local instrument/PowerPoint/Windows tests are required next.
+- **Mandatory hardware gates before merge**: follow `docs/RESEARCH_AGENT_BENCHMARK_WINDOWS.md`, run the original frozen 12-question V12.1 RAG product benchmark, then Ollama + Deep Planner/Reviewer + MCP + real instruments and real PPTX template. Measure accuracy, sources, time, VRAM, iterations and sample isolation.
+- **Scope limit**: this is a functional local prototype, not a calibrated phase-quantification system or a production-ready autonomous research assistant. Keep Draft until the above gates and scientific review pass.
+
+---
+
 ## Experimental research-agent expansion (2026-11-03; isolated feature branch)
 
 - **Branch:** `feature/research-agent-adaptive-iteration`. Current code is experimental, not merged into the production RAG API.
