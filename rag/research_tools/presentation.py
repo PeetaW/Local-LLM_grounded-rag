@@ -75,31 +75,56 @@ def _add_text(slide, rect, text, font_size, *, bold=False):
 
 
 def _blank_layout(presentation):
-    # Template layout may have arbitrary names. Use the layout with least
-    # placeholders; preserve master through template rather than rebuilding it.
+    """Prefer an actual blank layout, including PowerPoint's Traditional Chinese name."""
+    for layout in presentation.slide_layouts:
+        name = (layout.name or "").strip().lower()
+        if name in {"blank", "空白"}:
+            return layout
     return min(presentation.slide_layouts, key=lambda layout: len(layout.placeholders))
 
 
 def _slide_content(slide, spec: SlideSpec, number: int):
+    from pptx.util import Inches
     _add_text(slide, STYLE["content_title_rect"], spec.title, 30, bold=True)
     if spec.figure_paths:
-        from pptx.util import Inches
+        from PIL import Image
         pictures = tuple(Path(p) for p in spec.figure_paths)
         for picture in pictures:
             if not picture.is_file():
                 raise FileNotFoundError(str(picture))
-        fig_width = 5.5 if len(pictures) == 2 else 8.4
-        first_x = 0.7 if len(pictures) == 2 else 2.4
+        # Keep plots within an allocated figure region; do not crop or stretch.
+        count = len(pictures)
+        box_width = 5.3 if count == 2 else 10.6
+        box_height = 4.0 if spec.bullets else 4.65
+        region_top = 1.35
         for j, picture in enumerate(pictures):
-            slide.shapes.add_picture(str(picture), Inches(first_x + j * 6.0), Inches(1.45), width=Inches(fig_width))
+            with Image.open(picture) as bitmap:
+                width_px, height_px = bitmap.size
+            ratio = min(box_width / width_px, box_height / height_px)
+            width, height = width_px * ratio, height_px * ratio
+            left = ((0.9 if count == 2 else 1.35) + (6.2 * j if count == 2 else 0)
+                    + (box_width - width) / 2)
+            top = region_top + (box_height - height) / 2
+            slide.shapes.add_picture(
+                str(picture), Inches(left), Inches(top),
+                width=Inches(width), height=Inches(height),
+            )
         if spec.bullets:
-            _add_text(slide, (0.9, 5.65, 11.5, 1.05), "\n".join(spec.bullets), 17)
+            _add_text(
+                slide, (0.9, 5.55, 11.6, 0.9),
+                "\n".join("• " + item for item in spec.bullets[:3]), 16,
+            )
     elif spec.bullets:
-        _add_text(slide, (1.05, 1.45, 11.0, 4.85), "\n".join(spec.bullets), 22)
+        _add_text(
+            slide, (1.05, 1.45, 11.0, 4.85),
+            "\n".join("• " + item for item in spec.bullets[:8]), 20,
+        )
     _add_text(slide, STYLE["page_number_rect"], str(number), 13)
-    # Evidence refs remain visible to reviewers, not silently fabricated.
     if spec.evidence_refs:
-        _add_text(slide, (0.9, 6.4, 11.5, 0.45), "Sources: " + "; ".join(spec.evidence_refs), 11)
+        _add_text(
+            slide, (0.9, 6.58, 11.5, 0.35),
+            "Sources: " + "; ".join(spec.evidence_refs), 10,
+        )
 
 
 def export_research_deck(
