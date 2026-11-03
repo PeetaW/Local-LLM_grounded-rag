@@ -37,6 +37,7 @@ def analyze_spectra_to_deck(
             row["path"], row["technique"], row["sample_id"],
             signal_mode=row.get("signal_mode", "intensity"),
             x_unit=row.get("x_unit"),
+            measurement_id=row.get("measurement_id", ""),
         )
         result = analyze_spectrum(
             spec, min_prominence=float(row["min_prominence"]),
