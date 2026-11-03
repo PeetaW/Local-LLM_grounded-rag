@@ -1,6 +1,6 @@
 # Research Agent + Adaptive Iteration + Spectroscopy + PPT — development specification
 
-Status: **experimental branch implementation**; not enabled for the production RAG path.
+Status: **working opt-in experimental Research Agent CLI, standalone local API and MCP v2 tooling**; not enabled for the original production `api.py` or existing RAG endpoints. Deterministic mocks and CI are not a substitute for real research correctness/RTX GPU benchmark.
 
 ## Non-regression gate
 
@@ -26,8 +26,13 @@ Status: **experimental branch implementation**; not enabled for the production R
   and Current questions / future work slide assembly.
 - `rag/research_tools/report_pipeline.py`: deterministic data -> JSON + PNG +
   PPTX tool workflow.
-- `rag/research_tools/registry.py`: allowlisted invocation interface
-  (NOT exposed to LLM input or over HTTP until path validation/sandboxing).
+- `rag/research_tools/registry.py`: allowlisted tool implementations; `rag/research_agent/tool_router.py` validates private workspace and filenames before invocation.
+- `rag/research_agent/outcome_planner.py` / `intent_router.py`: route verified user inputs into a bounded dependent task graph, optional Ollama JSON planning.
+- `rag/research_agent/workflow.py` / `rag_adapter.py` / `ollama_adapter.py`: opt-in local end-to-end execution, original RAG bridge and model planning.
+- `rag/research_agent/mcp_server.py` / `mcp_client.py` / `mcp_backend.py`: official MCP v2 stdio server/client and in-process integration tests.
+- `rag/research_agent/http_app.py`: separate token-authenticated local-only API; `api.py` remains unmodified.
+- `rag/research_agent/evaluator.py` / `expert_profiles.py`: structural artifact checks and advisory specialist review, **not a scientific accuracy oracle**.
+- `eval/research_agent_eval.py`: 8 synthetic offline scenarios with explicit expected stops. See `docs/RESEARCH_AGENT_BENCHMARK_WINDOWS.md` for real GPU/hardware acceptance.
 - Offline tests under `tests/`.
 
 ## Scientific constraints
