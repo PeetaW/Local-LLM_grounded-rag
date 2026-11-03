@@ -39,9 +39,15 @@ def analyze_spectra_to_deck(
             x_unit=row.get("x_unit"),
             measurement_id=row.get("measurement_id", ""),
         )
+        peak_options = {}
+        if row.get("min_distance_points") is not None:
+            peak_options["min_distance_points"] = int(row["min_distance_points"])
+        if row.get("min_distance_x") is not None:
+            peak_options["min_distance_x"] = float(row["min_distance_x"])
+        if row.get("smoothing_window_points") is not None:
+            peak_options["smoothing_window_points"] = int(row["smoothing_window_points"])
         result = analyze_spectrum(
-            spec, min_prominence=float(row["min_prominence"]),
-            min_distance_points=int(row.get("min_distance_points", 3)),
+            spec, min_prominence=float(row["min_prominence"]), **peak_options
         )
         plot_path = dest / f"spectrum_{idx:03d}.png"
         save_plot(spec, result, plot_path)
