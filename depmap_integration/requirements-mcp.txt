@@ -1,0 +1,2 @@
+# v1 API pinned intentionally; upgrade to v2 requires migration and regression tests.
+mcp>=1.28,<2
