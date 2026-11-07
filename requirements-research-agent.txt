@@ -1,0 +1,7 @@
+# Optional MCP 2.x SDK for Research Agent, separate from frozen production llm_env
+# Free/open-source. Python 3.11+ recommended.
+mcp>=2,<3
+
+# Optional authenticated standalone local API tests (production already uses FastAPI)
+fastapi>=0.115,<1
+httpx>=0.28,<1

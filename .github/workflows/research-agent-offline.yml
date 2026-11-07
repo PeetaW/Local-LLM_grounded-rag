@@ -1,0 +1,52 @@
+name: Research Agent offline tests
+
+on:
+  pull_request:
+    paths:
+      - 'rag/research_agent/**'
+      - 'rag/research_tools/**'
+      - 'tests/test_research_agent*.py'
+      - 'scripts/run_research_agent.py'
+      - 'eval/research_agent_eval.py'
+      - 'tests/test_spectroscopy.py'
+      - 'tests/test_presentation.py'
+      - 'tests/test_slide_planner.py'
+      - 'tests/test_research_tools_integration.py'
+      - 'tests/test_research_cli.py'
+      - 'tests/test_research_tool_router.py'
+      - 'scripts/run_research_tools_smoke.py'
+      - 'examples/research_tools_manifest.example.json'
+      - 'requirements-research-tools.txt'
+      - 'requirements-research-agent.txt'
+      - 'docs/LOCAL_TEST_WINDOWS.md'
+      - 'docs/TEST_REPORT_2026-11-03.md'
+      - 'rag/research_tools/STYLE_PROFILE.md'
+      - '.github/workflows/research-agent-offline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install optional slide plotting packages
+        run: python -m pip install -r requirements-research-tools.txt -r requirements-research-agent.txt
+      - name: Compile new modules
+        run: python -m compileall -q rag/research_agent rag/research_tools tests scripts/run_research_tools_smoke.py scripts/run_research_agent.py eval/research_agent_eval.py
+      - name: Run isolated unit tests
+        run: |
+          python -m unittest discover -s tests -p 'test_research_agent*.py' -v
+          python -m unittest discover -s tests -p 'test_spectroscopy.py' -v
+          python -m unittest discover -s tests -p 'test_presentation.py' -v
+          python -m unittest discover -s tests -p 'test_slide_planner.py' -v
+          python -m unittest discover -s tests -p 'test_research_tools_integration.py' -v
+          python -m unittest discover -s tests -p 'test_research_cli.py' -v
+          python -m unittest discover -s tests -p 'test_research_tool_router.py' -v
+      - name: Run deterministic research-agent benchmark
+        run: python -m eval.research_agent_eval --output agent_offline_benchmark.json

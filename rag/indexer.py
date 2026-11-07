@@ -84,7 +84,7 @@ def load_or_build_index(pdf_file: str):
 
 def _cleanup_orphan_indexes(existing_paper_names: set):
     """
-    刪除 index_storage/ 中沒有對應 PDF 的孤兒索引目錄。
+    保留 index_storage/ 中沒有對應 PDF 的孤兒索引目錄並發出警告。
     """
     if not os.path.isdir(cfg.INDEX_BASE_DIR):
         return
@@ -95,8 +95,7 @@ def _cleanup_orphan_indexes(existing_paper_names: set):
             continue
         if entry in existing_paper_names or entry in skip:
             continue
-        print(f"  🗑️  刪除孤兒索引（對應 PDF 已移除）：{entry}")
-        shutil.rmtree(entry_path)
+        print(f"  ⚠️  保留孤兒索引（對應 PDF 已移除）：{entry}")
 
 
 def load_all_papers():
@@ -109,7 +108,7 @@ def load_all_papers():
     ])
 
     # ── 匯入健檢：跳過內容重複的冗餘份（保留排序首位）──────────
-    # 冗餘份不建索引；其既有索引由下方 _cleanup_orphan_indexes 順手清掉（不刪 PDF）。
+    # 冗餘份不建索引；其既有索引保留並由下方 _cleanup_orphan_indexes 提醒。
     from rag.corpus_health import duplicate_skip_set
     skip = duplicate_skip_set(pdf_files)
     for redundant, keep in skip.items():

@@ -34,6 +34,7 @@ projects/*/papers_metadata.json
 
 # ── Eval result data (contains verbatim/derived paper content) ─
 eval/results/*.json
+eval/results/eval_*.md
 # Per-run debug artifacts can contain long verbatim paper excerpts.
 eval/results/*/
 # Generated manual-model inputs/outputs are local; keep only the script and summary.
@@ -50,6 +51,7 @@ memory_db/
 e--Projects-rag-project/
 .codex/project-memory.md
 .codex/config.toml
+.local_recovery_backup/
 
 # ── Internal dev docs ─────────────────────────────────
 pipeline_v2_task_spec.md
@@ -57,6 +59,7 @@ pipeline_v2_task_spec.md
 # ── Logs ──────────────────────────────────────────────
 *.log
 logs/
+.tmp/
 
 # ── OS / Editor ───────────────────────────────────────
 .DS_Store
