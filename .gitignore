@@ -34,6 +34,7 @@ projects/*/papers_metadata.json
 
 # ── Eval result data (contains verbatim/derived paper content) ─
 eval/results/*.json
+eval/results/eval_*.md
 # Per-run debug artifacts can contain long verbatim paper excerpts.
 eval/results/*/
 # Generated manual-model inputs/outputs are local; keep only the script and summary.

@@ -1,7 +1,15 @@
 # 待實作任務看板（PENDING TASKS）
 
 > 用途：跟 spec 雙邊對照，確保任務推進。完成的 spec 已移至 `archive/specs/`（見該處 STATUS.md）。
-> 最後盤點：2026-08-07（對照 code、git history、config、模組大小與最新 eval/debug artifacts 驗證）。
+> 最後盤點：2026-11-08（對照 code、git history、config、環境驗收與最新完整 eval artifacts 驗證）。
+
+## 現行驗收 checkpoint（2026-11-08）
+
+- **T0 環境與版本隔離：PASS**。`llm_env` 與獨立 `research_agent_env` 皆通過驗收；Ollama 0.40.15、RTX 3090、既有私有 PDF/索引與 11 個本地模型均可用，無重建索引。詳見 `environment_audit_after.md`。
+- **T1 V12.1 full baseline：FAIL**。`baseline_v12_1_post_recovery_full` 完成 12/12 題，correctness `0.833`、grounding `0.791`、translation `0.950`、paper selection `100%`。Q01/Q03/Q06 correctness 僅 `0.50`，Q09/Q10 grounding 僅 `0.20/0.10`，因此不可凍結或升版。詳見 `v12_1_baseline_report.md`。
+- **T2 Research Agent 離線驗證：PASS（待本 checkpoint 再驗）**。Agent 專屬 33 測試、完整 63 測試與 8/8 mock benchmark 曾在修復後通過，其中 1 個 Windows symlink 情境因系統權限跳過。
+- **T3 MCP/工具驗證：PASS（待本 checkpoint 再驗）**。既有 official MCP v2 stdio、白名單、path root、檔案大小/副檔名與端到端光譜至 PPTX 測試。
+- **下一步**：先以離線 regression 再驗 T2/T3，再針對 T1 的 evidence selection、structured rendering 與 grounding 失敗做最小 root-cause 修復。T1 未通過前，不進入 T5 的 Agent + RAG 完整 GPU benchmark，不合併 PR #10。
 
 ## Research Agent integration checkpoint (2026-11-04; Draft PR #10)
 
@@ -10,7 +18,7 @@
 - **Execution**: `workflow.py` connects existing seven-stage RAG through a lazy adapter, private-workspace spectral analysis, editable PPTX and advisory evidence review.
 - **Iteration**: `controller.py` retains FAST/ADAPTIVE/DEEP bounded retries; `evaluator.py` performs structural/provenance gating only. Scientific correctness must be checked separately with a held-out human/reference benchmark; the LLM's self-review is advisory.
 - **Offline gate**: `eval/research_agent_eval.py` contains an 8-case deterministic mock benchmark for grounded/ungrounded RAG, missing input, spectroscopy, PPTX, end-to-end workflow and prompt-injection routing. GitHub CI verifies tests; local instrument/PowerPoint/Windows tests are required next.
-- **Mandatory hardware gates before merge**: follow `docs/RESEARCH_AGENT_BENCHMARK_WINDOWS.md`, run the original frozen 12-question V12.1 RAG product benchmark, then Ollama + Deep Planner/Reviewer + MCP + real instruments and real PPTX template. Measure accuracy, sources, time, VRAM, iterations and sample isolation.
+- **Mandatory hardware gates before merge**: the 2026-11-08 V12.1 full run completed but failed its quality gate. Fix and pass a fresh full regression before Ollama + Deep Planner/Reviewer + MCP + real instruments and real PPTX template benchmarking. Measure accuracy, sources, time, VRAM, iterations and sample isolation.
 - **Scope limit**: this is a functional local prototype, not a calibrated phase-quantification system or a production-ready autonomous research assistant. Keep Draft until the above gates and scientific review pass.
 
 ---

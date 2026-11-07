@@ -28,7 +28,7 @@ Audit date: 2026-11-07 Asia/Taipei
 | Research Agent benchmark | PASS | Deterministic offline benchmark passed 8/8 with zero false successes; scientific correctness was outside this synthetic benchmark. |
 | Research Agent API startup | PASS | `start_research_agent.cmd` started the local service and `/health` returned `ready`. |
 | Restart persistence | PASS | Windows rebooted at 2026-11-07 21:50 Asia/Taipei. Fresh CMD and PowerShell found Conda and activated `llm_env`. The reboot exposed an Ollama App-internal E-drive model location; after correcting Settings > Model location to G: and restarting the App, all 11 models, GPU inference, RAG startup, and the full query passed. |
-| V12.1 Baseline readiness | PASS | Every environment acceptance item in the handoff is now satisfied. The V12.1 Baseline itself has not been run and remains a separate evaluation stage. |
+| V12.1 Baseline runtime readiness | PASS | Every environment acceptance item in the handoff was satisfied. The subsequent full 12-question quality run completed successfully at the process level but failed the product quality gate; see `v12_1_baseline_report.md`. |
 
 Current important paths:
 
