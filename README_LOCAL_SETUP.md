@@ -37,6 +37,8 @@ ollama pull <official-model-tag>
 
 Do not delete the existing `blobs` or `manifests` directories to troubleshoot a pull.
 
+The Ollama App also stores a **Model location** setting. It must match `OLLAMA_MODELS`. If `ollama list` becomes empty after a reboot while the G-drive blobs still exist, open Ollama **Settings**, set **Model location** to `G:\HuggingFace\ollama_models`, then fully quit and restart the App.
+
 ## Research Agent isolation
 
 Research Agent dependencies are installed in the existing `research_agent_env`; do not merge them into `llm_env`. To recreate that environment later, use:
