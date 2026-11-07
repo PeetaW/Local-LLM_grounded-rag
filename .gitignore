@@ -50,6 +50,7 @@ memory_db/
 e--Projects-rag-project/
 .codex/project-memory.md
 .codex/config.toml
+.local_recovery_backup/
 
 # ── Internal dev docs ─────────────────────────────────
 pipeline_v2_task_spec.md
@@ -57,6 +58,7 @@ pipeline_v2_task_spec.md
 # ── Logs ──────────────────────────────────────────────
 *.log
 logs/
+.tmp/
 
 # ── OS / Editor ───────────────────────────────────────
 .DS_Store

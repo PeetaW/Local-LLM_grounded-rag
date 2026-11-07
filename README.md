@@ -262,12 +262,9 @@ cd rag_project
 uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
-Or create a batch file for convenience (`start_rag.bat`):
+Or use the included launcher:
 ```bat
-@echo off
-call conda activate llm_env
-cd /d E:\Projects\rag_project
-uvicorn api:app --host 0.0.0.0 --port 8000
+start_rag.cmd
 ```
 
 **Step 2 — Connect Open WebUI:**
@@ -665,12 +662,9 @@ cd rag_project
 uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
-或建立批次檔方便啟動（`start_rag.bat`）：
+或使用已附的啟動腳本：
 ```bat
-@echo off
-call conda activate llm_env
-cd /d E:\Projects\rag_project
-uvicorn api:app --host 0.0.0.0 --port 8000
+start_rag.cmd
 ```
 
 **步驟二 — 連接 Open WebUI：**

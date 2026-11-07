@@ -21,6 +21,7 @@ dependencies:
     # ── LlamaIndex core RAG framework ─────────────────
     - llama-index-core==0.14.15
     - llama-index-embeddings-ollama==0.8.6
+    - llama-index-llms-openai==0.6.26
     - llama-index-llms-openai-like==0.6.0
     - llama-index-retrievers-bm25==0.6.5
     - llama-index-readers-file==0.5.6
@@ -43,4 +44,6 @@ dependencies:
     - pillow==12.1.1
     - nltk==3.9.3
     - pyyaml==6.0.3
+    - pandas==2.3.3
+    - setuptools==84.2.1
     - tqdm==4.67.3
