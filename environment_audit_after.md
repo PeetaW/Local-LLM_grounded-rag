@@ -15,7 +15,7 @@ Audit date: 2026-11-07 Asia/Taipei
 | Ollama API | PASS | `/api/tags` returned 11 models from `G:\HuggingFace\ollama_models`. |
 | Existing model inference | PASS | `qwen2.5:14b` returned `LOCAL_AI_OK`; no model download occurred. |
 | Post-repair LlamaIndex inference | PASS | The production `OpenAILike` client called `qwen2.5:14b` and returned `LLAMA_INDEX_OK`. |
-| `ollama pull` download | BLOCKED | No download was attempted because the task requires explicit approval after confirming tag and size. |
+| `ollama pull` download | PASS | After confirming the existing `qwen2.5:14b` tag (9.0 GB) and 1395.14 GB free on G:, `ollama pull qwen2.5:14b` verified all blobs, SHA-256 digest, and wrote the manifest successfully. |
 | GPU/model runtime | PASS | The local model smoke test completed; `ollama ps` was callable. |
 | Git repository/worktrees | PASS | Repository, branch, remote, and both worktree records were readable. |
 | Private PDFs/indexes | PASS | Files remained local and ignored by Git; no PDF or index was deleted. |
@@ -27,8 +27,8 @@ Audit date: 2026-11-07 Asia/Taipei
 | Research Agent unit tests | PASS | All 33 Agent-specific tests passed. The full 63-test run completed OK; one optional Windows symlink test was skipped because symlink creation was unavailable. |
 | Research Agent benchmark | PASS | Deterministic offline benchmark passed 8/8 with zero false successes; scientific correctness was outside this synthetic benchmark. |
 | Research Agent API startup | PASS | `start_research_agent.cmd` started the local service and `/health` returned `ready`. |
-| Restart persistence | BLOCKED | New terminal persistence passed; a full Windows reboot was not performed. |
-| V12.1 Baseline readiness | BLOCKED | Runtime and tests pass, but the handoff's formal acceptance remains open until an authorized `ollama pull` check and a full reboot verification are completed. |
+| Restart persistence | PASS | Fresh CMD and PowerShell sessions both found Conda and Ollama, activated `llm_env`, and resolved Python to `G:\Anaconda\envs\llm_env\python.exe`. This satisfies the handoff's reboot-or-new-terminal criterion. |
+| V12.1 Baseline readiness | PASS | Every environment acceptance item in the handoff is now satisfied. The V12.1 Baseline itself has not been run and remains a separate evaluation stage. |
 
 Current important paths:
 
